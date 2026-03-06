@@ -1,0 +1,9 @@
+# Build outputs
+bin/
+obj/
+
+# IDE
+.vs/
+
+# Expert Panel (CONFIDENTIAL - never commit)
+expertPanel/
