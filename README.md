@@ -10,13 +10,13 @@ Elm Architecture • SIMD rendering • 990+ tests • Zero external dependencie
 ## Install
 
 ```bash
-dotnet add package SageTUI --prerelease
+dotnet add package SageTUI
 ```
 
 Or start from a template:
 
 ```bash
-dotnet new install SageTUI.Templates --prerelease
+dotnet new install SageTUI.Templates
 dotnet new sagetui -n MyApp
 cd MyApp && dotnet run
 ```
@@ -201,21 +201,36 @@ Run benchmarks yourself: `dotnet run -c Release --project SageTUI.Benchmarks`
 
 ## Samples
 
-| Sample | Description |
-|--------|-------------|
-| `01-HelloWorld` | Minimal TEA app |
-| `02-Dashboard` | Multi-panel dashboard with progress bars |
-| `03-HtmlRenderer` | Render HTML in the terminal |
-| `04-InteractiveForm` | TextInput, Select, validation |
-| `05-ColorPalette` | TrueColor gradients and named colors |
-| `06-Kanban` | Drag-and-drop Kanban board |
-| `07-Transitions` | Animated enter/exit transitions |
-| `08-Sparklines` | Real-time sparkline charts |
-| `09-SystemMonitor` | **Flagship demo** — sparklines, progress bars, tabs, scrolling, themes |
+Each sample builds on concepts from the previous ones:
+
+| # | Sample | What You Learn |
+|---|--------|----------------|
+| 01 | **HelloWorld** | TEA basics — `init`/`update`/`view`, `Keys.bind`, borders |
+| 02 | **Dashboard** | Layout (`row`/`column`/`fill`), `TimerSub`, progress bars |
+| 03 | **HtmlRenderer** | HTML→Element bridge, page navigation |
+| 04 | **InteractiveForm** | TextInput widget, raw `KeySub` for forms, validation |
+| 05 | **ColorPalette** | TrueColor/Ansi256/Named colors, text styles |
+| 06 | **Kanban** | Complex state, keyboard-driven UI, multi-column layout |
+| 07 | **Transitions** | Animated enter/exit, `Keyed` elements, conditional subscriptions |
+| 08 | **Sparklines** | Canvas rendering (HalfBlock/Braille), real-time data |
+| 09 | **SystemMonitor** | **Everything together** — sparklines, tabs, scrolling, themes, progress bars |
 
 ```bash
-cd samples/06-Kanban && dotnet run
+cd samples/09-SystemMonitor && dotnet run
 ```
+
+## Concepts
+
+SageTUI uses the [Elm Architecture](https://guide.elm-lang.org/architecture/) (TEA):
+
+- **Model** — your app's state (an immutable F# type)
+- **Msg** — a discriminated union of everything that can happen
+- **init** — returns `(model, Cmd)` — your starting state
+- **update** — `msg → model → (model, Cmd)` — handle events, return new state
+- **view** — `model → Element` — render state as a terminal UI tree
+- **subscribe** — `model → Sub list` — declare ongoing subscriptions (keyboard, timers, resize)
+- **Cmd** — side effects (async tasks, quit signal). `Cmd.none` means "no side effect"
+- **Sub** — ongoing event sources. `Keys.bind` for keyboard, `TimerSub` for polling
 
 ## Advanced: Custom Backend
 

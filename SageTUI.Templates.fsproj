@@ -3,7 +3,7 @@
   <PropertyGroup>
     <PackageType>Template</PackageType>
     <PackageId>SageTUI.Templates</PackageId>
-    <Version>0.1.0-preview.1</Version>
+    <Version>0.1.0</Version>
     <Authors>SageTUI Contributors</Authors>
     <Description>Project templates for SageTUI terminal UI applications</Description>
     <PackageTags>dotnet-new;templates;fsharp;tui;terminal;sagetui</PackageTags>
