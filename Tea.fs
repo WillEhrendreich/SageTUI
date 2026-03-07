@@ -81,6 +81,28 @@ and FocusDirection =
   | FocusNext
   | FocusPrev
 
+/// Key binding helpers for zero-ceremony keyboard subscriptions.
+module Keys =
+  /// Create a KeySub from a list of key-to-message bindings.
+  /// Unmatched keys are ignored.
+  let bind (bindings: (Key * 'msg) list) : Sub<'msg> =
+    let lookup = System.Collections.Generic.Dictionary(bindings.Length)
+    for (k, msg) in bindings do
+      lookup[k] <- msg
+    KeySub(fun (k, _mods) ->
+      match lookup.TryGetValue(k) with
+      | true, msg -> Some msg
+      | false, _ -> None)
+
+  /// Create a KeySub from key+modifier bindings.
+  let bindWithMods (bindings: ((Key * Modifiers) * 'msg) list) : Sub<'msg> =
+    KeySub(fun (k, mods) ->
+      bindings
+      |> List.tryPick (fun ((bk, bm), msg) ->
+        match bk = k && bm = mods with
+        | true -> Some msg
+        | false -> None))
+
 /// Subscription combinators.
 module Sub =
   /// Transform the message type of a subscription.
@@ -102,6 +124,34 @@ type Program<'model, 'msg> = {
   View: 'model -> Element
   Subscribe: 'model -> Sub<'msg> list
 }
+
+/// Program combinators for component composition.
+module Program =
+  /// Transform a component's program to work within a parent program.
+  /// `toMsg` wraps child messages into parent messages.
+  /// `toModel` extracts the child model from the parent model.
+  /// `withModel` sets the child model into the parent model.
+  let map
+    (toMsg: 'childMsg -> 'parentMsg)
+    (toModel: 'parentModel -> 'childModel)
+    (withModel: 'childModel -> 'parentModel -> 'parentModel)
+    (child: Program<'childModel, 'childMsg>)
+    : {| Init: 'parentModel -> 'parentModel * Cmd<'parentMsg>
+         Update: 'childMsg -> 'parentModel -> 'parentModel * Cmd<'parentMsg>
+         View: 'parentModel -> Element
+         Subscribe: 'parentModel -> Sub<'parentMsg> list |} =
+    {| Init = fun parentModel ->
+         let childModel, childCmd = child.Init()
+         withModel childModel parentModel, Cmd.map toMsg childCmd
+       Update = fun childMsg parentModel ->
+         let childModel = toModel parentModel
+         let newChildModel, childCmd = child.Update childMsg childModel
+         withModel newChildModel parentModel, Cmd.map toMsg childCmd
+       View = fun parentModel ->
+         child.View (toModel parentModel)
+       Subscribe = fun parentModel ->
+         child.Subscribe (toModel parentModel)
+         |> List.map (Sub.map toMsg) |}
 
 type TerminalBackend = {
   Size: unit -> int * int

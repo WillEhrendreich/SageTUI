@@ -265,3 +265,57 @@ module El =
         let elem = viewFn a b
         prev <- ValueSome struct(a, b, elem)
         elem
+
+  /// Recursively wraps each element with a colored border showing its type and constraint.
+  /// Useful for understanding how the layout engine allocates space.
+  let debugLayout (elem: Element) : Element =
+    let colors = [|
+      Color.Named(Cyan, Bright)
+      Color.Named(Magenta, Bright)
+      Color.Named(Yellow, Bright)
+      Color.Named(Green, Bright)
+      Color.Named(Red, Bright)
+      Color.Named(Blue, Bright)
+    |]
+    let rec dbg depth elem =
+      let color = colors[depth % colors.Length]
+      let label tag inner =
+        Bordered(Light,
+          Column [
+            Text(tag, { Fg = Some color; Bg = None; Attrs = TextAttrs.bold })
+            inner
+          ])
+        |> fun e -> Styled({ Fg = Some color; Bg = None; Attrs = TextAttrs.none }, e)
+      match elem with
+      | Empty -> label "·" Empty
+      | Text(s, st) -> label (sprintf "T\"%s\"" (match s.Length > 12 with | true -> s[..11] + "…" | false -> s)) (Text(s, st))
+      | Row children ->
+        label "Row" (Row(children |> List.map (dbg (depth + 1))))
+      | Column children ->
+        label "Col" (Column(children |> List.map (dbg (depth + 1))))
+      | Overlay layers ->
+        label "Ov" (Overlay(layers |> List.map (dbg (depth + 1))))
+      | Styled(st, child) ->
+        label "Sty" (Styled(st, dbg (depth + 1) child))
+      | Constrained(c, child) ->
+        let cStr =
+          match c with
+          | Fill -> "Fill"
+          | Fixed n -> sprintf "W%d" n
+          | Percentage p -> sprintf "%d%%" p
+          | Min n -> sprintf "≥%d" n
+          | Max n -> sprintf "≤%d" n
+          | Ratio(n, d) -> sprintf "%d/%d" n d
+        label cStr (dbg (depth + 1) child)
+      | Bordered(bs, child) ->
+        label (sprintf "Brd:%A" bs) (Bordered(bs, dbg (depth + 1) child))
+      | Padded(p, child) ->
+        label (sprintf "Pad%d,%d,%d,%d" p.Top p.Right p.Bottom p.Left) (Padded(p, dbg (depth + 1) child))
+      | Keyed(k, ent, ext, child) ->
+        label (sprintf "Key:%s" k) (Keyed(k, ent, ext, dbg (depth + 1) child))
+      | Canvas _ -> label "Canvas" elem
+      | Aligned(h, v, child) ->
+        label (sprintf "Align:%A,%A" h v) (Aligned(h, v, dbg (depth + 1) child))
+      | Gapped(g, child) ->
+        label (sprintf "Gap%d" g) (Gapped(g, dbg (depth + 1) child))
+    dbg 0 elem

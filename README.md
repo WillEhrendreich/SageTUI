@@ -30,12 +30,14 @@ That's it. No boilerplate. `App.display` handles terminal setup, rendering, and 
 ```fsharp
 open SageTUI
 
+type Msg = Increment | Quit
+
 let init () = 0, Cmd.none
+
 let update msg count =
   match msg with
-  | "inc" -> count + 1, Cmd.none
-  | "quit" -> count, Cmd.quit
-  | _ -> count, Cmd.none
+  | Increment -> count + 1, Cmd.none
+  | Quit -> count, Cmd.quit
 
 let view count =
   El.column [
@@ -43,16 +45,16 @@ let view count =
     El.text "[j] increment  [q] quit" |> El.dim
   ] |> El.padAll 1 |> El.bordered Rounded
 
-let program : Program<int, string> =
+let program : Program<int, Msg> =
   { Init = init
     Update = update
     View = view
     Subscribe = fun _ -> [
-      KeySub (fun (k, _) ->
-        match k with
-        | Key.Char 'j' -> Some "inc"
-        | Key.Char 'q' -> Some "quit"
-        | _ -> None) ] }
+      Keys.bind [
+        Key.Char 'j', Increment
+        Key.Char 'q', Quit
+        Key.Escape, Quit
+      ] ] }
 
 [<EntryPoint>]
 let main _ = App.run program; 0
@@ -149,6 +151,24 @@ let html = """<div>
 
 let element = HtmlString.parseFragment html
 ```
+
+## Performance
+
+Benchmarked with [BenchmarkDotNet](https://github.com/dotnet/BenchmarkDotNet) on .NET 10.0, i7-11800H:
+
+| Benchmark | Mean | Allocated |
+|-----------|------|-----------|
+| Buffer.diff identical (80×24) | **637 ns** | 32 B |
+| Buffer.diff 10% changed (80×24) | **3.3 μs** | 2.2 KB |
+| Render dashboard tree (80×24) | **19.4 μs** | 6.6 KB |
+| Arena render dashboard (80×24) | **31.8 μs** | 310 KB |
+| Layout 50-item column | **26.1 μs** | 91 KB |
+| Layout nested 3-level (10 rows) | **102 μs** | 143 KB |
+
+Buffer diff uses SIMD (Vector256) to compare 16-byte PackedCells — identical frames diff in under 1μs.
+The tree renderer allocates less; the arena renderer is optimized for large/complex UIs with pre-allocated nodes.
+
+Run benchmarks yourself: `dotnet run -c Release --project SageTUI.Benchmarks`
 
 ## Architecture
 

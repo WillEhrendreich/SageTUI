@@ -4,6 +4,14 @@ obj/
 
 # IDE
 .vs/
+.obsidian/
 
 # Expert Panel (CONFIDENTIAL - never commit)
 expertPanel/
+
+# Benchmark artifacts (raw logs, reports)
+BenchmarkDotNet.Artifacts/
+
+# Auto-generated analysis files
+IMPLEMENTATION_ASSESSMENT.md
+API_ERGONOMICS_ANALYSIS.md

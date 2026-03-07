@@ -2311,6 +2311,146 @@ let cmdExtendedTests = testList "Cmd extended" [
     | _ -> failwith "expected ResizeSub"
 ]
 
+let keysBindTests = testList "Keys.bind" [
+  testCase "bind matches registered keys" <| fun () ->
+    let sub = Keys.bind [ Key.Char 'q', "quit"; Key.Escape, "esc" ]
+    match sub with
+    | KeySub handler ->
+      handler (Key.Char 'q', Modifiers.None) |> Expect.equal "q→quit" (Some "quit")
+      handler (Key.Escape, Modifiers.None) |> Expect.equal "esc→esc" (Some "esc")
+    | _ -> failwith "expected KeySub"
+
+  testCase "bind ignores unregistered keys" <| fun () ->
+    let sub = Keys.bind [ Key.Char 'q', "quit" ]
+    match sub with
+    | KeySub handler ->
+      handler (Key.Char 'x', Modifiers.None) |> Expect.equal "x→None" None
+      handler (Key.Enter, Modifiers.None) |> Expect.equal "enter→None" None
+    | _ -> failwith "expected KeySub"
+
+  testCase "bind ignores modifiers" <| fun () ->
+    let sub = Keys.bind [ Key.Char 'q', "quit" ]
+    match sub with
+    | KeySub handler ->
+      handler (Key.Char 'q', Modifiers.Ctrl) |> Expect.equal "ctrl+q→quit" (Some "quit")
+    | _ -> failwith "expected KeySub"
+
+  testCase "bindWithMods matches exact modifier" <| fun () ->
+    let sub = Keys.bindWithMods [
+      (Key.Char 'c', Modifiers.Ctrl), "copy"
+      (Key.Char 'v', Modifiers.Ctrl), "paste"
+      (Key.Char 'q', Modifiers.None), "quit"
+    ]
+    match sub with
+    | KeySub handler ->
+      handler (Key.Char 'c', Modifiers.Ctrl) |> Expect.equal "ctrl+c→copy" (Some "copy")
+      handler (Key.Char 'c', Modifiers.None) |> Expect.equal "c→None" None
+      handler (Key.Char 'q', Modifiers.None) |> Expect.equal "q→quit" (Some "quit")
+      handler (Key.Char 'q', Modifiers.Ctrl) |> Expect.equal "ctrl+q→None" None
+    | _ -> failwith "expected KeySub"
+
+  testCase "bind works in full TEA program" <| fun () ->
+    let prog : Program<int, string> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun msg model ->
+        match msg with
+        | "inc" ->
+          match model >= 2 with
+          | true -> (model + 1, Cmd.quit)
+          | false -> (model + 1, Cmd.none)
+        | _ -> (model, Cmd.none)
+      View = fun model -> El.text (sprintf "%d" model)
+      Subscribe = fun _ -> [
+        Keys.bind [ Key.Char 'j', "inc" ]
+      ]
+    }
+    let events = [
+      TerminalEvent.KeyPressed(Key.Char 'j', Modifiers.None)
+      TerminalEvent.KeyPressed(Key.Char 'j', Modifiers.None)
+      TerminalEvent.KeyPressed(Key.Char 'j', Modifiers.None)
+    ]
+    let backend, _ = TestBackend.create 20 1 events
+    App.runWithBackend backend prog
+]
+
+let programMapTests = testList "Program.map" [
+  testCase "map transforms init" <| fun () ->
+    let child : Program<int, string> = {
+      Init = fun () -> (42, Cmd.none)
+      Update = fun _ m -> (m, Cmd.none)
+      View = fun m -> El.text (sprintf "%d" m)
+      Subscribe = fun _ -> []
+    }
+    let mapped =
+      Program.map
+        (fun s -> sprintf "child:%s" s)
+        (fun (parent: int * int) -> fst parent)
+        (fun child (_old, other) -> (child, other))
+        child
+    let parentModel, _cmd = mapped.Init (0, 99)
+    parentModel |> Expect.equal "child model set" (42, 99)
+
+  testCase "map transforms update" <| fun () ->
+    let child : Program<int, string> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun msg m ->
+        match msg with
+        | "inc" -> (m + 1, Cmd.none)
+        | _ -> (m, Cmd.none)
+      View = fun m -> El.text (sprintf "%d" m)
+      Subscribe = fun _ -> []
+    }
+    let mapped =
+      Program.map
+        (fun s -> sprintf "child:%s" s)
+        (fun (parent: int * int) -> fst parent)
+        (fun child (_old, other) -> (child, other))
+        child
+    let newModel, _cmd = mapped.Update "inc" (10, 99)
+    newModel |> Expect.equal "child updated" (11, 99)
+
+  testCase "map transforms view" <| fun () ->
+    let child : Program<int, string> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun _ m -> (m, Cmd.none)
+      View = fun m -> El.text (sprintf "child:%d" m)
+      Subscribe = fun _ -> []
+    }
+    let mapped =
+      Program.map
+        (fun s -> sprintf "wrap:%s" s)
+        (fun (parent: int * string) -> fst parent)
+        (fun child (_old, other) -> (child, other))
+        child
+    let elem = mapped.View (42, "test")
+    match elem with
+    | Text(s, _) -> s |> Expect.equal "view from child model" "child:42"
+    | _ -> failwith "expected Text"
+
+  testCase "map transforms subscriptions" <| fun () ->
+    let child : Program<int, string> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun _ m -> (m, Cmd.none)
+      View = fun _ -> El.empty
+      Subscribe = fun _ -> [
+        Keys.bind [ Key.Char 'j', "inc" ]
+      ]
+    }
+    let mapped =
+      Program.map
+        (sprintf "child:%s")
+        (fun (parent: int * int) -> fst parent)
+        (fun child (_old, other) -> (child, other))
+        child
+    let subs = mapped.Subscribe (5, 99)
+    subs |> Expect.hasLength "one sub" 1
+    match subs[0] with
+    | KeySub handler ->
+      handler (Key.Char 'j', Modifiers.None)
+      |> Expect.equal "msg wrapped" (Some "child:inc")
+    | _ -> failwith "expected KeySub"
+]
+
 let subscriptionTests2 = testList "Subscriptions" [
   testCase "timer sub dispatches ticks" <| fun () ->
     let prog: Program<int, string> = {
@@ -3015,6 +3155,8 @@ let allTests = testList "All" [
     appRunTests
     cmdInterpretTests
     cmdExtendedTests
+    keysBindTests
+    programMapTests
     subscriptionTests2
     eventDispatchTests
   ]
@@ -3048,5 +3190,54 @@ let allTests = testList "All" [
   testList "Panel fixes" [
     layoutConstraintFixTests
     arenaRenderTests
+  ]
+  testList "Debug + API" [
+    testList "El.debugLayout" [
+      testCase "wraps text in labeled border" <| fun () ->
+        let elem = El.text "Hello"
+        let debug = El.debugLayout elem
+        match debug with
+        | Styled(_, Bordered(Light, Column [Text(label, _); Text("Hello", _)])) ->
+          label |> Expect.stringContains "has T prefix" "T"
+        | other -> failwithf "unexpected: %A" other
+
+      testCase "wraps row with labeled children" <| fun () ->
+        let elem = El.row [ El.text "A"; El.text "B" ]
+        let debug = El.debugLayout elem
+        match debug with
+        | Styled(_, Bordered(Light, Column [Text(label, _); Row children])) ->
+          label |> Expect.equal "row label" "Row"
+          children |> Expect.hasLength "two children" 2
+        | other -> failwithf "unexpected: %A" other
+
+      testCase "preserves constraints in labels" <| fun () ->
+        let elem = El.text "X" |> El.fill
+        let debug = El.debugLayout elem
+        match debug with
+        | Styled(_, Bordered(Light, Column [Text(label, _); _])) ->
+          label |> Expect.equal "fill label" "Fill"
+        | other -> failwithf "unexpected: %A" other
+
+      testCase "nested depth cycles colors" <| fun () ->
+        let elem = El.column [ El.row [ El.text "deep" ] ]
+        let debug = El.debugLayout elem
+        match debug with
+        | Styled(outerStyle, Bordered(_, Column [_; Column [Styled(innerStyle, _)]])) ->
+          (outerStyle.Fg <> innerStyle.Fg) |> Expect.isTrue "different colors at different depths"
+        | other -> failwithf "unexpected: %A" other
+
+      testCase "renders without crash" <| fun () ->
+        let elem =
+          El.column [
+            El.row [
+              El.text "A" |> El.fill
+              El.text "B" |> El.width 10
+            ]
+            El.text "Footer" |> El.bordered Rounded |> El.padAll 1
+          ]
+        let debug = El.debugLayout elem
+        let buf = Buffer.create 60 20
+        Render.render { X = 0; Y = 0; Width = 60; Height = 20 } Style.empty buf debug
+    ]
   ]
 ]
