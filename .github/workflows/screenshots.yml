@@ -10,6 +10,8 @@ on:
 jobs:
   record:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -61,8 +63,8 @@ jobs:
             vhs "$tape"
           done
 
-      - name: Commit assets
+      - name: Commit demo GIFs
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore: update screenshots and demo GIFs [skip ci]"
-          file_pattern: "docs/screenshot-*.png docs/demo-*.gif"
+          commit_message: "chore: update demo GIFs [skip ci]"
+          file_pattern: "docs/demo-*.gif"
