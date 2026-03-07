@@ -12,6 +12,7 @@
     <Project Path="samples\07-Transitions\Transitions.fsproj" />
     <Project Path="samples\08-Sparklines\Sparklines.fsproj" />
   </Folder>
+  <Project Path="SageTUI.Benchmarks/SageTUI.Benchmarks.fsproj" />
   <Project Path="SageTUI.Html/SageTUI.Html.fsproj" />
   <Project Path="SageTUI.Library.fsproj" />
   <Project Path="SageTUI.Tests\SageTUI.Tests.fsproj" />

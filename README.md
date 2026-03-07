@@ -1,135 +1,137 @@
 # SageTUI
 
-**An Elm Architecture TUI framework for F# with SIMD-accelerated rendering, zero external dependencies, and a zero-GC frame loop.**
+**Build beautiful terminal UIs in F# with zero ceremony.**
 
-SageTUI brings the Elm Architecture (TEA) to the terminal. Build interactive terminal applications with a functional, composable API — the same `init → update → view` pattern you know from Elm, Elmish, and Fabulous, but purpose-built for character grids.
+Elm Architecture • SIMD rendering • 980+ tests • Zero external dependencies
 
-## Features
+<!-- TODO: Add GIF of Dashboard or Kanban sample here -->
+<!-- ![SageTUI Demo](docs/demo.gif) -->
 
-- **Elm Architecture** — `init`, `update`, `view`, `subscribe`. Pure state management, predictable updates, composable views.
-- **Arena Rendering** — All frame data lives in pre-allocated arena buffers. Zero allocations per frame, zero GC pauses.
-- **SIMD Diff** — Frame-to-frame diffing uses hardware SIMD instructions. Only changed cells are written to the terminal.
-- **Keyed Transitions** — Fade, wipe, dissolve, and color morph animations for element enter/exit.
-- **CSS-Vocabulary Layout** — `Row`, `Column`, `Fill`, `Percentage`, `Min`, `Max`, padding, borders, alignment, gap — terminal-native semantics with familiar names.
-- **HTML Bridge** — Parse HTML fragments and render them directly in the terminal. Tables, lists, inline styles, semantic tags — all mapped to `Element` trees.
-- **Rich Widget Suite** — TextInput, Select, ProgressBar, Tabs, Table, Modal, TreeView, Checkbox, Toggle, RadioGroup, Spinner, Toast, Form composition.
-- **Canvas Rendering** — HalfBlock (▀/▄) and Braille (⠿) modes for pixel-level graphics in terminal cells.
-- **TrueColor** — Full 24-bit RGB, named colors, hex (`#ff0000`), and `rgb(255,0,0)` parsing.
-- **Mouse & Focus** — Hit-testing with Z-order, click subscriptions, Tab/Shift+Tab focus cycling.
-- **Error Boundary** — Terminal state is always restored on unhandled exceptions — no corrupted terminals.
-- **965+ Tests** — Expecto-based test suite covering layout, rendering, widgets, hit-testing, scrolling, and more.
+## Install
 
-## Quick Start
+```bash
+dotnet add package SageTUI --prerelease
+```
 
-### Hello World (Minimal TEA)
+## 5-Line Hello World
 
 ```fsharp
 open SageTUI
 
-type Model = { Name: string }
-type Msg = KeyPressed of Key * Modifiers | Quit
+App.display (fun () ->
+  El.text "Hello from SageTUI!" |> El.bold |> El.fg (Color.Named(Cyan, Bright))
+  |> El.bordered Rounded |> El.padAll 1)
+```
 
-let init () = { Name = "" }, Cmd.none
+That's it. No boilerplate. `App.display` handles terminal setup, rendering, and cleanup.
 
-let update msg model =
+## Interactive App (Elm Architecture)
+
+```fsharp
+open SageTUI
+
+let init () = 0, Cmd.none
+let update msg count =
   match msg with
-  | Quit -> model, Cmd.quit
-  | KeyPressed(Char c, _) -> { Name = model.Name + string c }, Cmd.none
-  | _ -> model, Cmd.none
+  | "inc" -> count + 1, Cmd.none
+  | "quit" -> count, Cmd.quit
+  | _ -> count, Cmd.none
 
-let view model =
+let view count =
   El.column [
-    El.text (sprintf "Hello, %s!" (match model.Name with "" -> "World" | n -> n))
-      |> El.bold |> El.fg (Color.Named(Cyan, Bright))
-    El.text "Type your name, [Esc] to quit" |> El.dim
-  ] |> El.padAll 1
+    El.text (sprintf "Count: %d" count) |> El.bold
+    El.text "[j] increment  [q] quit" |> El.dim
+  ] |> El.padAll 1 |> El.bordered Rounded
 
-let subscribe _ =
-  [ KeySub (fun (k, m) ->
-      match k with Escape -> Some Quit | _ -> Some (KeyPressed(k, m))) ]
+let program : Program<int, string> =
+  { Init = init
+    Update = update
+    View = view
+    Subscribe = fun _ -> [
+      KeySub (fun (k, _) ->
+        match k with
+        | Key.Char 'j' -> Some "inc"
+        | Key.Char 'q' -> Some "quit"
+        | _ -> None) ] }
 
 [<EntryPoint>]
-let main _ =
-  let profile =
-    Detect.fromEnvironment
-      (fun k -> System.Environment.GetEnvironmentVariable(k) |> Option.ofObj)
-      (fun () -> System.Console.WindowWidth, System.Console.WindowHeight)
-  let backend = Backend.create profile
-  App.run backend
-    { Init = init; Update = update; View = view; Subscribe = subscribe }
-  0
+let main _ = App.run program; 0
 ```
 
-### Even Simpler — `App.simple`
+`App.run` auto-detects your terminal (TrueColor, 256-color, multiplexer) and handles everything.
 
-Skip subscriptions when you don't need them:
+## Features
 
-```fsharp
-let program = App.simple init update view
-App.run backend program
-```
-
-### Static Display
-
-Show a view with no interaction (Esc to quit):
-
-```fsharp
-App.display (fun () ->
-  El.column [
-    El.text "Hello from SageTUI!" |> El.bold |> El.fg (Color.Named(Green, Bright))
-    El.text "Press Esc to exit" |> El.dim
-  ] |> El.bordered Rounded |> El.padAll 1
-) backend
-```
+| Category | What You Get |
+|----------|-------------|
+| **Architecture** | Elm Architecture (init/update/view/subscribe), pure state management |
+| **Layout** | Row, Column, Fill, Percentage, Min/Max, padding, borders, alignment, gap, flex-shrink |
+| **Rendering** | Arena-allocated zero-GC frame loop, SIMD-accelerated diff, 24-bit TrueColor |
+| **Widgets** | TextInput, Select, Table, Tabs, Modal, TreeView, ProgressBar, Checkbox, Toggle, RadioGroup, Spinner, Toast, Form |
+| **Scrolling** | ScrollState, scroll indicators, mouse wheel, ScrollableList, keyboard navigation |
+| **Canvas** | HalfBlock (▀/▄) and Braille (⠿) pixel modes |
+| **Transitions** | Fade, Wipe, SlideIn, Dissolve, ColorMorph, Grow, Custom |
+| **Themes** | 5 built-in themes (dark, light, nord, dracula, catppuccin) |
+| **HTML Bridge** | Parse HTML fragments → Element trees (tables, styles, semantic tags) |
+| **Mouse** | Click subscriptions, hit-testing with Z-order, focus cycling |
+| **Safety** | Error boundary restores terminal on crash. Always. |
 
 ## Layout Engine
 
-SageTUI's layout engine uses CSS vocabulary with terminal-native semantics:
+Terminal-native flexbox with CSS vocabulary:
 
 ```fsharp
 // Rows and columns
-El.row [ El.text "Left"; El.text "Right" |> El.fill ]
-El.column [ El.text "Top"; El.text "Bottom" ]
-
-// Constraints
-El.text "Fixed" |> El.width 20
-El.text "Flexible" |> El.fill
-El.text "Half" |> El.percentage 50
+El.row [ El.text "Left" |> El.fill; El.text "Right" |> El.width 20 ]
 
 // Box model
-El.text "Padded" |> El.padAll 2 |> El.bordered Rounded
+El.text "Content" |> El.padAll 1 |> El.bordered Rounded
 
 // Alignment
 El.text "Centered" |> El.center
-El.text "Bottom-right" |> El.alignBottomRight
 
 // Gap between children
 El.column [ El.text "A"; El.text "B"; El.text "C" ] |> El.gap 1
+
+// Percentage sizing
+El.row [
+  El.text "Sidebar" |> El.percentage 30
+  El.text "Main" |> El.fill
+]
 ```
 
 ## Widgets
 
 ```fsharp
-// TextInput with cursor
 TextInput.view focused model.Input
-
-// Progress bar
 ProgressBar.view { ProgressBar.defaults with Percent = 0.75; Width = 40 }
-
-// Tabs
 Tabs.view ["Home"; "Settings"; "Help"] activeTab
-
-// Table with headers and rows
 Table.view headers rows selectedRow focused
-
-// Modal overlay
 Modal.view { Modal.defaults with Title = Some "Confirm" } content
-
-// TreeView with keyboard navigation
 TreeView.view toString focused nodes treeState
-
-// Form composition
 Form.view fields focusedKey model
+```
+
+## Themes
+
+```fsharp
+let themed = Theme.dark  // or: light, nord, dracula, catppuccin
+El.text "Styled heading" |> Theme.heading themed
+El.column [...] |> Theme.panel themed "My Panel"
+```
+
+## .NET Interop
+
+Call any .NET library from your update function:
+
+```fsharp
+let update msg model =
+  match msg with
+  | FetchData ->
+    model, Cmd.ofTask
+      (fun () -> httpClient.GetStringAsync("https://api.example.com/data"))
+      (fun result -> DataReceived result)
+  | DataReceived data -> { model with Data = data }, Cmd.none
 ```
 
 ## HTML Rendering
@@ -137,13 +139,11 @@ Form.view fields focusedKey model
 ```fsharp
 open SageTUI.Html
 
-let html = """
-<div>
+let html = """<div>
   <h1 style="color: cyan">Dashboard</h1>
   <table>
     <tr><th>Service</th><th>Status</th></tr>
     <tr><td>API</td><td style="color: green">● Online</td></tr>
-    <tr><td>DB</td><td style="color: yellow">● Degraded</td></tr>
   </table>
 </div>"""
 
@@ -154,30 +154,49 @@ let element = HtmlString.parseFragment html
 
 ```
 ┌─────────────────────────────────────────┐
-│            Your Application             │
+│          Your Application               │
 │  init → update → view → subscribe       │
 ├─────────────────────────────────────────┤
-│              Element Tree               │
+│            Element Tree                 │
 │  Text · Row · Column · Styled · ...     │
 ├─────────────────────────────────────────┤
-│           Arena Rendering               │
-│  Pre-allocated nodes, zero GC           │
+│         Arena Rendering (zero-GC)       │
+│  Pre-allocated nodes, single pass       │
 ├─────────────────────────────────────────┤
-│            SIMD Diff                    │
-│  Hardware-accelerated change detection  │
+│       SIMD Diff (hardware accel)        │
+│  Only changed cells hit the terminal    │
 ├─────────────────────────────────────────┤
-│          Terminal Backend               │
-│  ANSI escape sequences, raw mode        │
+│         Terminal Backend                │
+│  Auto-detect, TrueColor, mouse, raw     │
 └─────────────────────────────────────────┘
 ```
 
-## Performance
+## Samples
 
-- **Zero-GC frame loop** — Arena allocation means no garbage collector pressure during rendering
-- **SIMD diff** — Only changed cells are written to the terminal, minimizing I/O
-- **O(1) arena reset** — Frame buffers clear in constant time
-- **Content-aware layout** — Flex distribution, proportional shrink, overflow clipping all in a single pass
-- **Memoized views** — `El.lazy'` skips re-computation when model reference hasn't changed
+| Sample | Description |
+|--------|-------------|
+| `01-HelloWorld` | Minimal TEA app |
+| `02-Dashboard` | Multi-panel dashboard with progress bars |
+| `03-HtmlRenderer` | Render HTML in the terminal |
+| `04-InteractiveForm` | TextInput, Select, validation |
+| `05-ColorPalette` | TrueColor gradients and named colors |
+| `06-Kanban` | Drag-and-drop Kanban board |
+| `07-Transitions` | Animated enter/exit transitions |
+| `08-Sparklines` | Real-time sparkline charts |
+
+```bash
+cd samples/06-Kanban && dotnet run
+```
+
+## Advanced: Custom Backend
+
+For testing or custom terminal implementations:
+
+```fsharp
+let profile = Detect.fromEnvironment envReader sizeGetter
+let backend = Backend.create profile
+App.runWithBackend backend program
+```
 
 ## Requirements
 
