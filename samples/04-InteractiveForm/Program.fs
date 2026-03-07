@@ -3,6 +3,7 @@ module InteractiveForm
 // Full interactive form with text inputs, dropdown, focus ring, validation.
 // Demonstrates: TextInput, FocusRing, Select, keyboard navigation, styled feedback.
 
+open System
 open SageTUI
 
 type Field = Name | Email | Role | Submit
@@ -13,11 +14,57 @@ type Model =
     Role: SelectModel<string>
     Focus: FocusRing<Field>
     Submitted: bool
-    Errors: Map<Field, string> }
+    Errors: Map<Field, string>
+    DemoStep: int }
 
 type Msg =
   | KeyInput of Key * Modifiers
   | Quit
+  | NextDemoStep
+
+// ─── Demo Mode ───────────────────────────────────────────────────────────────
+
+let isDemoMode = Environment.GetEnvironmentVariable("SAGETUI_DEMO_MODE") = "1"
+
+let private key k = Some (KeyInput(k, Modifiers.None))
+let private shiftKey k = Some (KeyInput(k, Modifiers.Shift))
+let private ch c = key (Key.Char c)
+let private tab () = key Key.Tab
+let private shiftTab () = shiftKey Key.Tab
+let private enter () = key Key.Enter
+let private bs () = key Key.Backspace
+let private typeStr (delayMs: int) (s: string) = s |> Seq.toList |> List.map (fun c -> delayMs, ch c)
+let private bsMany n = List.replicate n (90, bs())
+
+// Sequence: type name → type bad email → submit → see error → fix email → select role → submit → success
+let demoSteps : (int * Msg option) list = [
+  yield  900, None                            // form loads, Name focused
+  yield! typeStr 80 "Ada Lovelace"            // type name
+  yield  450, tab()                           // Tab → Email
+  yield  300, None
+  yield! typeStr 75 "notvalid"                // type bad email (no @)
+  yield  450, tab()                           // Tab → Role
+  yield  350, tab()                           // Tab → Submit
+  yield  600, None                            // hover on Submit button
+  yield  350, enter()                         // SUBMIT → validation error!
+  yield  1100, None                           // pause — let viewer read the error
+  yield  300, shiftTab()                      // Shift+Tab → back to Email
+  yield  250, None
+  yield! bsMany 8                             // clear "notvalid"
+  yield  200, None
+  yield! typeStr 70 "ada@example.com"         // correct email
+  yield  450, tab()                           // Tab → Role
+  yield  400, enter()                         // open dropdown
+  yield  500, None                            // dropdown opens
+  yield  280, key Key.Down                    // → "Designer"
+  yield  350, enter()                         // confirm selection
+  yield  450, tab()                           // Tab → Submit
+  yield  700, None                            // pause on Submit — anticipation
+  yield  350, enter()                         // SUBMIT → READY ✅
+  yield 1800, None                            // hold on success state
+]
+
+// ─── TEA ─────────────────────────────────────────────────────────────────────
 
 let theme = Theme.catppuccin
 
@@ -46,12 +93,23 @@ let init () =
     Role = Select.create ["Developer"; "Designer"; "Manager"; "DevOps"; "QA"]
     Focus = FocusRing.create [Name; Email; Role; Submit]
     Submitted = false
-    Errors = Map.empty },
-  Cmd.none
+    Errors = Map.empty
+    DemoStep = 0 },
+  match isDemoMode with true -> Cmd.delay 400 NextDemoStep | false -> Cmd.none
 
-let update msg model =
+let rec update msg model =
   match msg with
   | Quit -> model, Cmd.quit
+  | NextDemoStep when isDemoMode ->
+    let step = model.DemoStep % demoSteps.Length
+    let (delayMs, actionOpt) = demoSteps[step]
+    let model' = { model with DemoStep = step + 1 }
+    let model'', actionCmd =
+      match actionOpt with
+      | Some action -> update action model'
+      | None -> model', Cmd.none
+    model'', Cmd.batch [actionCmd; Cmd.delay delayMs NextDemoStep]
+  | NextDemoStep -> model, Cmd.none
   | KeyInput (key, _mods) ->
     let focus = FocusRing.current model.Focus
     match focus, key with
@@ -283,3 +341,4 @@ let program : Program<Model, Msg> =
 
 [<EntryPoint>]
 let main _ = App.run program; 0
+

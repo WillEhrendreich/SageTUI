@@ -1,7 +1,7 @@
 module SystemMonitor
 
-open SageTUI
 open System
+open SageTUI
 
 type Msg =
   | Tick
@@ -10,6 +10,7 @@ type Msg =
   | ScrollDown
   | NextTab
   | PrevTab
+  | NextDemoStep
 
 type ProcessInfo = {
   Name: string
@@ -28,7 +29,36 @@ type Model = {
   Uptime: int
   ActiveTab: int
   Rng: Random
+  DemoStep: int
 }
+
+// ─── Demo Mode ───────────────────────────────────────────────────────────────
+
+let isDemoMode = Environment.GetEnvironmentVariable("SAGETUI_DEMO_MODE") = "1"
+
+// Sequence: scroll process table, watch rankings update, cycle to Network tab, back.
+let demoSteps : (int * Msg option) list = [
+  1500, None              // pause on Overview — data builds up, rankings shift
+  700,  None              // another tick or two of watching CPU percentages move
+  350,  Some ScrollDown   // scroll processes down
+  350,  Some ScrollDown
+  350,  Some ScrollDown
+  350,  Some ScrollDown
+  700,  None              // pause — see lower-ranked processes
+  350,  Some ScrollUp     // scroll back to top
+  350,  Some ScrollUp
+  350,  Some ScrollUp
+  350,  Some ScrollUp
+  700,  None              // pause at top — watch #1 CPU process
+  700,  None              // another tick — rankings shuffle
+  800,  Some NextTab      // → Network tab
+  2500, None              // show Network tab — sparklines, interfaces
+  800,  Some NextTab      // → About tab
+  1800, None              // show About
+  800,  Some PrevTab      // ← Network
+  800,  Some PrevTab      // ← Overview
+  1000, None              // back at Overview — loop
+]
 
 let maxHistory = 40
 let theme = Theme.nord
@@ -92,9 +122,11 @@ let init () =
     ProcessScroll = ScrollState.create 20 8
     Uptime = 0
     ActiveTab = 0
-    Rng = rng }, Cmd.none
+    Rng = rng
+    DemoStep = 0 },
+  match isDemoMode with true -> Cmd.delay 800 NextDemoStep | false -> Cmd.none
 
-let update msg model =
+let rec update msg model =
   match msg with
   | Tick ->
     let cpu = model.Rng.NextDouble() * 40.0
@@ -117,6 +149,16 @@ let update msg model =
   | PrevTab ->
     { model with ActiveTab = (model.ActiveTab + 2) % 3 }, Cmd.none
   | Quit -> model, Cmd.quit
+  | NextDemoStep when isDemoMode ->
+    let step = model.DemoStep % demoSteps.Length
+    let (delayMs, actionOpt) = demoSteps[step]
+    let model' = { model with DemoStep = step + 1 }
+    let model'', actionCmd =
+      match actionOpt with
+      | Some action -> update action model'
+      | None -> model', Cmd.none
+    model'', Cmd.batch [actionCmd; Cmd.delay delayMs NextDemoStep]
+  | NextDemoStep -> model, Cmd.none
 
 let sparkline color label (data: float list) maxVal =
   let bars =
@@ -379,3 +421,4 @@ let program : Program<Model, Msg> =
 
 [<EntryPoint>]
 let main _ = App.run program; 0
+

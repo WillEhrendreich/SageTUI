@@ -25,7 +25,8 @@ type Model =
     Elapsed: int64
     Metrics: Metric list
     Paused: bool
-    Focused: int option }
+    Focused: int option
+    DemoStep: int }
 
 type Msg =
   | Tick
@@ -35,6 +36,27 @@ type Msg =
   | Focus of int
   | Unfocus
   | Quit
+  | NextDemoStep
+
+// ─── Demo Mode ───────────────────────────────────────────────────────────────
+
+let isDemoMode = Environment.GetEnvironmentVariable("SAGETUI_DEMO_MODE") = "1"
+
+// Cycle through focused panels (zoomed braille) to showcase the gradient beauty.
+// Slower tick in demo mode so each frame is readable.
+let demoSteps : (int * Msg option) list = [
+  2500, None              // overview — 4 panels, data builds up
+  400,  Some (Focus 0)   // zoom into CPU — braille detail
+  4500, None             // hold on CPU (data accumulates, gradient shifts)
+  400,  Some (Focus 1)   // zoom into MEM
+  4500, None             // hold on MEM — blue-purple gradient
+  400,  Some (Focus 2)   // zoom into NET
+  4000, None             // hold on NET — yellow-orange gradient
+  400,  Some (Focus 3)   // zoom into DSK
+  3500, None             // hold on DSK — cyan gradient
+  400,  Some Unfocus     // back to 4-panel overview
+  2500, None             // end on overview — loop
+]
 
 // ─── Data Generation ───
 
@@ -137,20 +159,23 @@ let minibar (width: int) (value: float) (lo: byte * byte * byte) (hi: byte * byt
 
 let init () =
   let (w, h) = Console.WindowWidth, Console.WindowHeight
-  { Width = w
-    Height = h
-    Tick = 0
-    Elapsed = 0L
-    Metrics =
-      [ { Kind = Cpu; Name = "CPU"; Data = []; Low = (40uy, 200uy, 80uy); High = (255uy, 60uy, 50uy) }
-        { Kind = Memory; Name = "MEM"; Data = []; Low = (60uy, 120uy, 255uy); High = (220uy, 80uy, 255uy) }
-        { Kind = Network; Name = "NET"; Data = []; Low = (255uy, 200uy, 40uy); High = (255uy, 80uy, 20uy) }
-        { Kind = Disk; Name = "DSK"; Data = []; Low = (40uy, 220uy, 220uy); High = (40uy, 80uy, 255uy) } ]
-    Paused = false
-    Focused = None },
-  Cmd.none
+  let m =
+    { Width = w
+      Height = h
+      Tick = 0
+      Elapsed = 0L
+      Metrics =
+        [ { Kind = Cpu; Name = "CPU"; Data = []; Low = (40uy, 200uy, 80uy); High = (255uy, 60uy, 50uy) }
+          { Kind = Memory; Name = "MEM"; Data = []; Low = (60uy, 120uy, 255uy); High = (220uy, 80uy, 255uy) }
+          { Kind = Network; Name = "NET"; Data = []; Low = (255uy, 200uy, 40uy); High = (255uy, 80uy, 20uy) }
+          { Kind = Disk; Name = "DSK"; Data = []; Low = (40uy, 220uy, 220uy); High = (40uy, 80uy, 255uy) } ]
+      Paused = false
+      Focused = None
+      DemoStep = 0 }
+  let cmd = match isDemoMode with true -> Cmd.delay 1000 NextDemoStep | false -> Cmd.none
+  m, cmd
 
-let update msg model =
+let rec update msg model =
   match msg with
   | Tick ->
     match model.Paused with
@@ -179,6 +204,16 @@ let update msg model =
   | Focus idx -> { model with Focused = Some idx }, Cmd.none
   | Unfocus -> { model with Focused = None }, Cmd.none
   | Quit -> model, Cmd.quit
+  | NextDemoStep when isDemoMode ->
+    let step = model.DemoStep % demoSteps.Length
+    let (delayMs, actionOpt) = demoSteps[step]
+    let model' = { model with DemoStep = step + 1 }
+    let model'', actionCmd =
+      match actionOpt with
+      | Some action -> update action model'
+      | None -> model', Cmd.none
+    model'', Cmd.batch [actionCmd; Cmd.delay delayMs NextDemoStep]
+  | NextDemoStep -> model, Cmd.none
 
 let view model =
   let elapsed = TimeSpan.FromMilliseconds(float model.Elapsed)
@@ -273,7 +308,11 @@ let view model =
   El.column [ header; content |> El.fill; footer ]
 
 let subscribe _model =
-  [ TimerSub("tick", TimeSpan.FromMilliseconds(100.0), fun () -> Tick)
+  let tickInterval =
+    match isDemoMode with
+    | true  -> TimeSpan.FromMilliseconds(300.0)   // slower in demo — each frame readable
+    | false -> TimeSpan.FromMilliseconds(100.0)
+  [ TimerSub("tick", tickInterval, fun () -> Tick)
     ResizeSub (fun (w, h) -> Resized (w, h))
     Keys.bind [
       Key.Char 'q', Quit
@@ -300,3 +339,4 @@ let main _ =
   let backend = Backend.auto()
   App.runWith { AppConfig.defaults with ArenaNodes = 16384; ArenaLayout = 16384 } backend program
   0
+

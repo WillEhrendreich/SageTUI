@@ -3,6 +3,7 @@ module Kanban
 // Kanban board with columns, cards, keyboard navigation.
 // Demonstrates: Complex layouts, fill/ratio, borders, overlays, keyboard-driven UX.
 
+open System
 open SageTUI
 
 type Priority = Low | Medium | High | Critical
@@ -19,7 +20,8 @@ type Model =
   { Cards: Map<Column, Card list>
     FocusCol: Column
     FocusRow: int
-    Moving: bool }
+    Moving: bool
+    DemoStep: int }
 
 type Msg =
   | MoveLeft
@@ -28,6 +30,44 @@ type Msg =
   | MoveDown
   | GrabOrDrop
   | Quit
+  | NextDemoStep
+
+// ─── Demo Mode ───────────────────────────────────────────────────────────────
+
+let isDemoMode = Environment.GetEnvironmentVariable("SAGETUI_DEMO_MODE") = "1"
+
+// Sequence: navigate to InProgress, browse cards, grab Critical card, fly it to Done.
+// Then navigate back, grab a Todo card, push it to InProgress.
+let demoSteps : (int * Msg option) list = [
+  700,  None               // board renders — pause
+  350,  Some MoveRight     // → InProgress column
+  400,  None               // pause — InProgress focused
+  300,  Some MoveDown      // → row 1 (SIMD diff engine)
+  300,  Some MoveUp        // → row 0 (Arena allocator - CRITICAL)
+  500,  None               // pause — hovering Critical card
+  300,  Some GrabOrDrop    // GRAB — MOVING badge appears
+  700,  None               // pause — let viewer see MOVING state
+  400,  Some MoveRight     // → card moves to Review
+  600,  None               // pause — card landed in Review
+  300,  Some GrabOrDrop    // GRAB again from Review
+  500,  None               // pause
+  400,  Some MoveRight     // → card moves to Done!
+  900,  None               // dramatic pause — DONE ✅
+  350,  Some MoveLeft      // ← navigate back (card is in Done, we navigate)
+  350,  Some MoveLeft      // ← InProgress
+  350,  Some MoveLeft      // ← Todo
+  400,  None               // pause on Todo
+  300,  Some MoveDown      // → row 1 (Write MDN tests)
+  300,  Some GrabOrDrop    // GRAB
+  500,  None               // pause — MOVING
+  400,  Some MoveRight     // → moves to InProgress
+  700,  None               // pause — card is now in InProgress
+  350,  Some MoveLeft      // ← back to Todo
+  350,  Some MoveUp        // → row 0
+  600,  None               // pause — back to start, loop
+]
+
+// ─── Data ────────────────────────────────────────────────────────────────────
 
 let allColumns = [Todo; InProgress; Review; Done]
 
@@ -75,8 +115,9 @@ let init () =
       ]
     FocusCol = Todo
     FocusRow = 0
-    Moving = false },
-  Cmd.none
+    Moving = false
+    DemoStep = 0 },
+  match isDemoMode with true -> Cmd.delay 500 NextDemoStep | false -> Cmd.none
 
 let colIdx col =
   match col with Todo -> 0 | InProgress -> 1 | Review -> 2 | Done -> 3
@@ -107,7 +148,7 @@ let moveCardToColumn (deltaIdx: int) model =
         Moving = false }, Cmd.none
   | false -> model, Cmd.none
 
-let update msg model =
+let rec update msg model =
   match msg with
   | Quit -> model, Cmd.quit
   | MoveRight ->
@@ -129,6 +170,16 @@ let update msg model =
     { model with FocusRow = min maxRow (model.FocusRow + 1) }, Cmd.none
   | GrabOrDrop ->
     { model with Moving = not model.Moving }, Cmd.none
+  | NextDemoStep when isDemoMode ->
+    let step = model.DemoStep % demoSteps.Length
+    let (delayMs, actionOpt) = demoSteps[step]
+    let model' = { model with DemoStep = step + 1 }
+    let model'', actionCmd =
+      match actionOpt with
+      | Some action -> update action model'
+      | None -> model', Cmd.none
+    model'', Cmd.batch [actionCmd; Cmd.delay delayMs NextDemoStep]
+  | NextDemoStep -> model, Cmd.none
 
 let renderCard (card: Card) (focused: bool) (grabbed: bool) =
   let border =
@@ -267,3 +318,4 @@ let program : Program<Model, Msg> =
 
 [<EntryPoint>]
 let main _ = App.run program; 0
+
