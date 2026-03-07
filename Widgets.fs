@@ -520,3 +520,29 @@ module TreeView =
       | true -> el |> El.bold |> El.reverse
       | false -> el)
     |> El.column
+
+type FormField<'model, 'msg> = {
+  Key: string
+  View: bool -> 'model -> Element
+  HandleKey: Key -> 'model -> 'msg option
+}
+
+module Form =
+  let field (key: string) (view: bool -> 'model -> Element) (handleKey: Key -> 'model -> 'msg option) : FormField<'model, 'msg> =
+    { Key = key; View = view; HandleKey = handleKey }
+
+  let view (fields: FormField<'model, 'msg> list) (focusedKey: string) (model: 'model) : Element =
+    fields
+    |> List.map (fun f -> f.View (f.Key = focusedKey) model)
+    |> El.column
+
+  let handleKey (fields: FormField<'model, 'msg> list) (focusedKey: string) (key: Key) (model: 'model) : 'msg option =
+    fields
+    |> List.tryFind (fun f -> f.Key = focusedKey)
+    |> Option.bind (fun f -> f.HandleKey key model)
+
+  let keys (fields: FormField<'model, 'msg> list) : string list =
+    fields |> List.map (fun f -> f.Key)
+
+  let handleFocus (fields: FormField<'model, 'msg> list) (focusedKey: string) (dir: FocusDirection) : string =
+    Focus.tabOrder (keys fields) focusedKey dir

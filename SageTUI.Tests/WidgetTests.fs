@@ -739,6 +739,74 @@ let lazyTests = testList "El.lazy'" [
   }
 ]
 
+type TestFormModel = { Name: string; Age: int; Active: bool }
+
+let formTests = testList "Form" [
+  let nameField =
+    Form.field "name"
+      (fun focused (model: TestFormModel) ->
+        let el = El.text (sprintf "Name: %s" model.Name)
+        match focused with true -> el |> El.bold | false -> el)
+      (fun _key (_model: TestFormModel) -> None)
+
+  let ageField =
+    Form.field "age"
+      (fun focused (model: TestFormModel) ->
+        let el = El.text (sprintf "Age: %d" model.Age)
+        match focused with true -> el |> El.bold | false -> el)
+      (fun _key (_model: TestFormModel) -> None)
+
+  let activeField =
+    Form.field "active"
+      (fun focused (model: TestFormModel) ->
+        Checkbox.view "Active" focused model.Active)
+      (fun _key (_model: TestFormModel) -> None)
+
+  let fields = [nameField; ageField; activeField]
+  let model = { Name = "Alice"; Age = 30; Active = true }
+
+  test "keys extracts field keys" {
+    Form.keys fields |> Expect.equal "keys" ["name"; "age"; "active"]
+  }
+
+  test "view renders all fields as column" {
+    let elem = Form.view fields "name" model
+    match elem with
+    | Column items -> items |> Expect.hasLength "3 fields" 3
+    | _ -> failtest "expected Column"
+  }
+
+  test "view highlights focused field" {
+    let elem = Form.view fields "name" model
+    match elem with
+    | Column (first :: _) ->
+      match first with
+      | Styled(_, _) -> ()
+      | _ -> failtest "expected Styled for focused"
+    | _ -> failtest "expected Column"
+  }
+
+  test "handleFocus moves to next field" {
+    let next = Form.handleFocus fields "name" FocusNext
+    next |> Expect.equal "next is age" "age"
+  }
+
+  test "handleFocus moves to previous field" {
+    let prev = Form.handleFocus fields "age" FocusPrev
+    prev |> Expect.equal "prev is name" "name"
+  }
+
+  test "handleFocus wraps around" {
+    let next = Form.handleFocus fields "active" FocusNext
+    next |> Expect.equal "wraps to name" "name"
+  }
+
+  test "handleKey routes to focused field" {
+    let result = Form.handleKey fields "name" Key.Enter model
+    result |> Expect.isNone "no handler for enter on name"
+  }
+]
+
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -757,4 +825,5 @@ let allWidgetTests = testList "Widgets" [
   toastTests
   treeViewTests
   lazyTests
+  formTests
 ]
