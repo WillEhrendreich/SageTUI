@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/examples/">
+    <Project Path="examples\Counter\Counter.fsproj" />
+  </Folder>
   <Project Path="SageTUI.Library.fsproj" />
   <Project Path="SageTUI.Tests\SageTUI.Tests.fsproj" />
 </Solution>
