@@ -2227,6 +2227,90 @@ let cmdInterpretTests = testList "Cmd interpret" [
     App.runWithBackend backend prog
 ]
 
+let cmdExtendedTests = testList "Cmd extended" [
+  testCase "ofMsg dispatches immediately" <| fun () ->
+    let prog: Program<string, string> = {
+      Init = fun () -> ("init", Cmd.ofMsg "hello")
+      Update = fun msg _ ->
+        match msg with
+        | "hello" -> ("got-hello", Cmd.quit)
+        | _ -> ("unknown", Cmd.quit)
+      View = fun model -> El.text model
+      Subscribe = fun _ -> []
+    }
+    let backend, _ = TestBackend.create 20 1 []
+    App.runWithBackend backend prog
+
+  testCase "ofTask dispatches result" <| fun () ->
+    let prog: Program<string, string> = {
+      Init = fun () ->
+        ("waiting", Cmd.ofTask
+          (fun () -> System.Threading.Tasks.Task.FromResult("task-result"))
+          (fun r -> sprintf "got:%s" r))
+      Update = fun msg _ ->
+        match msg.StartsWith("got:") with
+        | true -> (msg, Cmd.quit)
+        | false -> ("unexpected", Cmd.quit)
+      View = fun model -> El.text model
+      Subscribe = fun _ -> []
+    }
+    let backend, _ = TestBackend.create 30 1 []
+    App.runWithBackend backend prog
+
+  testCase "ofTaskResult dispatches error on failure" <| fun () ->
+    let prog: Program<string, string> = {
+      Init = fun () ->
+        ("waiting", Cmd.ofTaskResult
+          (fun () -> System.Threading.Tasks.Task.FromException<string>(exn "boom"))
+          (fun _ -> "ok")
+          (fun ex -> sprintf "err:%s" ex.Message))
+      Update = fun msg _ ->
+        match msg.StartsWith("err:") with
+        | true -> (msg, Cmd.quit)
+        | false -> ("unexpected", Cmd.quit)
+      View = fun model -> El.text model
+      Subscribe = fun _ -> []
+    }
+    let backend, _ = TestBackend.create 30 1 []
+    App.runWithBackend backend prog
+
+  testCase "Cmd.map transforms message type" <| fun () ->
+    let inner : Cmd<int> = Cmd.ofMsg 42
+    let outer : Cmd<string> = Cmd.map (sprintf "%d") inner
+    match outer with
+    | Delay(0, "42") -> ()
+    | _ -> failwith "expected mapped Delay"
+
+  testCase "Sub.map transforms KeySub messages" <| fun () ->
+    let inner : Sub<int> = KeySub(fun (k, _) ->
+      match k with Key.Char 'a' -> Some 1 | _ -> None)
+    let outer : Sub<string> = Sub.map (sprintf "val:%d") inner
+    match outer with
+    | KeySub handler ->
+      handler(Key.Char 'a', Modifiers.None)
+      |> Expect.equal "mapped a" (Some "val:1")
+      handler(Key.Char 'b', Modifiers.None)
+      |> Expect.isNone "b stays None"
+    | _ -> failwith "expected KeySub"
+
+  testCase "Sub.map transforms TimerSub" <| fun () ->
+    let inner : Sub<int> = TimerSub("t", System.TimeSpan.FromSeconds(1.0), fun () -> 99)
+    let outer : Sub<string> = Sub.map (sprintf "%d") inner
+    match outer with
+    | TimerSub(id, _, tick) ->
+      id |> Expect.equal "id preserved" "t"
+      tick() |> Expect.equal "tick mapped" "99"
+    | _ -> failwith "expected TimerSub"
+
+  testCase "Sub.map transforms ResizeSub" <| fun () ->
+    let inner : Sub<string> = ResizeSub(fun (w, h) -> sprintf "%dx%d" w h)
+    let outer : Sub<int> = Sub.map (fun (s: string) -> s.Length) inner
+    match outer with
+    | ResizeSub handler ->
+      handler(80, 24) |> Expect.equal "resize mapped" 5
+    | _ -> failwith "expected ResizeSub"
+]
+
 let subscriptionTests2 = testList "Subscriptions" [
   testCase "timer sub dispatches ticks" <| fun () ->
     let prog: Program<int, string> = {
@@ -2930,6 +3014,7 @@ let allTests = testList "All" [
   testList "Phase 7" [
     appRunTests
     cmdInterpretTests
+    cmdExtendedTests
     subscriptionTests2
     eventDispatchTests
   ]

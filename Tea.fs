@@ -30,6 +30,7 @@ module Cmd =
   /// Quit the application.
   let quit = Quit
 
+  /// Transform the message type of a command.
   let rec map (f: 'a -> 'b) (cmd: Cmd<'a>) : Cmd<'b> =
     match cmd with
     | NoCmd -> NoCmd
@@ -40,6 +41,31 @@ module Cmd =
     | CancelSub id -> CancelSub id
     | Delay(ms, msg) -> Delay(ms, f msg)
     | Quit -> Quit
+
+  /// Dispatch a message immediately (synchronous, no delay).
+  let ofMsg (msg: 'msg) : Cmd<'msg> = Delay(0, msg)
+
+  /// Run a Task and dispatch the result as a message.
+  let ofTask (task: unit -> Threading.Tasks.Task<'a>) (toMsg: 'a -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        let! result = task() |> Async.AwaitTask
+        dispatch (toMsg result)
+      })
+
+  /// Run a Task with success/error message mapping.
+  let ofTaskResult
+    (task: unit -> Threading.Tasks.Task<'a>)
+    (onOk: 'a -> 'msg)
+    (onError: exn -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        try
+          let! result = task() |> Async.AwaitTask
+          dispatch (onOk result)
+        with ex ->
+          dispatch (onError ex)
+      })
 
 /// A subscription that connects external events to messages.
 type Sub<'msg> =
@@ -54,6 +80,20 @@ type Sub<'msg> =
 and FocusDirection =
   | FocusNext
   | FocusPrev
+
+/// Subscription combinators.
+module Sub =
+  /// Transform the message type of a subscription.
+  let map (f: 'a -> 'b) (sub: Sub<'a>) : Sub<'b> =
+    match sub with
+    | KeySub handler -> KeySub(fun input -> handler input |> Option.map f)
+    | MouseSub handler -> MouseSub(fun input -> handler input |> Option.map f)
+    | ClickSub handler -> ClickSub(fun input -> handler input |> Option.map f)
+    | FocusSub handler -> FocusSub(fun input -> handler input |> Option.map f)
+    | TimerSub(id, interval, tick) -> TimerSub(id, interval, tick >> f)
+    | ResizeSub handler -> ResizeSub(fun input -> handler input |> f)
+    | CustomSub(id, start) ->
+      CustomSub(id, fun dispatch ct -> start (f >> dispatch) ct)
 
 /// The Elm Architecture program definition. Init/Update/View/Subscribe.
 type Program<'model, 'msg> = {

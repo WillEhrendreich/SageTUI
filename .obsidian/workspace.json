@@ -185,6 +185,11 @@
   },
   "active": "ac394dc03ed8186e",
   "lastOpenFiles": [
+    "SageTUI.Tests/obj/Debug/net10.0/g4jbsfj3.knw~",
+    "SageTUI.Html/obj/Debug/net10.0/0f3enqav.by2~",
+    "obj/Debug/net10.0/tw2m5bti.e20~",
+    "expertPanel/wave4-incredible-deliberation.md",
+    "API_ERGONOMICS_ANALYSIS.md",
     "LICENSE",
     "bin/Debug/net10.0/SageTUI.Library.xml",
     "bin/Release/SageTUI.0.1.0-preview.1.nupkg",
@@ -193,9 +198,6 @@
     "bin/Release/net10.0/SageTUI.Library.xml",
     "bin/Release/net10.0/SageTUI.Library.pdb",
     "obj/Release/net10.0/ref/SageTUI.Library.dll",
-    "bin/Release/net10.0/SageTUI.Library.dll",
-    "bin/Release/net10.0/SageTUI.Library.deps.json",
-    "obj/Release/net10.0/SageTUI.Library.pdb",
     "expertPanel/ship-nuget-deliberation.md",
     "README.md",
     "expertPanel/incredible-roadmap-deliberation.md",
@@ -218,8 +220,6 @@
     "expertPanel/_tmp/sec_4_buffer.md",
     "expertPanel/_tmp/sec_4_ansi.md",
     "expertPanel/_tmp/sec_3_7_el.md",
-    "expertPanel/_tmp/sec_3_6_note.md",
-    "expertPanel/_tmp/sec_3_9_transitions.md",
-    "expertPanel/_tmp/sec_3_8_arena.md"
+    "expertPanel/_tmp/sec_3_6_note.md"
   ]
 }
