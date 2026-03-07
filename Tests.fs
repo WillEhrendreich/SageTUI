@@ -2355,6 +2355,200 @@ let spinnerTests = testList "Spinner" [
     | _ -> failwith "expected wrap"
 ]
 
+// ============================================================
+// Phase 9: View Transitions Runtime Tests
+// ============================================================
+
+let lerpPackedColorTests = testList "TransitionFx.lerpPackedColor" [
+  testCase "both RGB t=0 returns first" <| fun () ->
+    let a = PackedColor.pack (Rgb(255uy, 0uy, 0uy))
+    let b = PackedColor.pack (Rgb(0uy, 0uy, 255uy))
+    TransitionFx.lerpPackedColor 0.0 a b |> Expect.equal "t=0 returns a" a
+  testCase "both RGB t=1 returns second" <| fun () ->
+    let a = PackedColor.pack (Rgb(255uy, 0uy, 0uy))
+    let b = PackedColor.pack (Rgb(0uy, 0uy, 255uy))
+    TransitionFx.lerpPackedColor 1.0 a b |> Expect.equal "t=1 returns b" b
+  testCase "both RGB t=0.5 midpoint" <| fun () ->
+    let a = PackedColor.pack (Rgb(0uy, 0uy, 0uy))
+    let b = PackedColor.pack (Rgb(200uy, 100uy, 50uy))
+    let result = TransitionFx.lerpPackedColor 0.5 a b
+    let unpacked = PackedColor.unpack result
+    match unpacked with
+    | Rgb(r, g, bl) ->
+      r |> Expect.equal "r mid" 100uy
+      g |> Expect.equal "g mid" 50uy
+      bl |> Expect.equal "b mid" 25uy
+    | _ -> failwith "expected RGB"
+  testCase "mixed types t<0.5 returns first" <| fun () ->
+    let a = PackedColor.pack Default
+    let b = PackedColor.pack (Rgb(255uy, 0uy, 0uy))
+    TransitionFx.lerpPackedColor 0.3 a b |> Expect.equal "returns a" a
+  testCase "mixed types t>=0.5 returns second" <| fun () ->
+    let a = PackedColor.pack Default
+    let b = PackedColor.pack (Rgb(255uy, 0uy, 0uy))
+    TransitionFx.lerpPackedColor 0.7 a b |> Expect.equal "returns b" b
+]
+
+let lerpCellTests = testList "TransitionFx.lerpCell" [
+  testCase "t=0 keeps old rune and attrs" <| fun () ->
+    let old = PackedCell.create (int 'A') 0 0 1us
+    let new' = PackedCell.create (int 'B') 0 0 2us
+    let result = TransitionFx.lerpCell 0.0 old new'
+    result.Rune |> Expect.equal "rune" (int 'A')
+    result.Attrs |> Expect.equal "attrs" 1us
+  testCase "t=1 uses new rune and attrs" <| fun () ->
+    let old = PackedCell.create (int 'A') 0 0 1us
+    let new' = PackedCell.create (int 'B') 0 0 2us
+    let result = TransitionFx.lerpCell 1.0 old new'
+    result.Rune |> Expect.equal "rune" (int 'B')
+    result.Attrs |> Expect.equal "attrs" 2us
+  testCase "t=0.5 switches to new rune" <| fun () ->
+    let old = PackedCell.create (int 'A') 0 0 0us
+    let new' = PackedCell.create (int 'B') 0 0 0us
+    let result = TransitionFx.lerpCell 0.5 old new'
+    result.Rune |> Expect.equal "rune" (int 'B')
+]
+
+let wipeTests = testList "TransitionFx.applyWipe" [
+  testCase "wipe right at t=0 shows all old" <| fun () ->
+    let buf = Buffer.create 3 1
+    let old = [| PackedCell.create (int 'A') 0 0 0us
+                 PackedCell.create (int 'B') 0 0 0us
+                 PackedCell.create (int 'C') 0 0 0us |]
+    let new' = [| PackedCell.create (int 'X') 0 0 0us
+                  PackedCell.create (int 'Y') 0 0 0us
+                  PackedCell.create (int 'Z') 0 0 0us |]
+    TransitionFx.applyWipe 0.0 Direction.Right old new' 0 3 1 buf
+    buf.Cells.[0].Rune |> Expect.equal "col0" (int 'A')
+    buf.Cells.[1].Rune |> Expect.equal "col1" (int 'B')
+    buf.Cells.[2].Rune |> Expect.equal "col2" (int 'C')
+  testCase "wipe right at t=1 shows all new" <| fun () ->
+    let buf = Buffer.create 3 1
+    let old = [| PackedCell.create (int 'A') 0 0 0us
+                 PackedCell.create (int 'B') 0 0 0us
+                 PackedCell.create (int 'C') 0 0 0us |]
+    let new' = [| PackedCell.create (int 'X') 0 0 0us
+                  PackedCell.create (int 'Y') 0 0 0us
+                  PackedCell.create (int 'Z') 0 0 0us |]
+    TransitionFx.applyWipe 1.0 Direction.Right old new' 0 3 1 buf
+    buf.Cells.[0].Rune |> Expect.equal "col0" (int 'X')
+    buf.Cells.[1].Rune |> Expect.equal "col1" (int 'Y')
+    buf.Cells.[2].Rune |> Expect.equal "col2" (int 'Z')
+  testCase "wipe right at t=0.5 reveals first half" <| fun () ->
+    let buf = Buffer.create 4 1
+    let old = Array.init 4 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let new' = Array.init 4 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applyWipe 0.5 Direction.Right old new' 0 4 1 buf
+    buf.Cells.[0].Rune |> Expect.equal "col0 revealed" (int 'N')
+    buf.Cells.[1].Rune |> Expect.equal "col1 revealed" (int 'N')
+    buf.Cells.[2].Rune |> Expect.equal "col2 old" (int 'O')
+    buf.Cells.[3].Rune |> Expect.equal "col3 old" (int 'O')
+]
+
+let dissolveTests = testList "TransitionFx.applyDissolve" [
+  testCase "dissolve at t=0 shows all old" <| fun () ->
+    let buf = Buffer.create 4 1
+    let order = TransitionFx.fisherYatesShuffle 42 4
+    let old = Array.init 4 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let new' = Array.init 4 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applyDissolve 0.0 order old new' 0 4 1 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "old" (int 'O'))
+  testCase "dissolve at t=1 shows all new" <| fun () ->
+    let buf = Buffer.create 4 1
+    let order = TransitionFx.fisherYatesShuffle 42 4
+    let old = Array.init 4 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let new' = Array.init 4 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applyDissolve 1.0 order old new' 0 4 1 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "new" (int 'N'))
+  testCase "fisher-yates produces permutation" <| fun () ->
+    let order = TransitionFx.fisherYatesShuffle 42 10
+    order.Length |> Expect.equal "length" 10
+    order |> Array.sort |> Expect.equal "all indices present" [| 0..9 |]
+  testCase "fisher-yates is deterministic" <| fun () ->
+    let a = TransitionFx.fisherYatesShuffle 42 10
+    let b = TransitionFx.fisherYatesShuffle 42 10
+    a |> Expect.equal "same seed same result" b
+]
+
+let reconcileTests = testList "Reconcile" [
+  testCase "empty tree has no keyed elements" <| fun () ->
+    Reconcile.findKeyedElements Empty
+    |> Map.isEmpty
+    |> Expect.isTrue "empty"
+  testCase "finds keyed element" <| fun () ->
+    let el = El.text "hello" |> El.viewTransition "k1"
+    let keys = Reconcile.findKeyedElements el
+    keys |> Map.containsKey "k1" |> Expect.isTrue "found k1"
+  testCase "finds nested keyed elements" <| fun () ->
+    let el =
+      El.row [
+        El.text "a" |> El.viewTransition "k1"
+        El.text "b" |> El.viewTransition "k2"
+      ]
+    let keys = Reconcile.findKeyedElements el
+    keys.Count |> Expect.equal "2 keys" 2
+  testCase "reconcile detects entering elements" <| fun () ->
+    let oldKeys = Map.empty
+    let newKeys = Map.ofList [ "k1", Empty ]
+    let (entering, _, _) = Reconcile.reconcile oldKeys newKeys
+    entering.Length |> Expect.equal "1 entering" 1
+  testCase "reconcile detects exiting elements" <| fun () ->
+    let oldKeys = Map.ofList [ "k1", Empty ]
+    let newKeys = Map.empty
+    let (_, exiting, _) = Reconcile.reconcile oldKeys newKeys
+    exiting.Length |> Expect.equal "1 exiting" 1
+  testCase "reconcile detects staying elements" <| fun () ->
+    let oldKeys = Map.ofList [ "k1", Empty ]
+    let newKeys = Map.ofList [ "k1", Empty ]
+    let (entering, exiting, staying) = Reconcile.reconcile oldKeys newKeys
+    entering.Length |> Expect.equal "0 entering" 0
+    exiting.Length |> Expect.equal "0 exiting" 0
+    staying.Length |> Expect.equal "1 staying" 1
+]
+
+let durationTests = testList "TransitionDuration" [
+  testCase "Fade duration" <| fun () ->
+    TransitionDuration.get (Fade 200<ms>) |> Expect.equal "200" 200
+  testCase "ColorMorph duration" <| fun () ->
+    TransitionDuration.get (ColorMorph 150<ms>) |> Expect.equal "150" 150
+  testCase "Wipe duration" <| fun () ->
+    TransitionDuration.get (Wipe(Direction.Right, 300<ms>)) |> Expect.equal "300" 300
+  testCase "Sequence sums durations" <| fun () ->
+    TransitionDuration.get (Sequence [Fade 100<ms>; ColorMorph 200<ms>])
+    |> Expect.equal "300" 300
+  testCase "Custom defaults to 200" <| fun () ->
+    TransitionDuration.get (Custom (fun _ a _ -> a))
+    |> Expect.equal "200" 200
+]
+
+let activeTransitionTests = testList "ActiveTransition" [
+  testCase "progress at start = 0" <| fun () ->
+    let at = { Key = "k"; Transition = ColorMorph 200<ms>; StartMs = 1000L
+               DurationMs = 200; Easing = Ease.linear
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+    ActiveTransition.progress 1000L at |> Expect.equal "start" 0.0
+  testCase "progress at end = 1" <| fun () ->
+    let at = { Key = "k"; Transition = ColorMorph 200<ms>; StartMs = 1000L
+               DurationMs = 200; Easing = Ease.linear
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+    ActiveTransition.progress 1200L at |> Expect.equal "end" 1.0
+  testCase "isDone at end" <| fun () ->
+    let at = { Key = "k"; Transition = Fade 200<ms>; StartMs = 1000L
+               DurationMs = 200; Easing = Ease.linear
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+    ActiveTransition.isDone 1200L at |> Expect.isTrue "done"
+  testCase "not done before end" <| fun () ->
+    let at = { Key = "k"; Transition = Fade 200<ms>; StartMs = 1000L
+               DurationMs = 200; Easing = Ease.linear
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+    ActiveTransition.isDone 1100L at |> Expect.isFalse "not done"
+  testCase "easing applied to progress" <| fun () ->
+    let at = { Key = "k"; Transition = ColorMorph 200<ms>; StartMs = 0L
+               DurationMs = 200; Easing = Ease.quadOut
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+    ActiveTransition.progress 100L at |> Expect.equal "quadOut at 0.5" 0.75
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -2443,5 +2637,14 @@ let allTests = testList "All" [
     gradientHorizontalTests
     gradientRainbowTests
     spinnerTests
+  ]
+  testList "Phase 9" [
+    lerpPackedColorTests
+    lerpCellTests
+    wipeTests
+    dissolveTests
+    reconcileTests
+    durationTests
+    activeTransitionTests
   ]
 ]
