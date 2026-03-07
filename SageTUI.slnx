@@ -2,6 +2,15 @@
   <Folder Name="/examples/">
     <Project Path="examples\Counter\Counter.fsproj" />
   </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples\01-HelloWorld\HelloWorld.fsproj" />
+    <Project Path="samples\02-Dashboard\Dashboard.fsproj" />
+    <Project Path="samples\03-HtmlRenderer\HtmlRenderer.fsproj" />
+    <Project Path="samples\04-InteractiveForm\InteractiveForm.fsproj" />
+    <Project Path="samples\05-ColorPalette\ColorPalette.fsproj" />
+    <Project Path="samples\06-Kanban\Kanban.fsproj" />
+    <Project Path="samples\07-Transitions\Transitions.fsproj" />
+  </Folder>
   <Project Path="SageTUI.Html/SageTUI.Html.fsproj" />
   <Project Path="SageTUI.Library.fsproj" />
   <Project Path="SageTUI.Tests\SageTUI.Tests.fsproj" />
