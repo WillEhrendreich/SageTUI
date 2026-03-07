@@ -2251,6 +2251,110 @@ let eventDispatchTests = testList "Event dispatch" [
     App.run backend prog
 ]
 
+// ============================================================
+// Phase 8: Animation Helper Tests
+// ============================================================
+
+let animLerpTests = testList "Anim.lerp" [
+  testCase "lerp at t=0 returns a" <| fun () ->
+    Anim.lerp 10.0 20.0 0.0 |> Expect.equal "t=0" 10.0
+  testCase "lerp at t=1 returns b" <| fun () ->
+    Anim.lerp 10.0 20.0 1.0 |> Expect.equal "t=1" 20.0
+  testCase "lerp at t=0.5 returns midpoint" <| fun () ->
+    Anim.lerp 0.0 100.0 0.5 |> Expect.equal "mid" 50.0
+  testCase "lerpInt at t=0 returns a" <| fun () ->
+    Anim.lerpInt 0 10 0.0 |> Expect.equal "t=0" 0
+  testCase "lerpInt at t=1 returns b" <| fun () ->
+    Anim.lerpInt 0 10 1.0 |> Expect.equal "t=1" 10
+  testCase "lerpInt at t=0.5 returns midpoint" <| fun () ->
+    Anim.lerpInt 0 100 0.5 |> Expect.equal "mid" 50
+]
+
+let animProgressTests = testList "Anim.progress" [
+  testCase "progress at start = 0.0" <| fun () ->
+    Anim.progress 1000L 1000L 200 |> Expect.equal "start" 0.0
+  testCase "progress at end = 1.0" <| fun () ->
+    Anim.progress 1000L 1200L 200 |> Expect.equal "end" 1.0
+  testCase "progress past end clamped to 1.0" <| fun () ->
+    Anim.progress 1000L 2000L 200 |> Expect.equal "past" 1.0
+  testCase "progress before start clamped to 0.0" <| fun () ->
+    Anim.progress 1000L 500L 200 |> Expect.equal "before" 0.0
+  testCase "progress halfway = 0.5" <| fun () ->
+    Anim.progress 1000L 1100L 200 |> Expect.equal "half" 0.5
+]
+
+let animIsDoneTests = testList "Anim.isDone" [
+  testCase "not done at start" <| fun () ->
+    Anim.isDone 1000L 1000L 200 |> Expect.isFalse "not done"
+  testCase "done at exact end" <| fun () ->
+    Anim.isDone 1000L 1200L 200 |> Expect.isTrue "done"
+  testCase "done past end" <| fun () ->
+    Anim.isDone 1000L 2000L 200 |> Expect.isTrue "past"
+]
+
+let gradientLerpRgbTests = testList "Gradient.lerpRgb" [
+  testCase "t=0 returns start color" <| fun () ->
+    Gradient.lerpRgb (255uy, 0uy, 0uy) (0uy, 0uy, 255uy) 0.0
+    |> Expect.equal "start" (255uy, 0uy, 0uy)
+  testCase "t=1 returns end color" <| fun () ->
+    Gradient.lerpRgb (255uy, 0uy, 0uy) (0uy, 0uy, 255uy) 1.0
+    |> Expect.equal "end" (0uy, 0uy, 255uy)
+  testCase "t=0.5 returns midpoint" <| fun () ->
+    let (r, g, b) = Gradient.lerpRgb (0uy, 0uy, 0uy) (200uy, 100uy, 50uy) 0.5
+    r |> Expect.equal "r" 100uy
+    g |> Expect.equal "g" 50uy
+    b |> Expect.equal "b" 25uy
+]
+
+let gradientHorizontalTests = testList "Gradient.horizontal" [
+  testCase "single char gradient" <| fun () ->
+    match Gradient.horizontal (255uy, 0uy, 0uy) (0uy, 0uy, 255uy) 1 "A" with
+    | Row [Styled(_, Text("A", _))] -> ()
+    | other -> failwith (sprintf "unexpected: %A" other)
+  testCase "multi-char gradient has correct length" <| fun () ->
+    match Gradient.horizontal (255uy, 0uy, 0uy) (0uy, 0uy, 255uy) 5 "Hello" with
+    | Row children -> children.Length |> Expect.equal "5 chars" 5
+    | _ -> failwith "expected Row"
+]
+
+let gradientRainbowTests = testList "Gradient.rainbow" [
+  testCase "rainbow produces Row with correct length" <| fun () ->
+    match Gradient.rainbow 7 "Rainbow" with
+    | Row children -> children.Length |> Expect.equal "7 chars" 7
+    | _ -> failwith "expected Row"
+  testCase "hueToRgb at 0 = red" <| fun () ->
+    let (r, _, b) = Gradient.hueToRgb 0.0
+    r |> Expect.equal "r" 255uy
+    b |> Expect.equal "b" 0uy
+]
+
+let spinnerTests = testList "Spinner" [
+  testCase "dots at 0ms returns first frame" <| fun () ->
+    match Spinner.dots 0L with
+    | Text("⠋", _) -> ()
+    | _ -> failwith "expected first frame"
+  testCase "dots cycles through frames" <| fun () ->
+    match Spinner.dots 80L with
+    | Text("⠙", _) -> ()
+    | _ -> failwith "expected second frame"
+  testCase "dots wraps around" <| fun () ->
+    match Spinner.dots (80L * 10L) with
+    | Text("⠋", _) -> ()
+    | _ -> failwith "expected wrap to first"
+  testCase "line at 0ms returns first frame" <| fun () ->
+    match Spinner.line 0L with
+    | Text("-", _) -> ()
+    | _ -> failwith "expected first frame"
+  testCase "line cycles through frames" <| fun () ->
+    match Spinner.line 100L with
+    | Text("\\", _) -> ()
+    | _ -> failwith "expected second frame"
+  testCase "line wraps around" <| fun () ->
+    match Spinner.line 400L with
+    | Text("-", _) -> ()
+    | _ -> failwith "expected wrap"
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -2330,5 +2434,14 @@ let allTests = testList "All" [
     cmdInterpretTests
     subscriptionTests2
     eventDispatchTests
+  ]
+  testList "Phase 8" [
+    animLerpTests
+    animProgressTests
+    animIsDoneTests
+    gradientLerpRgbTests
+    gradientHorizontalTests
+    gradientRainbowTests
+    spinnerTests
   ]
 ]
