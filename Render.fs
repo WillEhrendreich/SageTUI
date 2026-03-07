@@ -42,7 +42,7 @@ module Render =
         let contentWidths = Measure.childWidths children
         let areas = Layout.splitHWithContent constraints contentWidths area
         List.iter2 (fun childArea child ->
-          render childArea inheritedStyle buf child) areas unwrapped
+          render (Layout.intersectArea area childArea) inheritedStyle buf child) areas unwrapped
 
       | Column children ->
         let constraints = children |> List.map extractConstraint
@@ -50,7 +50,7 @@ module Render =
         let contentHeights = Measure.childHeights children
         let areas = Layout.splitVWithContent constraints contentHeights area
         List.iter2 (fun childArea child ->
-          render childArea inheritedStyle buf child) areas unwrapped
+          render (Layout.intersectArea area childArea) inheritedStyle buf child) areas unwrapped
 
       | Overlay layers ->
         layers |> List.iter (render area inheritedStyle buf)
@@ -94,13 +94,13 @@ module Render =
           let contentWidths = Measure.childWidths children
           let areas = Layout.splitHWithGap gap constraints contentWidths area
           List.iter2 (fun childArea c ->
-            render childArea inheritedStyle buf c) areas unwrapped
+            render (Layout.intersectArea area childArea) inheritedStyle buf c) areas unwrapped
         | Column children ->
           let constraints = children |> List.map extractConstraint
           let unwrapped = children |> List.map unwrapConstrained
           let contentHeights = Measure.childHeights children
           let areas = Layout.splitVWithGap gap constraints contentHeights area
           List.iter2 (fun childArea c ->
-            render childArea inheritedStyle buf c) areas unwrapped
+            render (Layout.intersectArea area childArea) inheritedStyle buf c) areas unwrapped
         | other ->
           render area inheritedStyle buf other

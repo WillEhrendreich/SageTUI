@@ -120,15 +120,24 @@ module Layout =
             sizes[i] <- contentArr[i] + perExtra + bonus
           | _ -> ())
       | false ->
-        // Not enough space: greedy content-first allocation
-        let mutable pool = remaining
-        constraints |> List.iteri (fun i c ->
-          match c with
-          | Fill ->
-            let give = min contentArr[i] pool
-            sizes[i] <- give
-            pool <- pool - give
-          | _ -> ())
+        // Not enough space: proportional shrink (flex-shrink)
+        let fillItems =
+          constraints |> List.mapi (fun i c ->
+            match c with
+            | Fill -> Some(i, contentArr[i])
+            | _ -> None)
+          |> List.choose id
+        let totalContent = fillItems |> List.sumBy snd
+        match totalContent with
+        | 0 -> ()
+        | _ ->
+          let pool = max 0 remaining
+          let sized = fillItems |> List.map (fun (i, c) -> (i, c * pool / totalContent))
+          let used = sized |> List.sumBy snd
+          let mutable rem = pool - used
+          sized |> List.iter (fun (i, s) ->
+            let bonus = match rem > 0 with | true -> rem <- rem - 1; 1 | false -> 0
+            sizes[i] <- s + bonus)
     | false -> ()
 
     let mutable offset = 0
@@ -199,6 +208,13 @@ module Layout =
     let w = min contentW area.Width
     let h = min contentH area.Height
     { X = max area.X x; Y = max area.Y y; Width = w; Height = h }
+
+  let intersectArea (parent: Area) (child: Area) : Area =
+    let x1 = max parent.X child.X
+    let y1 = max parent.Y child.Y
+    let x2 = min (parent.X + parent.Width) (child.X + child.Width)
+    let y2 = min (parent.Y + parent.Height) (child.Y + child.Height)
+    { X = x1; Y = y1; Width = max 0 (x2 - x1); Height = max 0 (y2 - y1) }
 
   let solveWithGap (gap: int) (available: int) (constraints: Constraint list) (contentSizes: int list) : (int * int) list =
     let n = List.length constraints

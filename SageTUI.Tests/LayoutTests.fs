@@ -864,6 +864,120 @@ let gapTests = testList "Gap" [
 ]
 
 // ═══════════════════════════════════════════════════════════════════════
+// PHASE 6: Overflow Clipping
+// intersectArea clips child areas to parent bounds
+// ═══════════════════════════════════════════════════════════════════════
+
+let overflowClippingTests = testList "Overflow Clipping" [
+  testCase "intersectArea: child extends right of parent" <| fun () ->
+    let parent = areaAt 0 0 10 5
+    let child = areaAt 5 0 10 5
+    let clipped = Layout.intersectArea parent child
+    clipped.X |> Expect.equal "x" 5
+    clipped.Width |> Expect.equal "width clipped to 5" 5
+
+  testCase "intersectArea: child extends below parent" <| fun () ->
+    let parent = areaAt 0 0 10 5
+    let child = areaAt 0 3 10 5
+    let clipped = Layout.intersectArea parent child
+    clipped.Y |> Expect.equal "y" 3
+    clipped.Height |> Expect.equal "height clipped to 2" 2
+
+  testCase "intersectArea: child fully inside parent unchanged" <| fun () ->
+    let parent = areaAt 0 0 20 20
+    let child = areaAt 5 5 5 5
+    Layout.intersectArea parent child |> Expect.equal "unchanged" child
+
+  testCase "intersectArea: no overlap returns zero area" <| fun () ->
+    let parent = areaAt 0 0 10 10
+    let child = areaAt 20 20 5 5
+    let clipped = Layout.intersectArea parent child
+    clipped.Width |> Expect.equal "zero width" 0
+    clipped.Height |> Expect.equal "zero height" 0
+
+  testCase "intersectArea: child extends both directions" <| fun () ->
+    let parent = areaAt 5 5 10 10
+    let child = areaAt 0 0 20 20
+    Layout.intersectArea parent child |> Expect.equal "clipped to parent" parent
+
+  testCase "intersectArea: parent with offset clips correctly" <| fun () ->
+    let parent = areaAt 10 10 5 5
+    let child = areaAt 12 12 5 5
+    let clipped = Layout.intersectArea parent child
+    clipped.X |> Expect.equal "x" 12
+    clipped.Y |> Expect.equal "y" 12
+    clipped.Width |> Expect.equal "width" 3
+    clipped.Height |> Expect.equal "height" 3
+
+  testCase "column: overflow children clipped at render" <| fun () ->
+    // 3 rows of text (content height 1 each) in 2-tall container
+    let elem = El.column [El.text "A"; El.text "B"; El.text "C"]
+    let buf = renderToBuffer 5 2 elem
+    // With proportional shrink: [1,1,0] — C gets 0 height, nothing rendered
+    charAt 0 0 buf |> Expect.equal "first row" 'A'
+    charAt 0 1 buf |> Expect.equal "second row" 'B'
+
+  testCase "row: overflow children clipped at render" <| fun () ->
+    // 3 columns of text in 5-wide container: "AB" "CD" "EF" → total 6 > 5
+    let elem = El.row [
+      Constrained(Fixed 2, Text("AB", Style.empty))
+      Constrained(Fixed 2, Text("CD", Style.empty))
+      Constrained(Fixed 2, Text("EF", Style.empty))
+    ]
+    let buf = renderToBuffer 5 1 elem
+    // Fixed(2)+Fixed(2)+Fixed(2) in 5: first=2, second=2, third=min(2,1)=1
+    // Third clipped to 1 char: "E" not "EF"
+    charAt 0 0 buf |> Expect.equal "first" 'A'
+    charAt 1 0 buf |> Expect.equal "first" 'B'
+    charAt 2 0 buf |> Expect.equal "second" 'C'
+    charAt 3 0 buf |> Expect.equal "second" 'D'
+    charAt 4 0 buf |> Expect.equal "third clipped" 'E'
+]
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 7: Flex-shrink (Proportional)
+// When Fill children's content > available, shrink proportionally
+// ═══════════════════════════════════════════════════════════════════════
+
+let flexShrinkTests = testList "Flex-shrink proportional" [
+  testCase "equal content shrunk proportionally" <| fun () ->
+    let result = Layout.solveWithContent 10 [Fill; Fill; Fill] [5; 5; 5]
+    let sizes = result |> List.map snd
+    sizes |> Expect.equal "proportional [4,3,3]" [4; 3; 3]
+
+  testCase "unequal content shrunk proportionally" <| fun () ->
+    let result = Layout.solveWithContent 5 [Fill; Fill] [8; 2]
+    let sizes = result |> List.map snd
+    sizes |> Expect.equal "proportional [4,1]" [4; 1]
+
+  testCase "single Fill overflows" <| fun () ->
+    let result = Layout.solveWithContent 3 [Fill] [10]
+    let sizes = result |> List.map snd
+    sizes |> Expect.equal "clamped to 3" [3]
+
+  testCase "mixed Fixed + Fill overflow: Fixed preserved" <| fun () ->
+    let result = Layout.solveWithContent 10 [Fixed 6; Fill] [6; 8]
+    let sizes = result |> List.map snd
+    sizes |> Expect.equal "fixed 6, fill 4" [6; 4]
+
+  testCase "total sizes never exceed available" <| fun () ->
+    let result = Layout.solveWithContent 10 [Fill; Fill; Fill; Fill] [10; 10; 10; 10]
+    let total = result |> List.sumBy snd
+    total |> Expect.equal "total = 10" 10
+
+  testCase "no shrink when content fits" <| fun () ->
+    let result = Layout.solveWithContent 20 [Fill; Fill] [3; 3]
+    let sizes = result |> List.map snd
+    // Excess 14 split equally: each gets 3 + 7 = 10
+    sizes |> Expect.equal "equal split" [10; 10]
+
+  testCase "Arena parity: overflow clipping" <| fun () ->
+    let elem = El.column [El.text "A"; El.text "B"; El.text "C"]
+    let (tree, arena) = arenaHelper elem 5 2
+    arena.Cells |> Expect.sequenceEqual "arena matches tree" tree.Cells
+]
+
+// ═══════════════════════════════════════════════════════════════════════
 // Combined test list for export
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -882,4 +996,6 @@ let allLayoutTests = testList "MDN CSS Layout Compliance" [
   edgeCaseTests
   alignmentTests
   gapTests
+  overflowClippingTests
+  flexShrinkTests
 ]

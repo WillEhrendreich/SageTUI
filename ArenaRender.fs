@@ -189,7 +189,7 @@ module ArenaRender =
           i <- i + 1
         let areas = Layout.splitHWithContent (Array.toList constraints) (Array.toList contentWidths) area
         List.iteri (fun j childArea ->
-          render arena childNodes.[j] childArea inheritedFg inheritedBg inheritedAttrs buf) areas
+          render arena childNodes.[j] (Layout.intersectArea area childArea) inheritedFg inheritedBg inheritedAttrs buf) areas
 
       | 3uy -> // Column
         let n = countChildren arena node.FirstChild
@@ -213,7 +213,7 @@ module ArenaRender =
           i <- i + 1
         let areas = Layout.splitVWithContent (Array.toList constraints) (Array.toList contentHeights) area
         List.iteri (fun j childArea ->
-          render arena childNodes.[j] childArea inheritedFg inheritedBg inheritedAttrs buf) areas
+          render arena childNodes.[j] (Layout.intersectArea area childArea) inheritedFg inheritedBg inheritedAttrs buf) areas
 
       | 4uy -> // Overlay
         let mutable idx = node.FirstChild
@@ -291,7 +291,7 @@ module ArenaRender =
             i <- i + 1
           let areas = Layout.splitHWithGap gap (Array.toList constraints) (Array.toList contentWidths) area
           List.iteri (fun j childArea ->
-            render arena childNodes.[j] childArea inheritedFg inheritedBg inheritedAttrs buf) areas
+            render arena childNodes.[j] (Layout.intersectArea area childArea) inheritedFg inheritedBg inheritedAttrs buf) areas
         | 3uy -> // Column inside Gapped
           let n = countChildren arena childNode.FirstChild
           let constraints = Array.zeroCreate<Constraint> n
@@ -314,7 +314,7 @@ module ArenaRender =
             i <- i + 1
           let areas = Layout.splitVWithGap gap (Array.toList constraints) (Array.toList contentHeights) area
           List.iteri (fun j childArea ->
-            render arena childNodes.[j] childArea inheritedFg inheritedBg inheritedAttrs buf) areas
+            render arena childNodes.[j] (Layout.intersectArea area childArea) inheritedFg inheritedBg inheritedAttrs buf) areas
         | _ ->
           render arena node.FirstChild area inheritedFg inheritedBg inheritedAttrs buf
 
