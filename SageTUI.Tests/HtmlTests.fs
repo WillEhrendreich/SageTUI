@@ -260,6 +260,201 @@ let htmlRoundtripTests = testList "Html.Roundtrip" [
     | other -> failwithf "expected Bordered Light, got %A" other
 ]
 
+// === HtmlString tests: raw HTML string → Element ===
+
+let htmlStringBasicTests = testList "HtmlString.Basic" [
+  testCase "plain text" <| fun () ->
+    let el = HtmlString.parseFragment "hello world"
+    match el with
+    | Text ("hello world", _) -> ()
+    | other -> failwithf "expected Text, got %A" other
+
+  testCase "span with text" <| fun () ->
+    let el = HtmlString.parseFragment "<span>hello</span>"
+    match el with
+    | Text ("hello", _) -> ()
+    | other -> failwithf "expected Text hello, got %A" other
+
+  testCase "div with text" <| fun () ->
+    let el = HtmlString.parseFragment "<div>content</div>"
+    match el with
+    | Text ("content", _) -> ()
+    | other -> failwithf "expected Text content, got %A" other
+
+  testCase "empty string" <| fun () ->
+    let el = HtmlString.parseFragment ""
+    match el with
+    | Element.Empty -> ()
+    | other -> failwithf "expected Empty, got %A" other
+]
+
+let htmlStringSemanticTests = testList "HtmlString.Semantic" [
+  testCase "bold tag" <| fun () ->
+    let el = HtmlString.parseFragment "<b>bold</b>"
+    match el with
+    | Styled (s, Text ("bold", _)) ->
+      TextAttrs.has TextAttrs.bold s.Attrs
+      |> Expect.isTrue "has bold"
+    | other -> failwithf "expected Styled bold, got %A" other
+
+  testCase "strong tag" <| fun () ->
+    let el = HtmlString.parseFragment "<strong>strong</strong>"
+    match el with
+    | Styled (s, Text ("strong", _)) ->
+      TextAttrs.has TextAttrs.bold s.Attrs
+      |> Expect.isTrue "has bold"
+    | other -> failwithf "expected Styled bold, got %A" other
+
+  testCase "italic tag" <| fun () ->
+    let el = HtmlString.parseFragment "<em>italic</em>"
+    match el with
+    | Styled (s, Text ("italic", _)) ->
+      TextAttrs.has TextAttrs.italic s.Attrs
+      |> Expect.isTrue "has italic"
+    | other -> failwithf "expected Styled italic, got %A" other
+
+  testCase "underline tag" <| fun () ->
+    let el = HtmlString.parseFragment "<u>underline</u>"
+    match el with
+    | Styled (s, Text ("underline", _)) ->
+      TextAttrs.has TextAttrs.underline s.Attrs
+      |> Expect.isTrue "has underline"
+    | other -> failwithf "expected Styled underline, got %A" other
+
+  testCase "link tag → cyan underline" <| fun () ->
+    let el = HtmlString.parseFragment """<a href="#">link</a>"""
+    match el with
+    | Styled (s, Text ("link", _)) ->
+      s.Fg |> Expect.isSome "has fg color"
+      TextAttrs.has TextAttrs.underline s.Attrs
+      |> Expect.isTrue "has underline"
+    | other -> failwithf "expected Styled link, got %A" other
+
+  testCase "heading → bold" <| fun () ->
+    let el = HtmlString.parseFragment "<h1>Title</h1>"
+    match el with
+    | Styled (s, Text ("Title", _)) ->
+      TextAttrs.has TextAttrs.bold s.Attrs
+      |> Expect.isTrue "has bold"
+    | other -> failwithf "expected Styled bold heading, got %A" other
+
+  testCase "list items → bullets" <| fun () ->
+    let el = HtmlString.parseFragment "<ul><li>one</li><li>two</li></ul>"
+    match el with
+    | Column items ->
+      items |> List.length |> Expect.equal "2 items" 2
+    | other -> failwithf "expected Column of items, got %A" other
+]
+
+let htmlStringCssTests = testList "HtmlString.CSS" [
+  testCase "inline color" <| fun () ->
+    let el = HtmlString.parseFragment """<span style="color:red">red text</span>"""
+    match el with
+    | Text (s, style) ->
+      s |> Expect.equal "text" "red text"
+      style.Fg |> Expect.isSome "has fg"
+    | other -> failwithf "expected styled Text, got %A" other
+
+  testCase "hex color" <| fun () ->
+    let el = HtmlString.parseFragment """<span style="color:#ff0080">hex</span>"""
+    match el with
+    | Text (_, style) ->
+      match style.Fg with
+      | Some (Color.Rgb (255uy, 0uy, 128uy)) -> ()
+      | other -> failwithf "expected Rgb(255,0,128), got %A" other
+    | other -> failwithf "expected Text, got %A" other
+
+  testCase "short hex color" <| fun () ->
+    let el = HtmlString.parseFragment """<span style="color:#f00">short hex</span>"""
+    match el with
+    | Text (_, style) ->
+      match style.Fg with
+      | Some (Color.Rgb (255uy, 0uy, 0uy)) -> ()
+      | other -> failwithf "expected Rgb(255,0,0), got %A" other
+    | other -> failwithf "expected Text, got %A" other
+
+  testCase "flex row" <| fun () ->
+    let el = HtmlString.parseFragment """<div style="display:flex;flex-direction:row"><span>a</span><span>b</span></div>"""
+    match el with
+    | Row children ->
+      children |> List.length |> Expect.equal "2 children" 2
+    | other -> failwithf "expected Row, got %A" other
+
+  testCase "flex column" <| fun () ->
+    let el = HtmlString.parseFragment """<div style="display:flex;flex-direction:column"><span>a</span><span>b</span></div>"""
+    match el with
+    | Column children ->
+      children |> List.length |> Expect.equal "2 children" 2
+    | other -> failwithf "expected Column, got %A" other
+
+  testCase "border" <| fun () ->
+    let el = HtmlString.parseFragment """<div style="border:1px solid"><span>box</span></div>"""
+    match el with
+    | Bordered (Light, _) -> ()
+    | other -> failwithf "expected Bordered Light, got %A" other
+
+  testCase "padding" <| fun () ->
+    let el = HtmlString.parseFragment """<div style="padding:2ch 2ch 2ch 2ch"><span>pad</span></div>"""
+    match el with
+    | Padded ({ Top = 2; Right = 2; Bottom = 2; Left = 2 }, _) -> ()
+    | other -> failwithf "expected Padded 2, got %A" other
+]
+
+let htmlStringComplexTests = testList "HtmlString.Complex" [
+  testCase "nested structure" <| fun () ->
+    let html = """
+      <div style="display:flex;flex-direction:row">
+        <div style="border:1px solid">
+          <span style="color:red">hello</span>
+        </div>
+        <span>world</span>
+      </div>"""
+    let el = HtmlString.parseFragment html
+    match el with
+    | Row [ Bordered(Light, _); Text("world", _) ] -> ()
+    | Row children ->
+      children |> List.length |> Expect.equal "2 children in row" 2
+    | other -> failwithf "expected Row with bordered + text, got %A" other
+
+  testCase "full HTML document" <| fun () ->
+    let html = """
+      <html><body>
+        <h1>Dashboard</h1>
+        <div style="display:flex;flex-direction:row">
+          <span>Left</span>
+          <span>Right</span>
+        </div>
+      </body></html>"""
+    let el = HtmlString.parse html
+    match el with
+    | Column _ -> ()
+    | other -> failwithf "expected Column, got %A" other
+
+  testCase "table renders as rows" <| fun () ->
+    let html = """<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>"""
+    let el = HtmlString.parseFragment html
+    // AngleSharp inserts tbody, so table→Column[tbody→Column[rows]]
+    // We just verify the structure flattens to contain Row elements with cells
+    let rec containsRow = function
+      | Row _ -> true
+      | Column children -> children |> List.exists containsRow
+      | Styled (_, inner) -> containsRow inner
+      | _ -> false
+    containsRow el |> Expect.isTrue "should contain rows"
+
+  testCase "id attribute → Keyed" <| fun () ->
+    let el = HtmlString.parseFragment """<div id="main"><span>content</span></div>"""
+    match el with
+    | Keyed ("main", _, _, _) -> ()
+    | other -> failwithf "expected Keyed main, got %A" other
+
+  testCase "img → alt text" <| fun () ->
+    let el = HtmlString.parseFragment """<img alt="Logo" />"""
+    match el with
+    | Text (s, _) when s.Contains("Logo") -> ()
+    | other -> failwithf "expected text with Logo, got %A" other
+]
+
 [<Tests>]
 let allHtmlTests = testList "Html" [
   htmlRenderEmptyTests
@@ -272,4 +467,8 @@ let allHtmlTests = testList "Html" [
   htmlParseLayoutTests
   htmlParseWrapperTests
   htmlRoundtripTests
+  htmlStringBasicTests
+  htmlStringSemanticTests
+  htmlStringCssTests
+  htmlStringComplexTests
 ]

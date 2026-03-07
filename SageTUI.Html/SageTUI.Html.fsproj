@@ -9,9 +9,11 @@
   <ItemGroup>
     <Compile Include="HtmlRender.fs" />
     <Compile Include="HtmlParse.fs" />
+    <Compile Include="HtmlString.fs" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="AngleSharp" Version="1.4.0" />
     <PackageReference Include="Falco.Markup" Version="1.2.0" />
   </ItemGroup>
 
