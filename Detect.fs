@@ -160,3 +160,71 @@ module RawMode =
       psi.RedirectStandardOutput <- true
       psi.UseShellExecute <- false
       System.Diagnostics.Process.Start(psi).WaitForExit()
+
+module Backend =
+  let private mapKey (ki: ConsoleKeyInfo) : Key =
+    match ki.Key with
+    | ConsoleKey.Escape -> Escape
+    | ConsoleKey.Enter -> Enter
+    | ConsoleKey.Backspace -> Backspace
+    | ConsoleKey.Tab -> Tab
+    | ConsoleKey.UpArrow -> Up
+    | ConsoleKey.DownArrow -> Down
+    | ConsoleKey.LeftArrow -> Left
+    | ConsoleKey.RightArrow -> Right
+    | ConsoleKey.Home -> Home
+    | ConsoleKey.End -> End
+    | ConsoleKey.Delete -> Delete
+    | ConsoleKey.Insert -> Insert
+    | ConsoleKey.PageUp -> PageUp
+    | ConsoleKey.PageDown -> PageDown
+    | ConsoleKey.F1 -> F 1
+    | ConsoleKey.F2 -> F 2
+    | ConsoleKey.F3 -> F 3
+    | ConsoleKey.F4 -> F 4
+    | ConsoleKey.F5 -> F 5
+    | ConsoleKey.F6 -> F 6
+    | ConsoleKey.F7 -> F 7
+    | ConsoleKey.F8 -> F 8
+    | ConsoleKey.F9 -> F 9
+    | ConsoleKey.F10 -> F 10
+    | ConsoleKey.F11 -> F 11
+    | ConsoleKey.F12 -> F 12
+    | _ -> Key.Char ki.KeyChar
+
+  let private mapMods (ki: ConsoleKeyInfo) : Modifiers =
+    let mutable m = Modifiers.None
+    match ki.Modifiers.HasFlag(ConsoleModifiers.Shift) with
+    | true -> m <- m ||| Modifiers.Shift
+    | false -> ()
+    match ki.Modifiers.HasFlag(ConsoleModifiers.Control) with
+    | true -> m <- m ||| Modifiers.Ctrl
+    | false -> ()
+    match ki.Modifiers.HasFlag(ConsoleModifiers.Alt) with
+    | true -> m <- m ||| Modifiers.Alt
+    | false -> ()
+    m
+
+  let private readKeyEvent () : TerminalEvent =
+    let ki = Console.ReadKey(true)
+    KeyPressed(mapKey ki, mapMods ki)
+
+  let create (profile: TerminalProfile) : TerminalBackend =
+    let mutable savedModes = Unchecked.defaultof<RawMode.SavedModes>
+    { Size = fun () -> profile.Size
+      Write = fun s -> Console.Write(s)
+      Flush = fun () -> Console.Out.Flush()
+      PollEvent = fun timeoutMs ->
+        match Console.KeyAvailable with
+        | true -> Some(readKeyEvent ())
+        | false ->
+          match timeoutMs > 0 with
+          | true ->
+            Threading.Thread.Sleep(timeoutMs)
+            match Console.KeyAvailable with
+            | true -> Some(readKeyEvent ())
+            | false -> None
+          | false -> None
+      EnterRawMode = fun () -> savedModes <- RawMode.enter profile.Platform
+      LeaveRawMode = fun () -> RawMode.leave savedModes
+      Profile = profile }

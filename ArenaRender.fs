@@ -121,13 +121,13 @@ module ArenaRender =
 
       | 6uy -> // Constrained
         let c = unpackConstraint node.ConstraintKind node.ConstraintVal
-        let constrained = Render.applyConstraint c area
+        let constrained = Layout.applyConstraint c area
         render arena node.FirstChild constrained inheritedFg inheritedBg inheritedAttrs buf
 
       | 7uy -> // Bordered
         let bs = unpackBorderStyle node.ConstraintKind
-        Render.renderBorder bs Style.empty area buf
-        let inner = Render.shrinkForBorder area
+        BorderRender.renderBorder bs Style.empty area buf
+        let inner = Layout.shrinkForBorder area
         render arena node.FirstChild inner inheritedFg inheritedBg inheritedAttrs buf
 
       | 8uy -> // Padded
@@ -141,7 +141,7 @@ module ArenaRender =
       | 9uy -> // Keyed (pass through to child)
         render arena node.FirstChild area inheritedFg inheritedBg inheritedAttrs buf
 
-      | 10uy -> () // Canvas (not yet implemented)
+      | 10uy -> eprintfn "Canvas rendering not yet implemented"
       | _ -> ()
 
   let renderRoot (arena: FrameArena) (rootHandle: NodeHandle) (area: Area) (buf: Buffer) =

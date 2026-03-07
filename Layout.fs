@@ -75,3 +75,31 @@ module Layout =
     solve area.Height constraints
     |> List.map (fun (offset, height) ->
       { X = area.X; Y = area.Y + offset; Width = area.Width; Height = height })
+
+  let applyConstraint (c: Constraint) (area: Area) =
+    match c with
+    | Fixed n -> { area with Width = min n area.Width }
+    | Min n -> { area with Width = max n area.Width }
+    | Max n -> { area with Width = min n area.Width }
+    | Percentage pct -> { area with Width = area.Width * pct / 100 }
+    | Fill -> area
+    | Ratio(num, den) ->
+      match den > 0 with
+      | true -> { area with Width = area.Width * num / den }
+      | false -> area
+
+  let applyConstraintV (c: Constraint) (area: Area) =
+    match c with
+    | Fixed n -> { area with Height = min n area.Height }
+    | Min n -> { area with Height = max n area.Height }
+    | Max n -> { area with Height = min n area.Height }
+    | Percentage pct -> { area with Height = area.Height * pct / 100 }
+    | Fill -> area
+    | Ratio(num, den) ->
+      match den > 0 with
+      | true -> { area with Height = area.Height * num / den }
+      | false -> area
+
+  let shrinkForBorder (area: Area) =
+    { X = area.X + 1; Y = area.Y + 1
+      Width = max 0 (area.Width - 2); Height = max 0 (area.Height - 2) }

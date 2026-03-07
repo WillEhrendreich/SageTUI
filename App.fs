@@ -94,7 +94,6 @@ module App =
     backend.Write(Ansi.enterAltScreen + Ansi.hideCursor)
 
     interpretCmd initCmd
-    let mutable prevModel = model
     let mutable subs = program.Subscribe model
     reconcileSubs subs
 
@@ -116,6 +115,8 @@ module App =
       let elem = program.View model
 
       // Reconcile keyed elements for transitions
+      // TODO: transitions are currently full-screen only. Scoped transitions
+      // require layout-time area tracking (ArenaRender recording node→area map).
       let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
       let newKeyed = Reconcile.findKeyedElements elem
       let (entering, exiting, _) = Reconcile.reconcile prevKeyedElements newKeyed
@@ -198,8 +199,8 @@ module App =
       frontBuf <- backBuf
       backBuf <- temp
 
-      match backend.PollEvent 16 with
-      | Some event ->
+      // Drain all available events per frame (burst input, paste)
+      let processEvent (event: TerminalEvent) =
         match event with
         | Resized(w, h) ->
           width <- w
@@ -213,6 +214,15 @@ module App =
           | ResizeSub handler, Resized(w, h) ->
             handler (w, h) |> dispatch
           | _ -> ()
+
+      match backend.PollEvent 16 with
+      | Some firstEvent ->
+        processEvent firstEvent
+        let mutable more = true
+        while more do
+          match backend.PollEvent 0 with
+          | Some next -> processEvent next
+          | None -> more <- false
       | None ->
         Thread.Sleep 1
 

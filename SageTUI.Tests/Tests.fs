@@ -304,6 +304,51 @@ let elementTests = testList "Element" [
     match El.overlay [El.text "a"] with
     | Overlay [Text("a",_)] -> ()
     | _ -> failwith "expected Overlay"
+  testCase "height wraps in Column" <| fun () ->
+    match El.height 5 (El.text "x") with
+    | Column [Constrained(Fixed 5, Text("x",_))] -> ()
+    | other -> failwith (sprintf "expected Column [Constrained(Fixed 5, Text)], got %A" other)
+  testCase "minHeight wraps in Column" <| fun () ->
+    match El.minHeight 3 (El.text "x") with
+    | Column [Constrained(Min 3, Text("x",_))] -> ()
+    | other -> failwith (sprintf "expected Column [Constrained(Min 3, Text)], got %A" other)
+  testCase "maxHeight wraps in Column" <| fun () ->
+    match El.maxHeight 10 (El.text "x") with
+    | Column [Constrained(Max 10, Text("x",_))] -> ()
+    | other -> failwith (sprintf "expected Column [Constrained(Max 10, Text)], got %A" other)
+]
+
+let heightConstraintTests = testList "Height constraints" [
+  testCase "applyConstraintV Fixed constrains height" <| fun () ->
+    let area = { X = 0; Y = 0; Width = 80; Height = 24 }
+    let result = Layout.applyConstraintV (Fixed 5) area
+    result.Height |> Expect.equal "height should be 5" 5
+    result.Width |> Expect.equal "width unchanged" 80
+  testCase "applyConstraintV Percentage constrains height" <| fun () ->
+    let area = { X = 0; Y = 0; Width = 80; Height = 100 }
+    let result = Layout.applyConstraintV (Percentage 25) area
+    result.Height |> Expect.equal "height should be 25" 25
+  testCase "applyConstraintV Min sets minimum height" <| fun () ->
+    let area = { X = 0; Y = 0; Width = 80; Height = 3 }
+    let result = Layout.applyConstraintV (Min 10) area
+    result.Height |> Expect.equal "height should be 10" 10
+  testCase "applyConstraintV Max caps height" <| fun () ->
+    let area = { X = 0; Y = 0; Width = 80; Height = 50 }
+    let result = Layout.applyConstraintV (Max 10) area
+    result.Height |> Expect.equal "height should be 10" 10
+  testCase "applyConstraintV Fill unchanged" <| fun () ->
+    let area = { X = 0; Y = 0; Width = 80; Height = 24 }
+    let result = Layout.applyConstraintV Fill area
+    result.Height |> Expect.equal "height unchanged" 24
+  testCase "applyConstraintV Ratio constrains height" <| fun () ->
+    let area = { X = 0; Y = 0; Width = 80; Height = 100 }
+    let result = Layout.applyConstraintV (Ratio(1, 3)) area
+    result.Height |> Expect.equal "height should be 33" 33
+  testCase "El.height integrates with splitV" <| fun () ->
+    let areas = Layout.splitV [Fixed 5] { X = 0; Y = 0; Width = 80; Height = 24 }
+    areas |> Expect.hasLength "one area" 1
+    areas[0].Height |> Expect.equal "height 5" 5
+    areas[0].Width |> Expect.equal "width unchanged" 80
 ]
 
 let easingTests = testList "Easing" [
@@ -2818,6 +2863,7 @@ let allTests = testList "All" [
     paddingTests
     constraintTests
     elementTests
+    heightConstraintTests
     easingTests
     brailleTests
     alphaTests
