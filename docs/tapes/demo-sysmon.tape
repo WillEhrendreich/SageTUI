@@ -1,7 +1,7 @@
 Output docs/demo-sysmon.gif
 
-Set Width 110
-Set Height 30
+Set Width 1100
+Set Height 600
 Set FontSize 13
 Set Framerate 15
 Set Padding 16

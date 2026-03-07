@@ -1,7 +1,7 @@
 Output docs/demo-hello.gif
 
-Set Width 80
-Set Height 20
+Set Width 800
+Set Height 480
 Set FontSize 14
 Set Framerate 15
 Set Padding 16

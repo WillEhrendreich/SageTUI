@@ -1,7 +1,7 @@
 Output docs/demo-form.gif
 
-Set Width 88
-Set Height 26
+Set Width 960
+Set Height 540
 Set FontSize 13
 Set Framerate 15
 Set Padding 16

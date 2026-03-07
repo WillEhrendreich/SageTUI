@@ -1,7 +1,7 @@
 Output docs/demo-kanban.gif
 
-Set Width 110
-Set Height 28
+Set Width 1100
+Set Height 560
 Set FontSize 13
 Set Framerate 15
 Set Padding 16
