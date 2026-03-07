@@ -2549,6 +2549,147 @@ let activeTransitionTests = testList "ActiveTransition" [
     ActiveTransition.progress 100L at |> Expect.equal "quadOut at 0.5" 0.75
 ]
 
+// ============================================================
+// Phase 10: Widget Example Tests
+// ============================================================
+
+let textInputBasicTests = testList "TextInput.basic" [
+  testCase "empty has no text" <| fun () ->
+    TextInput.empty.Text |> Expect.equal "empty" ""
+    TextInput.empty.Cursor |> Expect.equal "cursor" 0
+  testCase "ofString sets text and cursor at end" <| fun () ->
+    let m = TextInput.ofString "hello"
+    m.Text |> Expect.equal "text" "hello"
+    m.Cursor |> Expect.equal "cursor" 5
+  testCase "typing a char inserts at cursor" <| fun () ->
+    let m = TextInput.empty |> TextInput.handleKey (Key.Char 'a')
+    m.Text |> Expect.equal "text" "a"
+    m.Cursor |> Expect.equal "cursor" 1
+  testCase "typing multiple chars" <| fun () ->
+    let m =
+      TextInput.empty
+      |> TextInput.handleKey (Key.Char 'h')
+      |> TextInput.handleKey (Key.Char 'i')
+    m.Text |> Expect.equal "text" "hi"
+    m.Cursor |> Expect.equal "cursor" 2
+]
+
+let textInputEditTests = testList "TextInput.edit" [
+  testCase "backspace deletes before cursor" <| fun () ->
+    let m = TextInput.ofString "abc" |> TextInput.handleKey Key.Backspace
+    m.Text |> Expect.equal "text" "ab"
+    m.Cursor |> Expect.equal "cursor" 2
+  testCase "backspace at start does nothing" <| fun () ->
+    let m = { Text = "abc"; Cursor = 0 } |> TextInput.handleKey Key.Backspace
+    m.Text |> Expect.equal "text" "abc"
+  testCase "delete removes char at cursor" <| fun () ->
+    let m = { Text = "abc"; Cursor = 1 } |> TextInput.handleKey Key.Delete
+    m.Text |> Expect.equal "text" "ac"
+  testCase "delete at end does nothing" <| fun () ->
+    let m = TextInput.ofString "abc" |> TextInput.handleKey Key.Delete
+    m.Text |> Expect.equal "text" "abc"
+]
+
+let textInputNavTests = testList "TextInput.nav" [
+  testCase "left moves cursor" <| fun () ->
+    (TextInput.ofString "abc" |> TextInput.handleKey Key.Left).Cursor
+    |> Expect.equal "cursor" 2
+  testCase "left at start stays" <| fun () ->
+    ({ Text = "abc"; Cursor = 0 } |> TextInput.handleKey Key.Left).Cursor
+    |> Expect.equal "cursor" 0
+  testCase "right moves cursor" <| fun () ->
+    ({ Text = "abc"; Cursor = 1 } |> TextInput.handleKey Key.Right).Cursor
+    |> Expect.equal "cursor" 2
+  testCase "right at end stays" <| fun () ->
+    (TextInput.ofString "abc" |> TextInput.handleKey Key.Right).Cursor
+    |> Expect.equal "cursor" 3
+  testCase "home goes to start" <| fun () ->
+    (TextInput.ofString "abc" |> TextInput.handleKey Key.Home).Cursor
+    |> Expect.equal "cursor" 0
+  testCase "end goes to end" <| fun () ->
+    ({ Text = "abc"; Cursor = 0 } |> TextInput.handleKey Key.End).Cursor
+    |> Expect.equal "cursor" 3
+]
+
+let textInputInsertTests = testList "TextInput.insert" [
+  testCase "insert in middle" <| fun () ->
+    let m = { Text = "ac"; Cursor = 1 } |> TextInput.handleKey (Key.Char 'b')
+    m.Text |> Expect.equal "text" "abc"
+    m.Cursor |> Expect.equal "cursor" 2
+]
+
+let focusRingTests2 = testList "FocusRing" [
+  testCase "create starts at index 0" <| fun () ->
+    FocusRing.current (FocusRing.create ["a"; "b"; "c"])
+    |> Expect.equal "current" (Some "a")
+  testCase "next cycles forward" <| fun () ->
+    FocusRing.current (FocusRing.next (FocusRing.create ["a"; "b"; "c"]))
+    |> Expect.equal "current" (Some "b")
+  testCase "next wraps around" <| fun () ->
+    FocusRing.current (FocusRing.next { Items = ["a"; "b"; "c"]; Index = 2 })
+    |> Expect.equal "current" (Some "a")
+  testCase "prev cycles backward" <| fun () ->
+    FocusRing.current (FocusRing.prev (FocusRing.create ["a"; "b"; "c"]))
+    |> Expect.equal "current" (Some "c")
+  testCase "isFocused checks current" <| fun () ->
+    let ring = FocusRing.create ["a"; "b"; "c"]
+    FocusRing.isFocused "a" ring |> Expect.isTrue "a focused"
+    FocusRing.isFocused "b" ring |> Expect.isFalse "b not"
+  testCase "empty ring current is None" <| fun () ->
+    FocusRing.current (FocusRing.create ([] : string list))
+    |> Expect.equal "none" None
+  testCase "empty ring next is safe" <| fun () ->
+    (FocusRing.next (FocusRing.create ([] : string list))).Index
+    |> Expect.equal "index" 0
+]
+
+let selectBasicTests = testList "Select.basic" [
+  testCase "create starts closed at index 0" <| fun () ->
+    let m = Select.create ["red"; "green"; "blue"]
+    m.IsOpen |> Expect.isFalse "closed"
+    m.Selected |> Expect.equal "selected" 0
+  testCase "toggle opens" <| fun () ->
+    (Select.create ["a"; "b"] |> Select.toggle).IsOpen
+    |> Expect.isTrue "open"
+  testCase "toggle again closes" <| fun () ->
+    (Select.create ["a"; "b"] |> Select.toggle |> Select.toggle).IsOpen
+    |> Expect.isFalse "closed"
+  testCase "moveDown increases selected" <| fun () ->
+    (Select.create ["a"; "b"; "c"] |> Select.moveDown).Selected
+    |> Expect.equal "selected" 1
+  testCase "moveDown clamps at end" <| fun () ->
+    (Select.moveDown { Options = ["a"; "b"]; Selected = 1; IsOpen = true }).Selected
+    |> Expect.equal "clamped" 1
+  testCase "moveUp decreases selected" <| fun () ->
+    (Select.moveUp { Options = ["a"; "b"; "c"]; Selected = 2; IsOpen = true }).Selected
+    |> Expect.equal "selected" 1
+  testCase "moveUp clamps at 0" <| fun () ->
+    (Select.create ["a"; "b"] |> Select.moveUp).Selected
+    |> Expect.equal "clamped" 0
+  testCase "confirm closes" <| fun () ->
+    (Select.confirm { Options = ["a"; "b"]; Selected = 1; IsOpen = true }).IsOpen
+    |> Expect.isFalse "closed"
+  testCase "selectedValue returns current" <| fun () ->
+    Select.selectedValue { Options = ["a"; "b"; "c"]; Selected = 1; IsOpen = false }
+    |> Expect.equal "value" (Some "b")
+  testCase "selectedValue empty returns None" <| fun () ->
+    Select.selectedValue { Options = ([] : string list); Selected = 0; IsOpen = false }
+    |> Expect.equal "none" None
+]
+
+let selectViewTests = testList "Select.view" [
+  testCase "closed view shows selected value" <| fun () ->
+    let m = { Options = ["red"; "green"]; Selected = 1; IsOpen = false }
+    match Select.view id false m with
+    | Text(t, _) when t.Contains("green") -> ()
+    | other -> failwith (sprintf "expected green, got %A" other)
+  testCase "open view shows all options" <| fun () ->
+    let m = { Options = ["a"; "b"; "c"]; Selected = 0; IsOpen = true }
+    match Select.view id false m with
+    | Column children -> children.Length |> Expect.equal "3 options" 3
+    | other -> failwith (sprintf "expected Column, got %A" other)
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -2646,5 +2787,14 @@ let allTests = testList "All" [
     reconcileTests
     durationTests
     activeTransitionTests
+  ]
+  testList "Phase 10" [
+    textInputBasicTests
+    textInputEditTests
+    textInputNavTests
+    textInputInsertTests
+    focusRingTests2
+    selectBasicTests
+    selectViewTests
   ]
 ]
