@@ -29,6 +29,11 @@ jobs:
           dotnet build samples/08-Sparklines/Sparklines.fsproj     -c Release --no-restore
           dotnet build samples/09-SystemMonitor/SystemMonitor.fsproj -c Release --no-restore
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+
       - name: Install VHS
         uses: charmbracelet/vhs-action@v2
 
