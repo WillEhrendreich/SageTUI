@@ -1,5 +1,114 @@
 namespace SageTUI
 
+type Theme = {
+  Primary: Color
+  Secondary: Color
+  Accent: Color
+  Success: Color
+  Warning: Color
+  Error: Color
+  TextFg: Color
+  TextDim: Color
+  Background: Color
+  Border: BorderStyle
+}
+
+module Theme =
+  let dark : Theme =
+    { Primary = Color.Named(Cyan, Bright)
+      Secondary = Color.Named(Blue, Bright)
+      Accent = Color.Named(Magenta, Bright)
+      Success = Color.Named(Green, Bright)
+      Warning = Color.Named(Yellow, Bright)
+      Error = Color.Named(Red, Bright)
+      TextFg = Color.Named(White, Normal)
+      TextDim = Color.Named(White, Normal)
+      Background = Color.Named(Black, Normal)
+      Border = Rounded }
+
+  let light : Theme =
+    { Primary = Color.Named(Blue, Normal)
+      Secondary = Color.Named(Cyan, Normal)
+      Accent = Color.Named(Magenta, Normal)
+      Success = Color.Named(Green, Normal)
+      Warning = Color.Named(Yellow, Normal)
+      Error = Color.Named(Red, Normal)
+      TextFg = Color.Named(Black, Normal)
+      TextDim = Color.Named(Black, Normal)
+      Background = Color.Named(White, Normal)
+      Border = Light }
+
+  let nord : Theme =
+    { Primary = Color.Rgb(136uy, 192uy, 208uy)
+      Secondary = Color.Rgb(129uy, 161uy, 193uy)
+      Accent = Color.Rgb(180uy, 142uy, 173uy)
+      Success = Color.Rgb(163uy, 190uy, 140uy)
+      Warning = Color.Rgb(235uy, 203uy, 139uy)
+      Error = Color.Rgb(191uy, 97uy, 106uy)
+      TextFg = Color.Rgb(216uy, 222uy, 233uy)
+      TextDim = Color.Rgb(76uy, 86uy, 106uy)
+      Background = Color.Rgb(46uy, 52uy, 64uy)
+      Border = Rounded }
+
+  let dracula : Theme =
+    { Primary = Color.Rgb(139uy, 233uy, 253uy)
+      Secondary = Color.Rgb(189uy, 147uy, 249uy)
+      Accent = Color.Rgb(255uy, 121uy, 198uy)
+      Success = Color.Rgb(80uy, 250uy, 123uy)
+      Warning = Color.Rgb(241uy, 250uy, 140uy)
+      Error = Color.Rgb(255uy, 85uy, 85uy)
+      TextFg = Color.Rgb(248uy, 248uy, 242uy)
+      TextDim = Color.Rgb(98uy, 114uy, 164uy)
+      Background = Color.Rgb(40uy, 42uy, 54uy)
+      Border = Rounded }
+
+  let catppuccin : Theme =
+    { Primary = Color.Rgb(137uy, 180uy, 250uy)
+      Secondary = Color.Rgb(116uy, 199uy, 236uy)
+      Accent = Color.Rgb(245uy, 194uy, 231uy)
+      Success = Color.Rgb(166uy, 218uy, 149uy)
+      Warning = Color.Rgb(249uy, 226uy, 175uy)
+      Error = Color.Rgb(243uy, 139uy, 168uy)
+      TextFg = Color.Rgb(205uy, 214uy, 244uy)
+      TextDim = Color.Rgb(108uy, 112uy, 134uy)
+      Background = Color.Rgb(30uy, 30uy, 46uy)
+      Border = Rounded }
+
+  /// Apply theme colors to an element tree
+  let apply (theme: Theme) (elem: Element) : Element =
+    elem |> El.fg theme.TextFg |> El.bg theme.Background
+
+  /// Styled heading using theme primary color
+  let heading (theme: Theme) (text: string) : Element =
+    El.text text |> El.bold |> El.fg theme.Primary
+
+  /// Styled subheading using theme secondary color
+  let subheading (theme: Theme) (text: string) : Element =
+    El.text text |> El.fg theme.Secondary
+
+  /// Styled success text
+  let success (theme: Theme) (text: string) : Element =
+    El.text text |> El.fg theme.Success
+
+  /// Styled warning text
+  let warning (theme: Theme) (text: string) : Element =
+    El.text text |> El.fg theme.Warning
+
+  /// Styled error text
+  let error (theme: Theme) (text: string) : Element =
+    El.text text |> El.fg theme.Error
+
+  /// Themed border
+  let bordered (theme: Theme) (elem: Element) : Element =
+    elem |> El.bordered theme.Border
+
+  /// Create a themed panel (bordered + padded + title)
+  let panel (theme: Theme) (title: string) (content: Element) : Element =
+    El.column [
+      El.text title |> El.bold |> El.fg theme.Primary
+      content
+    ] |> El.bordered theme.Border |> El.padHV 1 0
+
 type TextInputModel = {
   Text: string
   Cursor: int

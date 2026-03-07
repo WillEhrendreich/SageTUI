@@ -185,6 +185,9 @@
   },
   "active": "ac394dc03ed8186e",
   "lastOpenFiles": [
+    "SageTUI.Tests/obj/Debug/net10.0/u5tcagpr.fqr~",
+    "SageTUI.Html/obj/Debug/net10.0/25bisouh.idv~",
+    "obj/Debug/net10.0/nqm45f20.yvn~",
     "README.md",
     "SageTUI.Tests/obj/Debug/net10.0/i4y1uz0u.z0f~",
     "SageTUI.Html/obj/Debug/net10.0/xdtemega.myy~",
@@ -195,8 +198,6 @@
     "obj/Debug/net10.0/gwlm0kpq.nyz~",
     "SageTUI.Html/obj/Debug/net10.0/kinysbth.wvu~",
     "obj/Debug/net10.0/smjwkoy4.nk3~",
-    "SageTUI.Tests/obj/Debug/net10.0/mdicsyig.5ec~",
-    "SageTUI.Html/obj/Debug/net10.0/fxrowsvx.5ou~",
     "expertPanel/next-wave-deliberation.md",
     "expertPanel/excellence-roadmap-deliberation.md",
     "expertPanel/next-priorities-deliberation.md",
@@ -219,7 +220,6 @@
     "expertPanel/_tmp/sec_3_6_note.md",
     "expertPanel/_tmp/sec_3_9_transitions.md",
     "expertPanel/_tmp/sec_3_8_arena.md",
-    "expertPanel/_tmp/sec_3_10_anim.md",
-    "expertPanel/_tmp/sec_1_to_3_5.md"
+    "expertPanel/_tmp/sec_3_10_anim.md"
   ]
 }

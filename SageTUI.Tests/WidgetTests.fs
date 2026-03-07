@@ -807,6 +807,55 @@ let formTests = testList "Form" [
   }
 ]
 
+let themeTests = testList "Theme" [
+  test "dark theme has expected primary" {
+    match Theme.dark.Primary with
+    | Color.Named(Cyan, Bright) -> ()
+    | _ -> failtest "expected bright cyan"
+  }
+
+  test "nord theme uses RGB" {
+    match Theme.nord.Primary with
+    | Color.Rgb _ -> ()
+    | _ -> failtest "expected RGB"
+  }
+
+  test "apply wraps in fg+bg" {
+    let elem = El.text "hello" |> Theme.apply Theme.dark
+    match elem with
+    | Styled(_, Styled(_, Text _)) -> ()
+    | _ -> failtest "expected nested Styled"
+  }
+
+  test "heading produces bold+colored text" {
+    let elem = Theme.heading Theme.dark "Title"
+    match elem with
+    | Styled(_, Styled(_, Text(t, _))) ->
+      t |> Expect.equal "text content" "Title"
+    | _ -> failtest "expected Styled"
+  }
+
+  test "panel produces bordered column" {
+    let elem = Theme.panel Theme.dark "Panel" (El.text "content")
+    match elem with
+    | Padded(_, Bordered(_, Column _)) -> ()
+    | _ -> failtest "expected Padded(Bordered(Column))"
+  }
+
+  test "five built-in themes available" {
+    [Theme.dark; Theme.light; Theme.nord; Theme.dracula; Theme.catppuccin]
+    |> Expect.hasLength "5 themes" 5
+  }
+
+  test "all themes have different primaries" {
+    let primaries =
+      [Theme.dark; Theme.light; Theme.nord; Theme.dracula; Theme.catppuccin]
+      |> List.map (fun t -> t.Primary)
+      |> List.distinct
+    primaries |> Expect.hasLength "all different" 5
+  }
+]
+
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -826,4 +875,5 @@ let allWidgetTests = testList "Widgets" [
   treeViewTests
   lazyTests
   formTests
+  themeTests
 ]
