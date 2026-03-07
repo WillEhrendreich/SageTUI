@@ -33,6 +33,99 @@ module ArenaRender =
       idx <- arena.Nodes.[idx].NextSibling
     count
 
+  /// Measure intrinsic width of an arena node.
+  let rec measureWidth (arena: FrameArena) (nodeIdx: int) : int =
+    let node = arena.Nodes.[nodeIdx]
+    match node.Kind with
+    | 0uy -> 0 // Empty
+    | 1uy -> // Text
+      let mutable w = 0
+      for i in node.DataStart .. node.DataStart + node.DataLen - 1 do
+        let rune = System.Text.Rune(arena.TextBuf.[i])
+        w <- w + RuneWidth.getColumnWidth rune
+      w
+    | 2uy -> // Row — sum of children widths
+      let mutable total = 0
+      let mutable idx = node.FirstChild
+      while idx >= 0 do
+        total <- total + measureWidth arena idx
+        idx <- arena.Nodes.[idx].NextSibling
+      total
+    | 3uy -> // Column — max of children widths
+      let mutable maxW = 0
+      let mutable idx = node.FirstChild
+      while idx >= 0 do
+        let w = measureWidth arena idx
+        maxW <- max maxW w
+        idx <- arena.Nodes.[idx].NextSibling
+      maxW
+    | 4uy -> // Overlay — max of children widths
+      let mutable maxW = 0
+      let mutable idx = node.FirstChild
+      while idx >= 0 do
+        let w = measureWidth arena idx
+        maxW <- max maxW w
+        idx <- arena.Nodes.[idx].NextSibling
+      maxW
+    | 5uy -> // Styled
+      measureWidth arena node.FirstChild
+    | 6uy -> // Constrained
+      match node.ConstraintKind with
+      | 0uy -> int node.ConstraintVal // Fixed → explicit width
+      | 1uy -> max (int node.ConstraintVal) (measureWidth arena node.FirstChild) // Min
+      | 2uy -> min (int node.ConstraintVal) (measureWidth arena node.FirstChild) // Max
+      | _ -> measureWidth arena node.FirstChild
+    | 7uy -> // Bordered
+      measureWidth arena node.FirstChild + 2
+    | 8uy -> // Padded
+      let pad = unpackPadding node.DataStart node.DataLen
+      measureWidth arena node.FirstChild + pad.Left + pad.Right
+    | 9uy -> // Keyed
+      measureWidth arena node.FirstChild
+    | _ -> 0
+
+  /// Measure intrinsic height of an arena node.
+  let rec measureHeight (arena: FrameArena) (nodeIdx: int) : int =
+    let node = arena.Nodes.[nodeIdx]
+    match node.Kind with
+    | 0uy -> 0 // Empty
+    | 1uy -> 1 // Text — always 1 row
+    | 2uy -> // Row — max of children heights
+      let mutable maxH = 0
+      let mutable idx = node.FirstChild
+      while idx >= 0 do
+        let h = measureHeight arena idx
+        maxH <- max maxH h
+        idx <- arena.Nodes.[idx].NextSibling
+      maxH
+    | 3uy -> // Column — sum of children heights
+      let mutable total = 0
+      let mutable idx = node.FirstChild
+      while idx >= 0 do
+        total <- total + measureHeight arena idx
+        idx <- arena.Nodes.[idx].NextSibling
+      total
+    | 4uy -> // Overlay — max of children heights
+      let mutable maxH = 0
+      let mutable idx = node.FirstChild
+      while idx >= 0 do
+        let h = measureHeight arena idx
+        maxH <- max maxH h
+        idx <- arena.Nodes.[idx].NextSibling
+      maxH
+    | 5uy -> // Styled
+      measureHeight arena node.FirstChild
+    | 6uy -> // Constrained
+      measureHeight arena node.FirstChild
+    | 7uy -> // Bordered
+      measureHeight arena node.FirstChild + 2
+    | 8uy -> // Padded
+      let pad = unpackPadding node.DataStart node.DataLen
+      measureHeight arena node.FirstChild + pad.Top + pad.Bottom
+    | 9uy -> // Keyed
+      measureHeight arena node.FirstChild
+    | _ -> 0
+
   let rec render (arena: FrameArena) (nodeIdx: int) (area: Area) (inheritedFg: int) (inheritedBg: int) (inheritedAttrs: uint16) (buf: Buffer) =
     match area.Width <= 0 || area.Height <= 0 with
     | true -> ()
@@ -70,6 +163,7 @@ module ArenaRender =
         let n = countChildren arena node.FirstChild
         let constraints = Array.zeroCreate<Constraint> n
         let childNodes = Array.zeroCreate<int> n
+        let contentWidths = Array.zeroCreate<int> n
         let mutable idx = node.FirstChild
         let mutable i = 0
         while idx >= 0 do
@@ -78,12 +172,14 @@ module ArenaRender =
           | 6uy ->
             constraints.[i] <- unpackConstraint cn.ConstraintKind cn.ConstraintVal
             childNodes.[i] <- cn.FirstChild
+            contentWidths.[i] <- measureWidth arena cn.FirstChild
           | _ ->
             constraints.[i] <- Fill
             childNodes.[i] <- idx
+            contentWidths.[i] <- measureWidth arena idx
           idx <- cn.NextSibling
           i <- i + 1
-        let areas = Layout.splitH (Array.toList constraints) area
+        let areas = Layout.splitHWithContent (Array.toList constraints) (Array.toList contentWidths) area
         List.iteri (fun j childArea ->
           render arena childNodes.[j] childArea inheritedFg inheritedBg inheritedAttrs buf) areas
 
@@ -91,6 +187,7 @@ module ArenaRender =
         let n = countChildren arena node.FirstChild
         let constraints = Array.zeroCreate<Constraint> n
         let childNodes = Array.zeroCreate<int> n
+        let contentHeights = Array.zeroCreate<int> n
         let mutable idx = node.FirstChild
         let mutable i = 0
         while idx >= 0 do
@@ -99,12 +196,14 @@ module ArenaRender =
           | 6uy ->
             constraints.[i] <- unpackConstraint cn.ConstraintKind cn.ConstraintVal
             childNodes.[i] <- cn.FirstChild
+            contentHeights.[i] <- measureHeight arena cn.FirstChild
           | _ ->
             constraints.[i] <- Fill
             childNodes.[i] <- idx
+            contentHeights.[i] <- measureHeight arena idx
           idx <- cn.NextSibling
           i <- i + 1
-        let areas = Layout.splitV (Array.toList constraints) area
+        let areas = Layout.splitVWithContent (Array.toList constraints) (Array.toList contentHeights) area
         List.iteri (fun j childArea ->
           render arena childNodes.[j] childArea inheritedFg inheritedBg inheritedAttrs buf) areas
 

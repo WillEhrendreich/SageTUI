@@ -66,6 +66,72 @@ module Layout =
         offset <- offset + sizes[i]
         yield result ]
 
+  /// Content-aware layout: Fill children get at least their content size,
+  /// then remaining space is distributed equally (like CSS flex-basis: auto).
+  let solveWithContent (available: int) (constraints: Constraint list) (contentSizes: int list) : (int * int) list =
+    let n = List.length constraints
+    let sizes = Array.create n 0
+    let mutable remaining = available
+    let mutable fillCount = 0
+    let mutable fillContentTotal = 0
+    let contentArr = List.toArray contentSizes
+
+    // Phase 1: allocate non-Fill items (identical to solve)
+    constraints |> List.iteri (fun i c ->
+      match c with
+      | Fixed size ->
+        sizes[i] <- min size remaining
+        remaining <- remaining - sizes[i]
+      | Percentage pct ->
+        sizes[i] <- available * pct / 100
+        remaining <- remaining - sizes[i]
+      | Ratio(num, den) when den > 0 ->
+        sizes[i] <- available * num / den
+        remaining <- remaining - sizes[i]
+      | Min minSize ->
+        sizes[i] <- minSize
+        remaining <- remaining - sizes[i]
+      | Max maxSize ->
+        sizes[i] <- min maxSize remaining
+        remaining <- remaining - sizes[i]
+      | Fill ->
+        fillCount <- fillCount + 1
+        fillContentTotal <- fillContentTotal + contentArr[i]
+      | _ -> ())
+
+    // Phase 2: allocate Fill items with content awareness
+    match fillCount > 0 with
+    | true ->
+      match fillContentTotal <= remaining with
+      | true ->
+        // Enough space: each Fill gets content size + equal share of excess
+        let excess = remaining - fillContentTotal
+        let perExtra = excess / fillCount
+        let mutable extraRem = excess % fillCount
+        constraints |> List.iteri (fun i c ->
+          match c with
+          | Fill ->
+            let bonus = match extraRem > 0 with | true -> extraRem <- extraRem - 1; 1 | false -> 0
+            sizes[i] <- contentArr[i] + perExtra + bonus
+          | _ -> ())
+      | false ->
+        // Not enough space: greedy content-first allocation
+        let mutable pool = remaining
+        constraints |> List.iteri (fun i c ->
+          match c with
+          | Fill ->
+            let give = min contentArr[i] pool
+            sizes[i] <- give
+            pool <- pool - give
+          | _ -> ())
+    | false -> ()
+
+    let mutable offset = 0
+    [ for i in 0 .. n - 1 do
+        let result = (offset, sizes[i])
+        offset <- offset + sizes[i]
+        yield result ]
+
   let splitH (constraints: Constraint list) (area: Area) : Area list =
     solve area.Width constraints
     |> List.map (fun (offset, width) ->
@@ -73,6 +139,16 @@ module Layout =
 
   let splitV (constraints: Constraint list) (area: Area) : Area list =
     solve area.Height constraints
+    |> List.map (fun (offset, height) ->
+      { X = area.X; Y = area.Y + offset; Width = area.Width; Height = height })
+
+  let splitHWithContent (constraints: Constraint list) (contentWidths: int list) (area: Area) : Area list =
+    solveWithContent area.Width constraints contentWidths
+    |> List.map (fun (offset, width) ->
+      { X = area.X + offset; Y = area.Y; Width = width; Height = area.Height })
+
+  let splitVWithContent (constraints: Constraint list) (contentHeights: int list) (area: Area) : Area list =
+    solveWithContent area.Height constraints contentHeights
     |> List.map (fun (offset, height) ->
       { X = area.X; Y = area.Y + offset; Width = area.Width; Height = height })
 

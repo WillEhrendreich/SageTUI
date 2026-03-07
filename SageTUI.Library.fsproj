@@ -16,6 +16,7 @@
     <Compile Include="Layout.fs" />
     <Compile Include="BorderRender.fs" />
     <Compile Include="Element.fs" />
+    <Compile Include="Measure.fs" />
     <Compile Include="Arena.fs" />
     <Compile Include="Effects.fs" />
     <Compile Include="Terminal.fs" />

@@ -39,14 +39,16 @@ module Render =
       | Row children ->
         let constraints = children |> List.map extractConstraint
         let unwrapped = children |> List.map unwrapConstrained
-        let areas = Layout.splitH constraints area
+        let contentWidths = Measure.childWidths children
+        let areas = Layout.splitHWithContent constraints contentWidths area
         List.iter2 (fun childArea child ->
           render childArea inheritedStyle buf child) areas unwrapped
 
       | Column children ->
         let constraints = children |> List.map extractConstraint
         let unwrapped = children |> List.map unwrapConstrained
-        let areas = Layout.splitV constraints area
+        let contentHeights = Measure.childHeights children
+        let areas = Layout.splitVWithContent constraints contentHeights area
         List.iter2 (fun childArea child ->
           render childArea inheritedStyle buf child) areas unwrapped
 
