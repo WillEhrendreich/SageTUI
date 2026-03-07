@@ -196,12 +196,15 @@ let view model =
   ]
 
 let subscribe _model =
-  [ KeySub (fun (key, _mods) ->
-      match key with
-      | Key.Right | Char 'l' -> Some NextPage
-      | Key.Left | Char 'h' -> Some PrevPage
-      | Char 'q' | Char 'Q' | Escape -> Some Quit
-      | _ -> None) ]
+  [ Keys.bind [
+      Key.Right, NextPage
+      Key.Char 'l', NextPage
+      Key.Left, PrevPage
+      Key.Char 'h', PrevPage
+      Key.Char 'q', Quit
+      Key.Char 'Q', Quit
+      Key.Escape, Quit
+    ] ]
 
 let program : Program<Model, Msg> =
   { Init = init

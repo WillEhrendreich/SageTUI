@@ -203,10 +203,11 @@ let view model =
 let subscribe _model =
   [ TimerSub("tick", TimeSpan.FromSeconds(1.0), fun () -> Tick)
     ResizeSub (fun (w, h) -> Resized(w, h))
-    KeySub (fun (key, _mods) ->
-      match key with
-      | Char 'q' | Char 'Q' | Escape -> Some Quit
-      | _ -> None) ]
+    Keys.bind [
+      Key.Char 'q', Quit
+      Key.Char 'Q', Quit
+      Key.Escape, Quit
+    ] ]
 
 let program : Program<Model, Msg> =
   { Init = init

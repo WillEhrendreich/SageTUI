@@ -15,3 +15,6 @@ BenchmarkDotNet.Artifacts/
 # Auto-generated analysis files
 IMPLEMENTATION_ASSESSMENT.md
 API_ERGONOMICS_ANALYSIS.md
+
+# Local NuGet output
+nupkgs/

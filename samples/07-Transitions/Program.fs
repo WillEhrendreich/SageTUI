@@ -413,14 +413,17 @@ let view model =
   ]
 
 let subscribe model =
-  [ KeySub (fun (key, _mods) ->
-      match key with
-      | Key.Right | Char 'l' -> Some NextContent
-      | Key.Left | Char 'h' -> Some PrevContent
-      | Char 'a' -> Some CycleAnim
-      | Char ' ' -> Some ToggleAuto
-      | Char 'q' | Char 'Q' | Escape -> Some Quit
-      | _ -> None)
+  [ Keys.bind [
+      Key.Right, NextContent
+      Key.Char 'l', NextContent
+      Key.Left, PrevContent
+      Key.Char 'h', PrevContent
+      Key.Char 'a', CycleAnim
+      Key.Char ' ', ToggleAuto
+      Key.Char 'q', Quit
+      Key.Char 'Q', Quit
+      Key.Escape, Quit
+    ]
     ResizeSub (fun (w, h) -> Resized(w, h))
     TimerSub("anim-tick", TimeSpan.FromMilliseconds(200.0), fun () -> AnimTick)
     match model.AutoCycle with

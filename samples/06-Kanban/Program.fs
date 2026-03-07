@@ -243,15 +243,21 @@ let view model =
   ]
 
 let subscribe _model =
-  [ KeySub (fun (key, _mods) ->
-      match key with
-      | Key.Left | Char 'h' -> Some MoveLeft
-      | Key.Right | Char 'l' -> Some MoveRight
-      | Key.Up | Char 'k' -> Some MoveUp
-      | Key.Down | Char 'j' -> Some MoveDown
-      | Char ' ' | Key.Enter -> Some GrabOrDrop
-      | Char 'q' | Char 'Q' | Escape -> Some Quit
-      | _ -> None) ]
+  [ Keys.bind [
+      Key.Left, MoveLeft
+      Key.Char 'h', MoveLeft
+      Key.Right, MoveRight
+      Key.Char 'l', MoveRight
+      Key.Up, MoveUp
+      Key.Char 'k', MoveUp
+      Key.Down, MoveDown
+      Key.Char 'j', MoveDown
+      Key.Char ' ', GrabOrDrop
+      Key.Enter, GrabOrDrop
+      Key.Char 'q', Quit
+      Key.Char 'Q', Quit
+      Key.Escape, Quit
+    ] ]
 
 let program : Program<Model, Msg> =
   { Init = init

@@ -10,7 +10,7 @@
     <PackageId>SageTUI</PackageId>
     <Version>0.1.0-preview.1</Version>
     <Authors>SageTUI Contributors</Authors>
-    <Description>A high-performance F# terminal UI library with Elm Architecture, SIMD-accelerated rendering, flexbox layout, and 970+ tests.</Description>
+    <Description>Build beautiful terminal UIs in F# — Elm Architecture, flexbox layout, 17+ widgets, SIMD rendering, zero dependencies.</Description>
     <PackageTags>fsharp;tui;terminal;elm-architecture;functional;simd;layout;cli</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>

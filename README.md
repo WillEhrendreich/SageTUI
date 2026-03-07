@@ -13,6 +13,14 @@ Elm Architecture • SIMD rendering • 990+ tests • Zero external dependencie
 dotnet add package SageTUI --prerelease
 ```
 
+Or start from a template:
+
+```bash
+dotnet new install SageTUI.Templates --prerelease
+dotnet new sagetui -n MyApp
+cd MyApp && dotnet run
+```
+
 ## 5-Line Hello World
 
 ```fsharp

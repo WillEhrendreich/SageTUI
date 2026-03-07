@@ -275,16 +275,19 @@ let view model =
 let subscribe _model =
   [ TimerSub("tick", TimeSpan.FromMilliseconds(100.0), fun () -> Tick)
     ResizeSub (fun (w, h) -> Resized (w, h))
-    KeySub (fun (key, _mods) ->
-      match key with
-      | Char 'q' | Char 'Q' | Escape -> Some Quit
-      | Char 'p' | Char 'P' -> Some TogglePause
-      | Char 'r' | Char 'R' -> Some Reset
-      | Char '1' -> Some (Focus 0)
-      | Char '2' -> Some (Focus 1)
-      | Char '3' -> Some (Focus 2)
-      | Char '4' -> Some (Focus 3)
-      | _ -> None) ]
+    Keys.bind [
+      Key.Char 'q', Quit
+      Key.Char 'Q', Quit
+      Key.Escape, Quit
+      Key.Char 'p', TogglePause
+      Key.Char 'P', TogglePause
+      Key.Char 'r', Reset
+      Key.Char 'R', Reset
+      Key.Char '1', Focus 0
+      Key.Char '2', Focus 1
+      Key.Char '3', Focus 2
+      Key.Char '4', Focus 3
+    ] ]
 
 let program : Program<Model, Msg> =
   { Init = init

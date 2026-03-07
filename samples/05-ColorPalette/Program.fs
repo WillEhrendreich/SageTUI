@@ -255,14 +255,15 @@ let view model =
 
 let subscribe _model =
   [ TimerSub("anim", TimeSpan.FromMilliseconds(200.0), fun () -> Tick)
-    KeySub (fun (key, _mods) ->
-      match key with
-      | Char '1' -> Some (SwitchTab Base16)
-      | Char '2' -> Some (SwitchTab Palette256)
-      | Char '3' -> Some (SwitchTab TrueColor)
-      | Char '4' -> Some (SwitchTab TextStyles)
-      | Char 'q' | Char 'Q' | Escape -> Some Quit
-      | _ -> None) ]
+    Keys.bind [
+      Key.Char '1', SwitchTab Base16
+      Key.Char '2', SwitchTab Palette256
+      Key.Char '3', SwitchTab TrueColor
+      Key.Char '4', SwitchTab TextStyles
+      Key.Char 'q', Quit
+      Key.Char 'Q', Quit
+      Key.Escape, Quit
+    ] ]
 
 let program : Program<Model, Msg> =
   { Init = init

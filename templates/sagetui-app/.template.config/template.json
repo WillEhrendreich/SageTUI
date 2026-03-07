@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "SageTUI Contributors",
+  "classifications": ["Console", "F#", "TUI", "Terminal"],
+  "identity": "SageTUI.App",
+  "name": "SageTUI Application",
+  "shortName": "sagetui",
+  "tags": {
+    "language": "F#",
+    "type": "project"
+  },
+  "sourceName": "SageTuiApp",
+  "preferNameDirectory": true,
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "description": "Target framework",
+      "datatype": "choice",
+      "choices": [
+        { "choice": "net10.0", "description": ".NET 10" },
+        { "choice": "net9.0", "description": ".NET 9" }
+      ],
+      "defaultValue": "net10.0",
+      "replaces": "net10.0"
+    }
+  }
+}
