@@ -252,7 +252,12 @@ module ArenaRender =
             Height = max 0 (area.Height - pad.Top - pad.Bottom) }
         render arena node.FirstChild inner inheritedFg inheritedBg inheritedAttrs buf
 
-      | 9uy -> // Keyed (pass through to child)
+      | 9uy -> // Keyed (pass through to child + record hit area)
+        match node.DataLen > 0 with
+        | true ->
+          let key = System.String(arena.TextBuf, node.DataStart, node.DataLen)
+          arena.HitMap.Add({ X = area.X; Y = area.Y; Width = area.Width; Height = area.Height; Key = key })
+        | false -> ()
         render arena node.FirstChild area inheritedFg inheritedBg inheritedAttrs buf
 
       | 10uy -> // Canvas
@@ -328,3 +333,15 @@ module ArenaRender =
 
   let renderRoot (arena: FrameArena) (rootHandle: NodeHandle) (area: Area) (buf: Buffer) =
     render arena (NodeHandle.value rootHandle) area 0 0 0us buf
+
+  let hitTest (arena: FrameArena) (x: int) (y: int) : string option =
+    let mutable result = None
+    for i in arena.HitMap.Count - 1 .. -1 .. 0 do
+      match result with
+      | Some _ -> ()
+      | None ->
+        let entry = arena.HitMap.[i]
+        match x >= entry.X && x < entry.X + entry.Width && y >= entry.Y && y < entry.Y + entry.Height with
+        | true -> result <- Some entry.Key
+        | false -> ()
+    result

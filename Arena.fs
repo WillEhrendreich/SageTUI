@@ -20,6 +20,8 @@ type NodeHandle = private NodeHandle of int
 module NodeHandle =
   let value (NodeHandle idx) = idx
 
+type HitEntry = { X: int; Y: int; Width: int; Height: int; Key: string }
+
 type FrameArena =
   { Nodes: ElementNode array
     mutable NodeCount: int
@@ -28,7 +30,8 @@ type FrameArena =
     LayoutScratch: int array
     mutable LayoutPos: int
     mutable Generation: int
-    CanvasDraws: System.Collections.Generic.List<CanvasConfig> }
+    CanvasDraws: System.Collections.Generic.List<CanvasConfig>
+    HitMap: System.Collections.Generic.List<HitEntry> }
 
 module FrameArena =
   let create maxNodes maxChars maxLayoutScratch =
@@ -39,7 +42,8 @@ module FrameArena =
       LayoutScratch = Array.zeroCreate maxLayoutScratch
       LayoutPos = 0
       Generation = 0
-      CanvasDraws = System.Collections.Generic.List<CanvasConfig>() }
+      CanvasDraws = System.Collections.Generic.List<CanvasConfig>()
+      HitMap = System.Collections.Generic.List<HitEntry>() }
 
   let reset arena =
     arena.NodeCount <- 0
@@ -47,6 +51,7 @@ module FrameArena =
     arena.LayoutPos <- 0
     arena.Generation <- arena.Generation + 1
     arena.CanvasDraws.Clear()
+    arena.HitMap.Clear()
 
   let allocNode arena =
     if arena.NodeCount >= arena.Nodes.Length then

@@ -35,6 +35,7 @@ module Cmd =
 type Sub<'msg> =
   | KeySub of (Key * Modifiers -> 'msg option)
   | MouseSub of (MouseEvent -> 'msg option)
+  | ClickSub of (MouseEvent * string option -> 'msg option)
   | TimerSub of id: string * interval: TimeSpan * tick: (unit -> 'msg)
   | ResizeSub of (int * int -> 'msg)
   | CustomSub of id: string * start: (('msg -> unit) -> CancellationToken -> Async<unit>)

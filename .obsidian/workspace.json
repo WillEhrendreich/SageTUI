@@ -185,6 +185,9 @@
   },
   "active": "ac394dc03ed8186e",
   "lastOpenFiles": [
+    "SageTUI.Tests/obj/Debug/net10.0/1slulxrk.pns~",
+    "SageTUI.Tests/HitTestTests.fs",
+    "SageTUI.Html/obj/Debug/net10.0/qw0dex2f.pyl~",
     "expertPanel/excellence-roadmap-deliberation.md",
     "SageTUI.Tests/bin/Debug/net10.0/AngleSharp.dll",
     "SageTUI.Tests/bin/Debug/net10.0/Falco.Markup.dll",
@@ -194,8 +197,6 @@
     "SageTUI.Tests/obj/Debug/net10.0/2eymw5cq.34s~",
     "obj/Debug/net10.0/xxsvzkhi.sfr~",
     "SageTUI.Tests/obj/Debug/net10.0/jdvm2nc4.yfd~",
-    "SageTUI.Tests/obj/Debug/net10.0/fo42s3fb.3un~",
-    "obj/Debug/net10.0/z1jdcafl.spv~",
     "expertPanel/next-priorities-deliberation.md",
     "expertPanel/sample-review.md",
     "samples/README.md",
@@ -219,7 +220,6 @@
     "expertPanel/_tmp/sec_3_10_anim.md",
     "expertPanel/_tmp/sec_1_to_3_5.md",
     "expertPanel/terminal-compatibility-deliberation.md",
-    "expertPanel/impossible-revisited-deliberation.md",
-    "expertPanel/visual-flair-deliberation.md"
+    "expertPanel/impossible-revisited-deliberation.md"
   ]
 }

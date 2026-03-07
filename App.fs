@@ -215,6 +215,9 @@ module App =
             handler (key, mods) |> Option.iter dispatch
           | MouseSub handler, MouseInput me ->
             handler me |> Option.iter dispatch
+          | ClickSub handler, MouseInput me ->
+            let hitKey = ArenaRender.hitTest arena me.X me.Y
+            handler (me, hitKey) |> Option.iter dispatch
           | ResizeSub handler, Resized(w, h) ->
             handler (w, h) |> dispatch
           | _ -> ()
