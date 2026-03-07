@@ -7,6 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="CssTypes.fs" />
+    <Compile Include="CssLayout.fs" />
     <Compile Include="HtmlRender.fs" />
     <Compile Include="HtmlParse.fs" />
     <Compile Include="HtmlString.fs" />
