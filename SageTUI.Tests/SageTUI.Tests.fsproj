@@ -17,12 +17,15 @@
     <Compile Include="CssTests.fs" />
     <Compile Include="IntegrationTests.fs" />
     <Compile Include="SnapshotTests.fs" />
+    <Compile Include="SampleShowcaseTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SageTUI.Library.fsproj" />
     <ProjectReference Include="..\SageTUI.Html\SageTUI.Html.fsproj" />
+    <ProjectReference Include="..\samples\04-InteractiveForm\InteractiveForm.fsproj" />
+    <ProjectReference Include="..\samples\09-SystemMonitor\SystemMonitor.fsproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,3 +1,5 @@
+module SystemMonitor
+
 open SageTUI
 open System
 
@@ -29,19 +31,53 @@ type Model = {
 }
 
 let maxHistory = 40
+let theme = Theme.nord
+
+let private chip fg bg text =
+  El.text (sprintf " %s " text)
+  |> El.bold
+  |> El.fg fg
+  |> El.bg bg
+
+let private formatUptime ticks =
+  let totalSeconds = ticks / 2
+  let minutes = totalSeconds / 60
+  let seconds = totalSeconds % 60
+  sprintf "%02d:%02d" minutes seconds
+
+let private trimHistory value xs =
+  let next = xs @ [value]
+  match List.length next > maxHistory with
+  | true -> next |> List.skip 1
+  | false -> next
+
+let private metricCard accent label value detail =
+  El.column [
+    El.text label
+      |> El.fg theme.TextDim
+      |> El.bold
+    El.text value
+      |> El.fg accent
+      |> El.bold
+    El.text detail
+      |> El.fg theme.TextDim
+      |> El.dim
+  ]
+  |> El.padHV 1 0
+  |> El.bordered Rounded
 
 let fakeProcesses (rng: Random) =
-  [| "dotnet"; "code"; "chrome"; "firefox"; "nvim"; "bash"; "node"
-     "postgres"; "redis"; "nginx"; "systemd"; "sshd"; "docker"
-     "tmux"; "htop"; "git"; "cargo"; "rustc"; "python3"; "fsi" |]
+  [| "gateway"; "event-store"; "scheduler"; "search-index"; "api-edge"; "asset-proxy"; "auth-svc"
+     "session-cache"; "email-worker"; "audit-writer"; "metrics"; "billing-sync"; "blob-sync"
+     "web-liveview"; "image-proxy"; "job-runner"; "replay"; "postgres"; "redis"; "queue" |]
   |> Array.map (fun name ->
     { Name = name
-      Cpu = Math.Round(rng.NextDouble() * 25.0, 1)
-      Mem = Math.Round(rng.NextDouble() * 500.0, 0)
+      Cpu = Math.Round(2.0 + rng.NextDouble() * 36.0, 1)
+      Mem = Math.Round(120.0 + rng.NextDouble() * 760.0, 0)
       Status =
         match rng.Next(10) with
         | 0 -> "idle"
-        | n when n < 3 -> "wait"
+        | n when n < 3 -> "sync"
         | _ -> "run" })
   |> Array.sortByDescending (fun p -> p.Cpu)
   |> Array.toList
@@ -65,12 +101,11 @@ let update msg model =
     let mem = 40.0 + model.Rng.NextDouble() * 25.0
     let netIn = model.Rng.NextDouble() * 100.0
     let netOut = model.Rng.NextDouble() * 50.0
-    let trim xs = (xs @ [cpu]) |> List.skip (match List.length xs >= maxHistory with | true -> 1 | false -> 0)
     { model with
-        CpuHistory = trim model.CpuHistory
-        MemHistory = (model.MemHistory @ [mem]) |> List.skip (match model.MemHistory.Length >= maxHistory with | true -> 1 | false -> 0)
-        NetInHistory = (model.NetInHistory @ [netIn]) |> List.skip (match model.NetInHistory.Length >= maxHistory with | true -> 1 | false -> 0)
-        NetOutHistory = (model.NetOutHistory @ [netOut]) |> List.skip (match model.NetOutHistory.Length >= maxHistory with | true -> 1 | false -> 0)
+        CpuHistory = trimHistory cpu model.CpuHistory
+        MemHistory = trimHistory mem model.MemHistory
+        NetInHistory = trimHistory netIn model.NetInHistory
+        NetOutHistory = trimHistory netOut model.NetOutHistory
         Processes = fakeProcesses model.Rng
         Uptime = model.Uptime + 1 }, Cmd.none
   | ScrollUp ->
@@ -94,128 +129,204 @@ let sparkline color label (data: float list) maxVal =
     |> String.concat ""
   let last = data |> List.tryLast |> Option.defaultValue 0.0
   El.column [
-    El.text label |> El.bold |> El.fg color
+    El.row [
+      El.text label |> El.bold |> El.fg color
+      El.fill El.empty
+      El.text (sprintf "current %.1f" last) |> El.fg theme.TextDim |> El.dim
+    ]
     El.text bars |> El.fg color
-    El.text (sprintf "%.1f%%" last) |> El.dim
+    El.text (sprintf "%.1f%% of threshold" last) |> El.fg theme.TextDim |> El.dim
   ]
-
-let gauge color label pct =
-  El.row [
-    El.text (sprintf "%s " label) |> El.bold |> El.width 6
-    ProgressBar.view
-      { ProgressBar.defaults with
-          Percent = pct
-          Width = 30
-          FilledColor = Some color
-          EmptyColor = Some (Color.Named(White, Normal)) }
-    El.text (sprintf " %d%%" (int (pct * 100.0))) |> El.dim
-  ]
+  |> El.padHV 1 0
+  |> El.bordered Rounded
 
 let statusDot status =
   match status with
-  | "run" -> El.text "●" |> El.fg (Color.Named(Green, Bright))
-  | "wait" -> El.text "●" |> El.fg (Color.Named(Yellow, Bright))
-  | _ -> El.text "●" |> El.fg (Color.Named(Red, Normal))
+  | "run" -> El.text "●" |> El.fg theme.Success
+  | "sync" -> El.text "●" |> El.fg theme.Warning
+  | _ -> El.text "●" |> El.fg theme.TextDim
 
 let processTable (procs: ProcessInfo list) scroll =
   let items =
     procs
     |> List.mapi (fun i p ->
-      El.row [
-        statusDot p.Status |> El.width 2
-        El.text p.Name |> El.width 12
-        El.text (sprintf "%5.1f%%" p.Cpu) |> El.width 8
-          |> El.fg (match p.Cpu > 15.0 with | true -> Color.Named(Red, Bright) | false -> Color.Named(Green, Bright))
-        El.text (sprintf "%5.0f MB" p.Mem) |> El.width 10
-        El.text p.Status |> El.dim
-      ])
+      let nameCell =
+        let baseCell = El.text p.Name |> El.width 18
+        match i = 0 with
+        | true -> baseCell |> El.bold
+        | false -> baseCell
+
+      let cpuCell =
+        El.text (sprintf "%5.1f%%" p.Cpu)
+        |> El.width 8
+        |> El.fg (match p.Cpu > 28.0 with | true -> theme.Error | false -> theme.Success)
+
+      let stateCell =
+        El.text p.Status
+        |> El.width 8
+        |> El.fg (match p.Status with | "run" -> theme.Success | "sync" -> theme.Warning | _ -> theme.TextDim)
+
+      let row =
+        El.row [
+          statusDot p.Status |> El.width 2
+          nameCell
+          cpuCell
+          El.text (sprintf "%5.0f MB" p.Mem) |> El.width 10
+          stateCell
+          El.text
+            (match p.Status with
+             | "run" -> "serving requests"
+             | "sync" -> "checkpointing"
+             | _ -> "waiting for work")
+            |> El.fg theme.TextDim
+            |> El.dim
+        ]
+      row)
   El.column [
     El.row [
-      El.text "  " |> El.width 2
-      El.text "PROCESS" |> El.bold |> El.width 12
-      El.text "   CPU" |> El.bold |> El.width 8
-      El.text "    MEM" |> El.bold |> El.width 10
-      El.text "STATUS" |> El.bold
-    ] |> El.fg (Color.Named(Cyan, Bright))
-    El.text (String.replicate 44 "─") |> El.dim
+      El.text "Top processes" |> El.bold |> El.fg theme.Primary
+      El.fill El.empty
+      El.text "↑/↓ scroll" |> El.fg theme.TextDim |> El.dim
+    ]
+    El.row [
+      El.text " " |> El.width 2
+      El.text "PROCESS" |> El.bold |> El.width 18
+      El.text "CPU" |> El.bold |> El.width 8
+      El.text "MEM" |> El.bold |> El.width 10
+      El.text "STATE" |> El.bold |> El.width 8
+      El.text "DETAIL" |> El.bold
+    ] |> El.fg theme.Secondary
+    El.text (String.replicate 72 "─") |> El.fg theme.TextDim |> El.dim
     Scroll.view scroll (fun _idx el -> el) items
-  ] |> El.bordered Light
+  ]
+  |> El.padHV 1 0
+  |> El.bordered Rounded
 
 let overviewTab model =
-  let theme = Theme.dark
   let lastCpu = model.CpuHistory |> List.tryLast |> Option.defaultValue 0.0
   let lastMem = model.MemHistory |> List.tryLast |> Option.defaultValue 0.0
+  let lastIn = model.NetInHistory |> List.tryLast |> Option.defaultValue 0.0
+  let lastOut = model.NetOutHistory |> List.tryLast |> Option.defaultValue 0.0
+  let hottest =
+    model.Processes
+    |> List.tryHead
+    |> Option.map (fun p -> sprintf "%s at %.1f%%" p.Name p.Cpu)
+    |> Option.defaultValue "No process activity"
+
+  let headline =
+    El.row [
+      metricCard theme.Primary "CPU LOAD" (sprintf "%.1f%%" lastCpu) "Nominal envelope < 45%" |> El.width 22
+      El.text " " |> El.width 1
+      metricCard theme.Accent "MEMORY" (sprintf "%.1f%%" lastMem) "Working set stays steady" |> El.width 22
+      El.text " " |> El.width 1
+      metricCard theme.Success "THROUGHPUT" (sprintf "%.1f Mbps" (lastIn + lastOut)) "Ingress + egress combined" |> El.width 24
+      El.text " " |> El.width 1
+      metricCard theme.Warning "UPTIME" (formatUptime model.Uptime) hottest |> El.width 22
+    ]
+
   El.column [
+    headline
+    El.text ""
     El.row [
-      sparkline (Color.Named(Cyan, Bright)) "CPU" model.CpuHistory 100.0 |> El.fill
-      sparkline (Color.Named(Magenta, Bright)) "MEM" model.MemHistory 100.0 |> El.fill
-    ] |> El.bordered Light
-    El.row [
-      gauge (Color.Named(Cyan, Bright)) "CPU" (lastCpu / 100.0)
-      El.text "  " |> El.width 2
-      gauge (Color.Named(Magenta, Bright)) "MEM" (lastMem / 100.0)
-    ] |> El.padAll 1
+      sparkline theme.Primary "CPU history" model.CpuHistory 100.0 |> El.width 49
+      El.text " " |> El.width 1
+      sparkline theme.Accent "Memory history" model.MemHistory 100.0 |> El.width 49
+    ]
+    El.text ""
     processTable model.Processes model.ProcessScroll |> El.fill
   ]
 
 let networkTab model =
+  let lastIn = model.NetInHistory |> List.tryLast |> Option.defaultValue 0.0
+  let lastOut = model.NetOutHistory |> List.tryLast |> Option.defaultValue 0.0
+
   El.column [
     El.row [
-      sparkline (Color.Named(Green, Bright)) "↓ Download" model.NetInHistory 100.0 |> El.fill
-      sparkline (Color.Named(Yellow, Bright)) "↑ Upload" model.NetOutHistory 100.0 |> El.fill
-    ] |> El.bordered Light
+      metricCard theme.Success "DOWNLOAD" (sprintf "%.1f Mbps" lastIn) "Public edge + replication traffic" |> El.width 32
+      El.text " " |> El.width 1
+      metricCard theme.Warning "UPLOAD" (sprintf "%.1f Mbps" lastOut) "Background jobs + client responses" |> El.width 32
+      El.text " " |> El.width 1
+      metricCard theme.Primary "INTERFACES" "3 / 4 up" "docker bridge parked" |> El.width 32
+    ]
+    El.text ""
     El.row [
-      El.column [
-        El.text "Network Stats" |> El.bold |> El.fg (Color.Named(Green, Bright))
-        let lastIn = model.NetInHistory |> List.tryLast |> Option.defaultValue 0.0
-        let lastOut = model.NetOutHistory |> List.tryLast |> Option.defaultValue 0.0
-        El.text (sprintf "  Download: %.1f Mbps" lastIn)
-        El.text (sprintf "  Upload:   %.1f Mbps" lastOut)
-        El.text (sprintf "  Total:    %.1f Mbps" (lastIn + lastOut))
-      ] |> El.fill |> El.padAll 1
-      El.column [
-        El.text "Interfaces" |> El.bold |> El.fg (Color.Named(Cyan, Bright))
-        El.text "  eth0   ● up" |> El.fg (Color.Named(Green, Bright))
-        El.text "  wlan0  ● up" |> El.fg (Color.Named(Green, Bright))
-        El.text "  lo     ● up" |> El.fg (Color.Named(Yellow, Bright))
-        El.text "  docker ○ down" |> El.dim
-      ] |> El.fill |> El.padAll 1
-    ] |> El.bordered Light |> El.fill
+      sparkline theme.Success "Download trend" model.NetInHistory 100.0 |> El.width 49
+      El.text " " |> El.width 1
+      sparkline theme.Warning "Upload trend" model.NetOutHistory 100.0 |> El.width 49
+    ]
+    El.text ""
+    El.column [
+      El.row [
+        El.text "Interface health" |> El.bold |> El.fg theme.Primary
+        El.fill El.empty
+        El.text "updated every 500 ms" |> El.fg theme.TextDim |> El.dim
+      ]
+      El.row [
+        El.text "eth0" |> El.width 10 |> El.bold
+        chip (Color.Named(Black, Normal)) theme.Success "UP"
+        El.text "  ingress 62.1 Mbps • primary application edge"
+      ]
+      El.row [
+        El.text "wlan0" |> El.width 10 |> El.bold
+        chip (Color.Named(Black, Normal)) theme.Success "UP"
+        El.text "  management 14.3 Mbps • maintenance and remote access"
+      ]
+      El.row [
+        El.text "lo" |> El.width 10 |> El.bold
+        chip (Color.Named(Black, Normal)) theme.Warning "LOCAL"
+        El.text "  service mesh and local health checks"
+      ]
+      El.row [
+        El.text "docker0" |> El.width 10 |> El.bold
+        El.text " DOWN " |> El.bold |> El.fg theme.TextDim |> El.bordered Rounded
+        El.text "  idle bridge • no active containers attached"
+          |> El.fg theme.TextDim
+          |> El.dim
+      ]
+    ]
+    |> El.padHV 1 0
+    |> El.bordered Rounded
   ]
 
 let aboutTab model =
   El.column [
-    El.text "SageTUI System Monitor" |> El.bold |> El.fg (Color.Named(Cyan, Bright))
+    Theme.heading theme "SageTUI System Monitor"
+    Theme.subheading theme "A dense operator-console sample built to show credible live data in a terminal-first UI."
     El.text ""
-    El.text "A showcase of SageTUI features:" |> El.dim
-    El.text "  • Elm Architecture (TEA)" |> El.fg (Color.Named(Green, Bright))
-    El.text "  • Sparkline charts" |> El.fg (Color.Named(Green, Bright))
-    El.text "  • Progress bars" |> El.fg (Color.Named(Green, Bright))
-    El.text "  • Scrollable lists" |> El.fg (Color.Named(Green, Bright))
-    El.text "  • Tabs navigation" |> El.fg (Color.Named(Green, Bright))
-    El.text "  • Theme system" |> El.fg (Color.Named(Green, Bright))
-    El.text "  • Keyboard bindings" |> El.fg (Color.Named(Green, Bright))
-    El.text "  • Live updates via subscriptions" |> El.fg (Color.Named(Green, Bright))
+    El.column [
+      El.row [ chip (Color.Named(Black, Normal)) theme.Primary "TEA"; El.text " Elm-style update loop with timer-driven live refresh" ]
+      El.row [ chip (Color.Named(Black, Normal)) theme.Accent "WIDGETS"; El.text " Tabs, progress bars, scroll regions, and themed panels" ]
+      El.row [ chip (Color.Named(Black, Normal)) theme.Success "OPERATIONS"; El.text " Realistic naming, process tables, and throughput trends" ]
+      El.row [ chip (Color.Named(Black, Normal)) theme.Warning "INPUT"; El.text " Arrow keys, Tab, and q support immediate exploration" ]
+    ]
+    |> El.gap 1
     El.text ""
-    El.text (sprintf "Uptime: %d ticks" model.Uptime) |> El.dim
-    El.text "Built with ❤ in F#" |> El.fg (Color.Named(Magenta, Bright))
-  ] |> El.padAll 2 |> El.bordered Rounded |> El.center
+    El.row [
+      metricCard theme.Primary "SESSION" (formatUptime model.Uptime) "Synthetic uptime since launch" |> El.width 30
+      El.text " " |> El.width 1
+      metricCard theme.Success "REFRESH" "500 ms" "Balanced for readable motion" |> El.width 30
+    ]
+  ]
+  |> El.padHV 2 1
+  |> El.bordered Rounded
+  |> El.center
 
 let view model =
-  let tabs = [| "Overview"; "Network"; "About" |]
   let tabBar =
-    El.row (
-      tabs
-      |> Array.mapi (fun i name ->
-        match i = model.ActiveTab with
-        | true ->
-          El.text (sprintf " %s " name)
-          |> El.bold |> El.fg (Color.Named(Cyan, Bright))
-          |> El.bordered Light
-        | false ->
-          El.text (sprintf " %s " name)
-          |> El.dim)
-      |> Array.toList)
+    El.row [
+      Tabs.view {
+        Items = ["Overview"; "Network"; "About"]
+        ActiveIndex = model.ActiveTab
+        ToString = id
+        ActiveColor = Some theme.Primary
+        InactiveColor = Some theme.TextDim
+      }
+      El.fill El.empty
+      El.text "←/→ or Tab to switch views"
+        |> El.fg theme.TextDim
+        |> El.dim
+    ]
+    |> El.padHV 1 0
 
   let content =
     match model.ActiveTab with
@@ -225,15 +336,29 @@ let view model =
 
   El.column [
     El.row [
-      El.text " ⚡ System Monitor " |> El.bold |> El.fg (Color.Named(Cyan, Bright))
-      tabBar |> El.fill
-      El.text (sprintf " tick:%d " model.Uptime) |> El.dim
+      chip (Color.Named(Black, Normal)) theme.Accent "FLAGSHIP"
+      Theme.heading theme "System Monitor"
+      El.text "  "
+      Theme.subheading theme "dense operator console"
+      El.fill El.empty
+      chip (Color.Named(Black, Normal)) theme.Success "LIVE"
+      El.text " "
+      El.text (sprintf "uptime %s" (formatUptime model.Uptime))
+        |> El.fg theme.TextDim
+        |> El.dim
     ]
-    content |> El.fill
+    |> El.padHV 1 0
+    tabBar
+    content |> El.fill |> El.padAll 1
     El.row [
-      El.text " [←/→] tabs  [↑/↓] scroll  [q] quit " |> El.dim
+      El.text "↑/↓" |> El.bold |> El.fg theme.Primary
+      El.text " scroll processes  " |> El.fg theme.TextDim |> El.dim
+      El.text "q" |> El.bold |> El.fg theme.Primary
+      El.text " quit" |> El.fg theme.TextDim |> El.dim
     ]
+    |> El.padHV 1 0
   ]
+  |> Theme.apply theme
 
 let program : Program<Model, Msg> =
   { Init = init

@@ -2,18 +2,17 @@
 
 **Build beautiful terminal UIs in F# with zero ceremony.**
 
-Elm Architecture • SIMD rendering • 990+ tests • Zero external dependencies
-
-<!-- TODO: Add GIF of Dashboard or Kanban sample here -->
-<!-- ![SageTUI Demo](docs/demo.gif) -->
+Elm Architecture • SIMD rendering • 1,110 tests • Core package has zero external dependencies
 
 ## Install
+
+### Core library
 
 ```bash
 dotnet add package SageTUI
 ```
 
-Or start from a template:
+### Project template
 
 ```bash
 dotnet new install SageTUI.Templates
@@ -21,17 +20,86 @@ dotnet new sagetui -n MyApp
 cd MyApp && dotnet run
 ```
 
-## 5-Line Hello World
+### Optional HTML bridge
+
+`SageTUI.Html` is a separate package/project for HTML parsing and rendering. It is not part of the core `SageTUI` package.
+
+## 60-Second Quickstart
+
+If you want the fastest path, use the template:
+
+```bash
+dotnet new install SageTUI.Templates
+dotnet new sagetui -n MyApp
+cd MyApp
+dotnet run
+```
+
+If you want to start from an empty F# console app, paste this complete `Program.fs`:
+
+```fsharp
+open SageTUI
+
+type Msg =
+  | Increment
+  | Decrement
+  | Quit
+
+let init () = 0, Cmd.none
+
+let update msg count =
+  match msg with
+  | Increment -> count + 1, Cmd.none
+  | Decrement -> max 0 (count - 1), Cmd.none
+  | Quit -> count, Cmd.quit
+
+let view count =
+  El.column [
+    El.text "Hello, SageTUI!"
+      |> El.bold
+      |> El.fg (Color.Rgb(255uy, 200uy, 50uy))
+    El.text ""
+    El.text (sprintf "Count: %d" count) |> El.bold
+    El.text ""
+    El.text "[j] increment  [k] decrement  [q] quit" |> El.dim
+  ]
+  |> El.padAll 1
+  |> El.bordered Rounded
+
+let program : Program<int, Msg> =
+  { Init = init
+    Update = update
+    View = view
+    Subscribe = fun _ -> [
+      Keys.bind [
+        Key.Char 'j', Increment
+        Key.Char 'k', Decrement
+        Key.Char 'q', Quit
+        Key.Escape, Quit
+      ] ] }
+
+[<EntryPoint>]
+let main _ = App.run program; 0
+```
+
+Press `q` or `Esc` to quit.
+
+## Smallest Possible Static View
+
+For one-off screens and demos:
 
 ```fsharp
 open SageTUI
 
 App.display (fun () ->
-  El.text "Hello from SageTUI!" |> El.bold |> El.fg (Color.Named(Cyan, Bright))
-  |> El.bordered Rounded |> El.padAll 1)
+  El.text "Hello from SageTUI!"
+  |> El.bold
+  |> El.fg (Color.Named(Cyan, Bright))
+  |> El.bordered Rounded
+  |> El.padAll 1)
 ```
 
-That's it. No boilerplate. `App.display` handles terminal setup, rendering, and cleanup.
+`App.display` is the smallest API surface; `App.run` is the full Elm Architecture entry point.
 
 ## Interactive App (Elm Architecture)
 
@@ -68,7 +136,7 @@ let program : Program<int, Msg> =
 let main _ = App.run program; 0
 ```
 
-`App.run` auto-detects your terminal (TrueColor, 256-color, multiplexer) and handles everything.
+`App.run` auto-detects your terminal capabilities and handles setup, rendering, and cleanup.
 
 ## Features
 
@@ -77,14 +145,22 @@ let main _ = App.run program; 0
 | **Architecture** | Elm Architecture (init/update/view/subscribe), pure state management |
 | **Layout** | Row, Column, Fill, Percentage, Min/Max, padding, borders, alignment, gap, flex-shrink |
 | **Rendering** | Arena-allocated zero-GC frame loop, SIMD-accelerated diff, 24-bit TrueColor |
-| **Widgets** | TextInput, Select, Table, Tabs, Modal, TreeView, ProgressBar, Checkbox, Toggle, RadioGroup, Spinner, Toast, Form |
+| **Widgets** | TextInput, Select, Table, Tabs, Modal, TreeView, ProgressBar, Checkbox, Toggle, RadioGroup, SpinnerWidget, Toast, Form |
 | **Scrolling** | ScrollState, scroll indicators, mouse wheel, ScrollableList, keyboard navigation |
 | **Canvas** | HalfBlock (▀/▄) and Braille (⠿) pixel modes |
-| **Transitions** | Fade, Wipe, SlideIn, Dissolve, ColorMorph, Grow, Custom |
+| **Transitions** | Runtime support for Fade, Wipe, Dissolve, and ColorMorph, with additional transition shapes modeled in the API |
 | **Themes** | 5 built-in themes (dark, light, nord, dracula, catppuccin) |
-| **HTML Bridge** | Parse HTML fragments → Element trees (tables, styles, semantic tags) |
+| **HTML Bridge** | Optional `SageTUI.Html` package for parsing HTML fragments into Element trees |
 | **Mouse** | Click subscriptions, hit-testing with Z-order, focus cycling |
-| **Safety** | Error boundary restores terminal on crash. Always. |
+| **Safety** | Restores the terminal on unhandled managed exceptions |
+
+## Why SageTUI
+
+- **F#-native TEA** — immutable model, explicit messages, pure view functions
+- **Terminal-native layout** — rows, columns, fill, percentages, borders, alignment, gap
+- **Fast rendering path** — packed cells, arena lowering, and diffing that avoids repainting unchanged output
+- **Testable by design** — integration and snapshot tests can render real programs without a live terminal
+- **Small mental model** — toolkit, not framework ceremony
 
 ## Layout Engine
 
@@ -115,19 +191,27 @@ El.row [
 ```fsharp
 TextInput.view focused model.Input
 ProgressBar.view { ProgressBar.defaults with Percent = 0.75; Width = 40 }
-Tabs.view ["Home"; "Settings"; "Help"] activeTab
-Table.view headers rows selectedRow focused
-Modal.view { Modal.defaults with Title = Some "Confirm" } content
-TreeView.view toString focused nodes treeState
+Tabs.view {
+  Items = ["Home"; "Settings"; "Help"]
+  ActiveIndex = activeTab
+  ToString = id
+  ActiveColor = Some (Color.Named(Cyan, Bright))
+  InactiveColor = None
+}
+Table.view columns rows (Some selectedRow)
+Modal.view { Modal.defaults with BorderStyle = Rounded; MaxWidth = Some 40 } content
+TreeView.view id focused nodes treeState
 Form.view fields focusedKey model
 ```
+
+These are low-level building blocks. Most real apps compose them inside `view` functions rather than relying on a heavyweight retained widget tree.
 
 ## Themes
 
 ```fsharp
 let themed = Theme.dark  // or: light, nord, dracula, catppuccin
-El.text "Styled heading" |> Theme.heading themed
-El.column [...] |> Theme.panel themed "My Panel"
+Theme.heading themed "Styled heading"
+Theme.panel themed "My Panel" (El.column [...])
 ```
 
 ## .NET Interop
@@ -145,6 +229,8 @@ let update msg model =
 ```
 
 ## HTML Rendering
+
+`SageTUI.Html` is an optional companion package/project for rendering HTML into SageTUI elements.
 
 ```fsharp
 open SageTUI.Html
@@ -173,8 +259,8 @@ Benchmarked with [BenchmarkDotNet](https://github.com/dotnet/BenchmarkDotNet) on
 | Layout 50-item column | **26.1 μs** | 91 KB |
 | Layout nested 3-level (10 rows) | **102 μs** | 143 KB |
 
-Buffer diff uses SIMD (Vector256) to compare 16-byte PackedCells — identical frames diff in under 1μs.
-The tree renderer allocates less; the arena renderer is optimized for large/complex UIs with pre-allocated nodes.
+The render path is built around packed cells, arena lowering, and JIT-vectorized diffing over unchanged spans.
+Some benchmark layers still allocate while constructing trees and layouts; the point is to keep the hot terminal rendering path tight and predictable.
 
 Run benchmarks yourself: `dotnet run -c Release --project SageTUI.Benchmarks`
 
@@ -201,22 +287,24 @@ Run benchmarks yourself: `dotnet run -c Release --project SageTUI.Benchmarks`
 
 ## Samples
 
-Each sample builds on concepts from the previous ones:
+The sample suite is tiered so the strongest experiences lead the front door:
 
-| # | Sample | What You Learn |
-|---|--------|----------------|
-| 01 | **HelloWorld** | TEA basics — `init`/`update`/`view`, `Keys.bind`, borders |
-| 02 | **Dashboard** | Layout (`row`/`column`/`fill`), `TimerSub`, progress bars |
-| 03 | **HtmlRenderer** | HTML→Element bridge, page navigation |
-| 04 | **InteractiveForm** | TextInput widget, raw `KeySub` for forms, validation |
-| 05 | **ColorPalette** | TrueColor/Ansi256/Named colors, text styles |
-| 06 | **Kanban** | Complex state, keyboard-driven UI, multi-column layout |
-| 07 | **Transitions** | Animated enter/exit, `Keyed` elements, conditional subscriptions |
-| 08 | **Sparklines** | Canvas rendering (HalfBlock/Braille), real-time data |
-| 09 | **SystemMonitor** | **Everything together** — sparklines, tabs, scrolling, themes, progress bars |
+| Tier | Sample | What It Shows |
+|------|--------|---------------|
+| **Flagship** | **09 SystemMonitor** | Dense operator console: tabs, scrolling, live updates, themes, telemetry |
+| **Showcase** | **06 Kanban** | Keyboard-driven board navigation and multi-column state |
+| **Showcase** | **08 Sparklines** | Canvas-based telemetry and compact data visualization |
+| **Showcase** | **04 InteractiveForm** | Keyboard-first form flow, TextInput, Select, validation |
+| **Supporting** | **01 HelloWorld** | Smallest possible TEA app with borders and key bindings |
+| **Supporting** | **05 ColorPalette** | Theme semantics, color modes, text styles |
+| **Supporting** | **07 Transitions** | Keyed transitions and animated state changes |
+| **Supporting** | **02 Dashboard** | Secondary overview sample; useful for layout ideas, not the hero |
+| **Experimental** | **03 HtmlRenderer** | HTML→Element bridge and document rendering lab |
+
+If you only run one sample, start here:
 
 ```bash
-cd samples/09-SystemMonitor && dotnet run
+dotnet run --project samples/09-SystemMonitor
 ```
 
 ## Concepts
@@ -232,15 +320,27 @@ SageTUI uses the [Elm Architecture](https://guide.elm-lang.org/architecture/) (T
 - **Cmd** — side effects (async tasks, quit signal). `Cmd.none` means "no side effect"
 - **Sub** — ongoing event sources. `Keys.bind` for keyboard, `TimerSub` for polling
 
+## Support & Stability
+
+- **Package version:** 0.1.0
+- **Target framework:** .NET 10.0
+- **API status:** pre-1.0; expect iterative changes while the surface area settles
+- **Core package:** `SageTUI`
+- **Template package:** `SageTUI.Templates`
+- **Optional companion project:** `SageTUI.Html`
+- **Experimental areas:** the HTML bridge and some sample/demo surfaces are still evolving
+
 ## Advanced: Custom Backend
 
 For testing or custom terminal implementations:
 
 ```fsharp
-let profile = Detect.fromEnvironment envReader sizeGetter
+let profile = Detect.fromEnvironment readEnv getTerminalSize
 let backend = Backend.create profile
 App.runWithBackend backend program
 ```
+
+Where `readEnv` is a `string -> string option` function and `getTerminalSize` returns the current terminal size.
 
 ## Requirements
 

@@ -1,6 +1,6 @@
 # SageTUI Samples
 
-Seven showcase applications demonstrating the best features of SageTUI.
+Nine sample applications demonstrating the current SageTUI surface, grouped by how polished and representative they are.
 
 ## Running a Sample
 
@@ -8,18 +8,25 @@ Seven showcase applications demonstrating the best features of SageTUI.
 dotnet run --project samples/01-HelloWorld
 ```
 
+## Sample Tiers
+
+- **Flagship:** 09 SystemMonitor
+- **Showcase:** 04 InteractiveForm, 06 Kanban, 08 Sparklines
+- **Supporting:** 01 HelloWorld, 02 Dashboard, 05 ColorPalette, 07 Transitions
+- **Experimental:** 03 HtmlRenderer
+
 ## The Samples
 
 ### 01 — Hello World
-The simplest SageTUI app. Type your name, see it styled with TrueColor and borders.
-**Shows**: TEA architecture, keyboard input, styled text, padding.
+The simplest SageTUI app: a tiny counter with borders, color, and keyboard bindings.
+**Shows**: TEA architecture, `Keys.bind`, styled text, padding.
 
 ### 02 — Dashboard
-Real-time system monitor with auto-updating CPU bars, memory gauge, event log, and uptime clock.
-**Shows**: `TimerSub`, borders, `fill`/`ratio` layouts, progress bars, dynamic colors.
+Multi-panel operations dashboard with a clock, CPU bars, memory gauge, event log, and uptime.
+**Shows**: `TimerSub`, `ResizeSub`, borders, `fill`/`ratio` layouts, progress bars, dynamic colors.
 
-### 03 — HTML Renderer ⭐
-**The killer feature.** Browse 6 pages of raw HTML rendered directly to your terminal — styled text, tables, lists, forms, RGB gradients, and a full dashboard layout. All from plain HTML strings.
+### 03 — HTML Renderer
+Experimental HTML rendering lab. Useful for exploring the bridge, but not the primary front-door sample.
 **Shows**: `HtmlString.parseFragment`, CSS color support, semantic tags, inline styles.
 
 ### 04 — Interactive Form
@@ -35,5 +42,13 @@ Four-column Kanban with cards you can navigate and drag between columns. Cards s
 **Shows**: Complex layouts, `fill` distribution, nested borders, keyboard-driven state machine, `Map`-based state.
 
 ### 07 — Transitions
-Animated card carousel cycling through SageTUI feature cards. Switch between 6 animation types (Fade, ColorMorph, Wipe, Dissolve, Grow) and toggle auto-advance.
+Animated card carousel cycling through SageTUI feature cards. Switch between multiple transition styles and toggle auto-advance.
 **Shows**: `Keyed` elements, `Transition` DU, `viewTransition`, `TimerSub` for auto-cycle.
+
+### 08 — Sparklines
+Compact telemetry dashboard using HalfBlock and Braille rendering for real-time charts.
+**Shows**: canvas rendering, data visualization, `TimerSub`, dense operator-console layouts.
+
+### 09 — System Monitor
+The flagship sample. A dense terminal dashboard with tabs, live telemetry, scrolling process views, and themed status hierarchy.
+**Shows**: themes, tabs, scroll regions, live updates, telemetry composition, sample-grade layout polish.

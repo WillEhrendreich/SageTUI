@@ -1,0 +1,28 @@
+﻿  FLAGSHIP     System Monitor          dense operator console         LIVE          uptime 00:00    
+  Overview        Network       About                     ←/→ or Tab to switch views                
+                                                                                                    
+ ╭────────────────────╮ ╭────────────────────╮ ╭──────────────────────╮ ╭────────────────────╮      
+ │ CPU LOAD           │ │ MEMORY             │ │ THROUGHPUT           │ │ UPTIME             │      
+ │ 24.2%              │ │ 40.7%              │ │ 17.2 Mbps            │ │ 00:00              │      
+ │ Nominal envelope < │ │ Working set stays  │ │ Ingress + egress com │ │ search-index at 36 │      
+ ╰────────────────────╯ ╰────────────────────╯ ╰──────────────────────╯ ╰────────────────────╯      
+                                                                                                    
+ ╭───────────────────────────────────────────────╮ ╭──────────────────────────────────────────────╮ 
+ │ CPU history               current 24.2        │ │ Memory history            current 40.7       │ 
+ │ ▂▁▁▂▁▁▂▂▁▂▁▁▂▁▁▁▂▁▂▂▁▁▁▂▂▂▁▂▁▂▂▂▁▁▁▂▂▁▂▂      │ │ ▄▄▄▃▃▄▄▃▄▄▄▄▄▃▄▄▃▄▄▄▄▃▄▄▃▄▃▄▃▄▄▄▄▃▄▃▃▃▄▃     │ 
+ │ 24.2% of threshold                            │ │ 40.7% of threshold                           │ 
+ ╰───────────────────────────────────────────────╯ ╰──────────────────────────────────────────────╯ 
+                                                                                                    
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮ 
+ │ Top processes                                                ↑/↓ scroll                        │ 
+ │   PROCESS           CPU     MEM       STATE   DETAIL                                           │ 
+ │ ────────────────────────────────────────────────────────────────────────                       │ 
+ │ ● search-index               36.7%            472 MB  run             serving requests         │ 
+ │ ● postgres           36.3%               837 MB  run                serving requests           │ 
+ │ ● api-edge           36.1%                736 MB  sync                checkpointing            │ 
+ │ ● auth-svc           35.9%               667 MB  run                serving requests           │ 
+ │ ● email-worker       34.8%               853 MB  run                serving requests           │ 
+ │ ● redis              34.1%                857 MB  sync                checkpointing            │ 
+ │ ● web-liveview       34.0%                625 MB  sync                checkpointing            │ 
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯ 
+                                                                                                    

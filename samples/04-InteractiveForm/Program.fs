@@ -19,6 +19,14 @@ type Msg =
   | KeyInput of Key * Modifiers
   | Quit
 
+let theme = Theme.catppuccin
+
+let private chip fg bg text =
+  El.text (sprintf " %s " text)
+  |> El.bold
+  |> El.fg fg
+  |> El.bg bg
+
 let validate model =
   let errors = Map.empty
   let errors =
@@ -58,10 +66,10 @@ let update msg model =
       { model with Role = Select.toggle model.Role }, Cmd.none
     // Global keys
     | _, Escape -> model, Cmd.quit
+    | _, Key.Tab when _mods.HasFlag(Modifiers.Shift) ->
+      { model with Focus = FocusRing.prev model.Focus; Submitted = false }, Cmd.none
     | _, Tab ->
       { model with Focus = FocusRing.next model.Focus; Submitted = false }, Cmd.none
-    | _, BackTab ->
-      { model with Focus = FocusRing.prev model.Focus; Submitted = false }, Cmd.none
     // Submit
     | Some Submit, Key.Enter ->
       let errors = validate model
@@ -76,23 +84,75 @@ let update msg model =
     | _ -> model, Cmd.none
 
 let fieldLabel (label: string) (focused: bool) (error: string option) =
-  El.column [
-    El.row [
-      match focused with
-      | true ->
-        El.text (sprintf "▸ %s" label)
-          |> El.fg (Color.Named(Cyan, Bright))
-          |> El.bold
-      | false ->
-        El.text (sprintf "  %s" label)
-          |> El.fg (Color.Named(White, Normal))
-    ]
+  let labelEl =
+    El.text label
+    |> El.width 8
+    |> El.bold
+    |> El.fg (match focused with true -> theme.Primary | false -> theme.TextDim)
+
+  let detailEl =
     match error with
     | Some e ->
-      El.text (sprintf "    ⚠ %s" e)
-        |> El.fg (Color.Named(Red, Bright))
-    | None -> El.empty
+      Theme.error theme (sprintf "⚠ %s" e)
+    | None ->
+      El.text ""
+
+  El.row [
+    labelEl
+    detailEl
+    El.fill El.empty
+    match focused with
+    | true -> chip (Color.Named(Black, Normal)) theme.Primary "ACTIVE"
+    | false -> El.empty
   ]
+
+let fieldHint (hint: string) (error: string option) =
+  match error with
+  | Some _ -> El.empty
+  | None ->
+    El.text hint
+    |> El.fg theme.TextDim
+    |> El.dim
+
+let fieldShell (focused: bool) (content: Element) =
+  El.row [
+    El.text "[" |> El.fg (match focused with true -> theme.Primary | false -> theme.TextDim)
+    content |> El.width 34
+    El.text "]" |> El.fg (match focused with true -> theme.Primary | false -> theme.TextDim)
+  ]
+
+let textField label hint focused error content =
+  El.column [
+    fieldLabel label focused error
+    fieldShell focused content
+    fieldHint hint error
+  ]
+
+let textInputDisplay placeholder focused (model: TextInputModel) =
+  let value =
+    match model.Text, focused with
+    | "", true -> "▌"
+    | "", false -> placeholder
+    | text, true -> text + "▌"
+    | text, false -> text
+
+  let styled =
+    El.text value
+    |> El.fg (match focused with true -> theme.TextFg | false -> theme.TextFg)
+
+  match model.Text.Length = 0 with
+  | true -> styled |> El.dim
+  | false -> styled
+
+let selectDisplay focused (model: SelectModel<string>) =
+  let selected =
+    model.Options
+    |> List.tryItem model.Selected
+    |> Option.defaultValue "Developer"
+
+  let suffix = match model.IsOpen with true -> "[open]" | false -> "[enter]"
+  El.text (sprintf "%s %s" selected suffix)
+  |> El.fg (match focused with true -> theme.TextFg | false -> theme.TextFg)
 
 let view model =
   let focusedField = FocusRing.current model.Focus
@@ -101,88 +161,116 @@ let view model =
 
   let title =
     El.row [
-      El.text " ✦ Registration Form"
-        |> El.bold
-        |> El.fg (Color.Named(Cyan, Bright))
+      chip (Color.Named(Black, Normal)) theme.Accent "SHOWCASE"
+      Theme.heading theme "Interactive Form"
       El.fill (El.text "")
-      El.text "[Tab/Shift+Tab] Navigate  [Enter] Submit  [Esc] Quit "
+      El.text "Keyboard-first • focus • validation • select"
+        |> El.fg theme.TextDim
         |> El.dim
     ]
-    |> El.bg (Color.Named(Black, Normal))
+    |> El.padHV 1 0
 
   let nameField =
-    El.column [
-      fieldLabel "Name" (isFocused Name) (errorFor Name)
-      El.row [
-        El.text "    "
-        TextInput.view (isFocused Name) model.Name
-          |> El.width 30
-          |> El.bordered (match isFocused Name with true -> Rounded | false -> Light)
-      ]
-    ]
+    textField "Name" "Shown in alerts and ownership views." (isFocused Name) (errorFor Name)
+      (textInputDisplay "Ada Lovelace" (isFocused Name) model.Name)
 
   let emailField =
-    El.column [
-      fieldLabel "Email" (isFocused Email) (errorFor Email)
-      El.row [
-        El.text "    "
-        TextInput.view (isFocused Email) model.Email
-          |> El.width 30
-          |> El.bordered (match isFocused Email with true -> Rounded | false -> Light)
-      ]
-    ]
+    textField "Email" "Used for confirmations and deploy notices." (isFocused Email) (errorFor Email)
+      (textInputDisplay "ada@example.com" (isFocused Email) model.Email)
 
   let roleField =
     El.column [
       fieldLabel "Role" (isFocused Role) None
-      El.row [
-        El.text "    "
-        Select.view id (isFocused Role) model.Role
-          |> El.width 30
-          |> El.bordered (match isFocused Role with true -> Rounded | false -> Light)
-      ]
+      fieldShell (isFocused Role) (selectDisplay (isFocused Role) model.Role)
+      fieldHint "Press Enter to open the role list." None
+      match model.Role.IsOpen with
+      | true ->
+        model.Role.Options
+        |> List.mapi (fun i option ->
+          let prefix = match i = model.Role.Selected with true -> "›" | false -> " "
+          El.text (sprintf "  %s %s" prefix option)
+          |> El.fg (match i = model.Role.Selected with true -> theme.Secondary | false -> theme.TextDim))
+        |> El.column
+      | false -> El.empty
     ]
 
   let submitBtn =
-    let style =
+    let button =
       match isFocused Submit with
       | true ->
-        El.text "  ✓ Submit  "
+        El.text " Submit request "
           |> El.bold
           |> El.fg (Color.Named(Black, Normal))
-          |> El.bg (Color.Named(Green, Bright))
+          |> El.bg theme.Success
       | false ->
-        El.text "  ✓ Submit  "
-          |> El.dim
-    El.row [ El.text "    "; style ]
+        El.text " Submit request "
+          |> El.bold
+          |> El.fg theme.Primary
+          |> El.bordered Rounded
+    El.row [
+      button
+      El.text "  "
+      El.text "Enter submits the request."
+        |> El.fg theme.TextDim
+        |> El.dim
+    ]
 
   let result =
     match model.Submitted with
     | true ->
       let role = Select.selectedValue model.Role |> Option.defaultValue "?"
       El.column [
-        El.text ""
-        El.text (sprintf "  ✅ Welcome, %s! (%s)" model.Name.Text role)
-          |> El.fg (Color.Named(Green, Bright))
-          |> El.bold
-        El.text (sprintf "     Confirmation sent to %s" model.Email.Text)
-          |> El.fg (Color.Named(Green, Normal))
+        El.row [
+          chip (Color.Named(Black, Normal)) theme.Success "READY"
+          El.text (sprintf " %s is configured as %s" model.Name.Text role)
+            |> El.fg theme.Success
+            |> El.bold
+        ]
+        El.text (sprintf "Confirmation and audit notices will go to %s." model.Email.Text)
+          |> El.fg theme.TextFg
       ]
+      |> El.padAll 1
+      |> El.bordered Rounded
     | false -> El.empty
+
+  let intro =
+    El.column [
+      Theme.heading theme "Create an operator profile"
+      Theme.subheading theme "Move with Tab, edit inline, choose a role, and submit without leaving the keyboard."
+    ]
+
+  let formCard =
+    El.column [
+      intro
+      nameField
+      emailField
+      roleField
+      submitBtn
+      result
+    ]
+    |> El.padHV 1 0
+    |> El.bordered Rounded
+    |> El.width 54
+
+  let footer =
+    El.row [
+      El.text "Tab" |> El.bold |> El.fg theme.Primary
+      El.text " next  " |> El.fg theme.TextDim |> El.dim
+      El.text "Shift+Tab" |> El.bold |> El.fg theme.Primary
+      El.text " previous  " |> El.fg theme.TextDim |> El.dim
+      El.text "Enter" |> El.bold |> El.fg theme.Primary
+      El.text " submit/select  " |> El.fg theme.TextDim |> El.dim
+      El.text "Esc" |> El.bold |> El.fg theme.Primary
+      El.text " quit" |> El.fg theme.TextDim |> El.dim
+    ]
+    |> El.padHV 1 0
 
   El.column [
     title
-    El.text ""
-    nameField
-    El.text ""
-    emailField
-    El.text ""
-    roleField
-    El.text ""
-    submitBtn
-    result
+    formCard |> El.center
+    footer
   ]
-  |> El.padHV 2 0
+  |> Theme.apply theme
 
 let subscribe _model =
   [ KeySub (fun (key, mods) -> Some (KeyInput(key, mods))) ]
