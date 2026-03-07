@@ -1834,6 +1834,261 @@ let subTests = testList "Sub" [
     | _ -> failwith "expected ResizeSub"
 ]
 
+
+// ============================================================
+// Phase 6: Terminal Detection + User Override Tests
+// ============================================================
+
+let private envOf (vars: (string * string) list) : string -> string option =
+  let map = Map.ofList vars
+  fun key -> Map.tryFind key map
+
+let private emptyEnv : string -> string option = fun _ -> None
+
+let private testSize () = (80, 24)
+
+let private detect env = Detect.fromEnvironment env testSize
+
+let private baseDetectProfile : TerminalProfile =
+  { Color = ColorCapability.Basic16
+    Unicode = UnicodeCapability.AsciiOnly
+    Graphics = GraphicsCapability.TextOnly
+    Input = InputCapability.FunctionKeys
+    Output = OutputCapability.AltScreen
+    Size = (80, 24)
+    TermName = ""
+    Platform = Windows }
+
+let detectColorTests = testList "Detect color" [
+  testCase "COLORTERM=truecolor → TrueColor" <| fun () ->
+    let p = detect (envOf ["COLORTERM", "truecolor"])
+    p.Color |> Expect.equal "truecolor" ColorCapability.TrueColor
+
+  testCase "COLORTERM=24bit → TrueColor" <| fun () ->
+    let p = detect (envOf ["COLORTERM", "24bit"])
+    p.Color |> Expect.equal "24bit" ColorCapability.TrueColor
+
+  testCase "WT_SESSION present → TrueColor" <| fun () ->
+    let p = detect (envOf ["WT_SESSION", "guid"])
+    p.Color |> Expect.equal "wt" ColorCapability.TrueColor
+
+  testCase "TERM=xterm-256color → Indexed256" <| fun () ->
+    let p = detect (envOf ["TERM", "xterm-256color"])
+    p.Color |> Expect.equal "256" ColorCapability.Indexed256
+
+  testCase "TERM=dumb → NoColor" <| fun () ->
+    let p = detect (envOf ["TERM", "dumb"])
+    p.Color |> Expect.equal "dumb" ColorCapability.NoColor
+
+  testCase "empty env → Basic16" <| fun () ->
+    let p = detect emptyEnv
+    p.Color |> Expect.equal "default" ColorCapability.Basic16
+]
+
+let detectUnicodeTests = testList "Detect unicode" [
+  testCase "LANG with UTF-8 → FullUnicode" <| fun () ->
+    let p = detect (envOf ["LANG", "en_US.UTF-8"])
+    p.Unicode |> Expect.equal "utf8" UnicodeCapability.FullUnicode
+
+  testCase "WT_SESSION → FullUnicode" <| fun () ->
+    let p = detect (envOf ["WT_SESSION", "guid"])
+    p.Unicode |> Expect.equal "wt" UnicodeCapability.FullUnicode
+
+  testCase "LANG with ISO-8859 → Latin1" <| fun () ->
+    let p = detect (envOf ["LANG", "en_US.ISO-8859-1"])
+    p.Unicode |> Expect.equal "latin1" UnicodeCapability.Latin1
+
+  testCase "empty env → AsciiOnly" <| fun () ->
+    let p = detect emptyEnv
+    p.Unicode |> Expect.equal "default" UnicodeCapability.AsciiOnly
+]
+
+let detectGraphicsTests = testList "Detect graphics" [
+  testCase "TERM_PROGRAM=iTerm.app → ITermInline" <| fun () ->
+    let p = detect (envOf ["TERM_PROGRAM", "iTerm.app"])
+    p.Graphics |> Expect.equal "iterm" GraphicsCapability.ITermInline
+
+  testCase "TERM=xterm-kitty → KittyGraphics" <| fun () ->
+    let p = detect (envOf ["TERM", "xterm-kitty"])
+    p.Graphics |> Expect.equal "kitty" GraphicsCapability.KittyGraphics
+
+  testCase "FullUnicode → HalfBlock" <| fun () ->
+    let p = detect (envOf ["LANG", "en_US.UTF-8"])
+    p.Graphics |> Expect.equal "halfblock" GraphicsCapability.HalfBlock
+
+  testCase "AsciiOnly → TextOnly" <| fun () ->
+    let p = detect emptyEnv
+    p.Graphics |> Expect.equal "textonly" GraphicsCapability.TextOnly
+]
+
+let detectMiscTests = testList "Detect misc" [
+  testCase "TermName is TERM_PROGRAM" <| fun () ->
+    let p = detect (envOf ["TERM_PROGRAM", "Alacritty"])
+    p.TermName |> Expect.equal "name" "Alacritty"
+
+  testCase "defaults input to FunctionKeys" <| fun () ->
+    let p = detect emptyEnv
+    p.Input |> Expect.equal "input" InputCapability.FunctionKeys
+
+  testCase "defaults output to AltScreen" <| fun () ->
+    let p = detect emptyEnv
+    p.Output |> Expect.equal "output" OutputCapability.AltScreen
+]
+
+let multiplexerTests = testList "Multiplexer" [
+  testCase "no multiplexer → unchanged" <| fun () ->
+    Detect.adjustForMultiplexer emptyEnv baseDetectProfile
+    |> Expect.equal "unchanged" baseDetectProfile
+
+  testCase "tmux downgrades graphics to HalfBlock max" <| fun () ->
+    let p = { baseDetectProfile with Graphics = GraphicsCapability.KittyGraphics }
+    let r = Detect.adjustForMultiplexer (envOf ["TMUX", "/tmp/tmux"]) p
+    r.Graphics |> Expect.equal "halfblock" GraphicsCapability.HalfBlock
+
+  testCase "tmux leaves HalfBlock alone" <| fun () ->
+    let p = { baseDetectProfile with Graphics = GraphicsCapability.HalfBlock }
+    let r = Detect.adjustForMultiplexer (envOf ["TMUX", "/tmp/tmux"]) p
+    r.Graphics |> Expect.equal "halfblock" GraphicsCapability.HalfBlock
+
+  testCase "tmux downgrades output to AltScreen max" <| fun () ->
+    let p = { baseDetectProfile with Output = OutputCapability.SynchronizedOutput }
+    let r = Detect.adjustForMultiplexer (envOf ["TMUX", "/tmp/tmux"]) p
+    r.Output |> Expect.equal "altscreen" OutputCapability.AltScreen
+
+  testCase "screen downgrades color to Indexed256" <| fun () ->
+    let p = { baseDetectProfile with Color = ColorCapability.TrueColor }
+    let r = Detect.adjustForMultiplexer (envOf ["STY", "12345"]) p
+    r.Color |> Expect.equal "indexed" ColorCapability.Indexed256
+
+  testCase "screen sets graphics to TextOnly" <| fun () ->
+    let p = { baseDetectProfile with Graphics = GraphicsCapability.HalfBlock }
+    let r = Detect.adjustForMultiplexer (envOf ["STY", "12345"]) p
+    r.Graphics |> Expect.equal "textonly" GraphicsCapability.TextOnly
+
+  testCase "screen sets output to RawMode" <| fun () ->
+    let p = { baseDetectProfile with Output = OutputCapability.AltScreen }
+    let r = Detect.adjustForMultiplexer (envOf ["STY", "12345"]) p
+    r.Output |> Expect.equal "rawmode" OutputCapability.RawMode
+
+  testCase "tmux takes priority over screen" <| fun () ->
+    let p = { baseDetectProfile with Graphics = GraphicsCapability.KittyGraphics }
+    let r = Detect.adjustForMultiplexer (envOf ["TMUX", "/tmp/tmux"; "STY", "12345"]) p
+    r.Graphics |> Expect.equal "halfblock" GraphicsCapability.HalfBlock
+    r.Output |> Expect.equal "altscreen" OutputCapability.AltScreen
+]
+
+let userOverrideColorTests = testList "Override color" [
+  testCase "SAGETUI_COLOR=none → NoColor" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_COLOR", "none"]) baseDetectProfile).Color
+    |> Expect.equal "none" ColorCapability.NoColor
+
+  testCase "SAGETUI_COLOR=16 → Basic16" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_COLOR", "16"]) baseDetectProfile).Color
+    |> Expect.equal "16" ColorCapability.Basic16
+
+  testCase "SAGETUI_COLOR=256 → Indexed256" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_COLOR", "256"]) baseDetectProfile).Color
+    |> Expect.equal "256" ColorCapability.Indexed256
+
+  testCase "SAGETUI_COLOR=true → TrueColor" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_COLOR", "true"]) baseDetectProfile).Color
+    |> Expect.equal "true" ColorCapability.TrueColor
+
+  testCase "SAGETUI_COLOR=truecolor → TrueColor" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_COLOR", "truecolor"]) baseDetectProfile).Color
+    |> Expect.equal "truecolor" ColorCapability.TrueColor
+
+  testCase "no SAGETUI_COLOR → unchanged" <| fun () ->
+    (UserOverride.apply emptyEnv baseDetectProfile).Color
+    |> Expect.equal "default" baseDetectProfile.Color
+]
+
+let userOverrideUnicodeTests = testList "Override unicode" [
+  testCase "SAGETUI_UNICODE=ascii → AsciiOnly" <| fun () ->
+    let p = { baseDetectProfile with Unicode = UnicodeCapability.FullUnicode }
+    (UserOverride.apply (envOf ["SAGETUI_UNICODE", "ascii"]) p).Unicode
+    |> Expect.equal "ascii" UnicodeCapability.AsciiOnly
+
+  testCase "SAGETUI_UNICODE=latin1 → Latin1" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_UNICODE", "latin1"]) baseDetectProfile).Unicode
+    |> Expect.equal "latin1" UnicodeCapability.Latin1
+
+  testCase "SAGETUI_UNICODE=bmp → UnicodeBmp" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_UNICODE", "bmp"]) baseDetectProfile).Unicode
+    |> Expect.equal "bmp" UnicodeCapability.UnicodeBmp
+
+  testCase "SAGETUI_UNICODE=full → FullUnicode" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_UNICODE", "full"]) baseDetectProfile).Unicode
+    |> Expect.equal "full" UnicodeCapability.FullUnicode
+]
+
+let userOverrideGraphicsTests = testList "Override graphics" [
+  testCase "SAGETUI_GRAPHICS=text → TextOnly" <| fun () ->
+    let p = { baseDetectProfile with Graphics = GraphicsCapability.KittyGraphics }
+    (UserOverride.apply (envOf ["SAGETUI_GRAPHICS", "text"]) p).Graphics
+    |> Expect.equal "text" GraphicsCapability.TextOnly
+
+  testCase "SAGETUI_GRAPHICS=halfblock → HalfBlock" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_GRAPHICS", "halfblock"]) baseDetectProfile).Graphics
+    |> Expect.equal "halfblock" GraphicsCapability.HalfBlock
+
+  testCase "SAGETUI_GRAPHICS=braille → Braille" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_GRAPHICS", "braille"]) baseDetectProfile).Graphics
+    |> Expect.equal "braille" GraphicsCapability.Braille
+
+  testCase "SAGETUI_GRAPHICS=sixel → Sixel" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_GRAPHICS", "sixel"]) baseDetectProfile).Graphics
+    |> Expect.equal "sixel" GraphicsCapability.Sixel
+
+  testCase "SAGETUI_GRAPHICS=kitty → KittyGraphics" <| fun () ->
+    (UserOverride.apply (envOf ["SAGETUI_GRAPHICS", "kitty"]) baseDetectProfile).Graphics
+    |> Expect.equal "kitty" GraphicsCapability.KittyGraphics
+]
+
+let userOverrideCompositionTests = testList "Override composition" [
+  testCase "multiple overrides compose" <| fun () ->
+    let env = envOf ["SAGETUI_COLOR", "truecolor"; "SAGETUI_UNICODE", "full"; "SAGETUI_GRAPHICS", "kitty"]
+    let r = UserOverride.apply env baseDetectProfile
+    r.Color |> Expect.equal "color" ColorCapability.TrueColor
+    r.Unicode |> Expect.equal "unicode" UnicodeCapability.FullUnicode
+    r.Graphics |> Expect.equal "graphics" GraphicsCapability.KittyGraphics
+
+  testCase "overrides don't affect non-overridden fields" <| fun () ->
+    let r = UserOverride.apply (envOf ["SAGETUI_COLOR", "256"]) baseDetectProfile
+    r.Unicode |> Expect.equal "unicode" baseDetectProfile.Unicode
+    r.Graphics |> Expect.equal "graphics" baseDetectProfile.Graphics
+    r.Input |> Expect.equal "input" baseDetectProfile.Input
+    r.Output |> Expect.equal "output" baseDetectProfile.Output
+
+  testCase "unknown values leave field unchanged" <| fun () ->
+    let r = UserOverride.apply (envOf ["SAGETUI_COLOR", "invalid"]) baseDetectProfile
+    r.Color |> Expect.equal "unchanged" baseDetectProfile.Color
+]
+
+let detectPipelineTests = testList "Detection pipeline" [
+  testCase "full pipeline: detect → multiplexer → override" <| fun () ->
+    let env = envOf ["COLORTERM", "truecolor"; "LANG", "en_US.UTF-8"; "TMUX", "/tmp/tmux"; "SAGETUI_GRAPHICS", "kitty"]
+    let p = detect env |> Detect.adjustForMultiplexer env |> UserOverride.apply env
+    p.Color |> Expect.equal "color" ColorCapability.TrueColor
+    p.Unicode |> Expect.equal "unicode" UnicodeCapability.FullUnicode
+    p.Graphics |> Expect.equal "graphics" GraphicsCapability.KittyGraphics
+    p.Output |> Expect.equal "output" OutputCapability.AltScreen
+
+  testCase "dumb terminal stays minimal" <| fun () ->
+    let env = envOf ["TERM", "dumb"]
+    let p = detect env |> Detect.adjustForMultiplexer env |> UserOverride.apply env
+    p.Color |> Expect.equal "color" ColorCapability.NoColor
+    p.Unicode |> Expect.equal "unicode" UnicodeCapability.AsciiOnly
+    p.Graphics |> Expect.equal "graphics" GraphicsCapability.TextOnly
+
+  testCase "Windows Terminal full capabilities" <| fun () ->
+    let env = envOf ["WT_SESSION", "guid"; "TERM_PROGRAM", "Windows Terminal"]
+    let p = detect env
+    p.Color |> Expect.equal "truecolor" ColorCapability.TrueColor
+    p.Unicode |> Expect.equal "unicode" UnicodeCapability.FullUnicode
+    p.TermName |> Expect.equal "name" "Windows Terminal"
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -1895,5 +2150,17 @@ let allTests = testList "All" [
     programTests
     terminalEventTests
     subTests
+  ]
+  testList "Phase 6" [
+    detectColorTests
+    detectUnicodeTests
+    detectGraphicsTests
+    detectMiscTests
+    multiplexerTests
+    userOverrideColorTests
+    userOverrideUnicodeTests
+    userOverrideGraphicsTests
+    userOverrideCompositionTests
+    detectPipelineTests
   ]
 ]
