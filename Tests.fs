@@ -1579,6 +1579,261 @@ let renderInheritedStyleTests = testList "Render inherited style" [
     cell.Attrs |> Expect.equal "bold" TextAttrs.bold.Value
 ]
 
+// ============================================================
+// Phase 5: TEA + Input Types Tests
+// ============================================================
+
+let cmdTests = testList "Cmd" [
+  testCase "none is NoCmd" <| fun () ->
+    match Cmd.none with
+    | NoCmd -> ()
+    | _ -> failwith "expected NoCmd"
+
+  testCase "batch wraps list" <| fun () ->
+    let cmds: Cmd<int> list = [Cmd.none; Cmd.quit]
+    match Cmd.batch cmds with
+    | Batch items -> items |> List.length |> Expect.equal "two items" 2
+    | _ -> failwith "expected Batch"
+
+  testCase "delay stores ms and msg" <| fun () ->
+    match Cmd.delay 100 "tick" with
+    | Delay(ms, msg) ->
+      ms |> Expect.equal "ms" 100
+      msg |> Expect.equal "msg" "tick"
+    | _ -> failwith "expected Delay"
+
+  testCase "cancel stores id" <| fun () ->
+    match Cmd.cancel "sub1" with
+    | CancelSub id -> id |> Expect.equal "id" "sub1"
+    | _ -> failwith "expected CancelSub"
+
+  testCase "quit is Quit" <| fun () ->
+    match Cmd.quit with
+    | Quit -> ()
+    | _ -> failwith "expected Quit"
+
+  testCase "map NoCmd = NoCmd" <| fun () ->
+    match Cmd.map string (NoCmd: Cmd<int>) with
+    | NoCmd -> ()
+    | _ -> failwith "expected NoCmd"
+
+  testCase "map Quit = Quit" <| fun () ->
+    match Cmd.map string (Quit: Cmd<int>) with
+    | Quit -> ()
+    | _ -> failwith "expected Quit"
+
+  testCase "map Delay transforms msg" <| fun () ->
+    match Cmd.map (fun x -> x * 2) (Delay(50, 3)) with
+    | Delay(ms, msg) ->
+      ms |> Expect.equal "ms" 50
+      msg |> Expect.equal "msg" 6
+    | _ -> failwith "expected Delay"
+
+  testCase "map CancelSub preserves id" <| fun () ->
+    match Cmd.map string (CancelSub "x": Cmd<int>) with
+    | CancelSub id -> id |> Expect.equal "id" "x"
+    | _ -> failwith "expected CancelSub"
+
+  testCase "map Batch maps children" <| fun () ->
+    let cmd: Cmd<int> = Batch [Delay(10, 1); Delay(20, 2)]
+    match Cmd.map (fun x -> x * 10) cmd with
+    | Batch [Delay(10, a); Delay(20, b)] ->
+      a |> Expect.equal "a" 10
+      b |> Expect.equal "b" 20
+    | _ -> failwith "expected mapped Batch"
+]
+
+let inputTypeTests = testList "Input types" [
+  testCase "Key.Char roundtrip" <| fun () ->
+    match Char 'a' with
+    | Char c -> c |> Expect.equal "a" 'a'
+    | _ -> failwith "expected Char"
+
+  testCase "Key.F number" <| fun () ->
+    match F 12 with
+    | F n -> n |> Expect.equal "F12" 12
+    | _ -> failwith "expected F"
+
+  testCase "Modifiers flags combine" <| fun () ->
+    let combined = Modifiers.Shift ||| Modifiers.Ctrl
+    (combined &&& Modifiers.Shift <> Modifiers.None) |> Expect.isTrue "has shift"
+    (combined &&& Modifiers.Ctrl <> Modifiers.None) |> Expect.isTrue "has ctrl"
+    (combined &&& Modifiers.Alt = Modifiers.None) |> Expect.isTrue "no alt"
+
+  testCase "TerminalEvent variants" <| fun () ->
+    let events: TerminalEvent list = [
+      KeyPressed(Char 'x', Modifiers.None)
+      Resized(80, 24)
+      FocusGained
+      FocusLost
+      Pasted "hello"
+    ]
+    events |> List.length |> Expect.equal "5 events" 5
+
+  testCase "MouseEvent record" <| fun () ->
+    let me = { Button = LeftButton; X = 10; Y = 5; Modifiers = Modifiers.None }
+    me.X |> Expect.equal "x" 10
+    me.Y |> Expect.equal "y" 5
+]
+
+let safeProfileTests = testList "SafeProfile" [
+  testCase "minimum produces valid profile" <| fun () ->
+    let p = SafeProfile.minimum 80 24
+    p.Color |> Expect.equal "basic16" ColorCapability.Basic16
+    p.Unicode |> Expect.equal "ascii" UnicodeCapability.AsciiOnly
+    p.Graphics |> Expect.equal "text" GraphicsCapability.TextOnly
+    p.Input |> Expect.equal "basic" InputCapability.BasicKeys
+    p.Output |> Expect.equal "raw" OutputCapability.RawMode
+    p.Size |> Expect.equal "size" (80, 24)
+    p.TermName |> Expect.equal "name" "unknown"
+
+  testCase "minimum respects dimensions" <| fun () ->
+    let p = SafeProfile.minimum 120 50
+    p.Size |> Expect.equal "size" (120, 50)
+]
+
+let testBackendTests = testList "TestBackend" [
+  testCase "records write output" <| fun () ->
+    let backend, getOutput = TestBackend.create 10 5 []
+    backend.Write("hello")
+    backend.Write(" world")
+    getOutput() |> Expect.equal "recorded" "hello world"
+
+  testCase "replays events in order" <| fun () ->
+    let events = [KeyPressed(Char 'a', Modifiers.None); KeyPressed(Char 'b', Modifiers.None)]
+    let backend, _ = TestBackend.create 10 5 events
+    let e1 = backend.PollEvent 0
+    let e2 = backend.PollEvent 0
+    let e3 = backend.PollEvent 0
+    match e1 with
+    | Some(KeyPressed(Char 'a', _)) -> ()
+    | _ -> failwith "expected 'a'"
+    match e2 with
+    | Some(KeyPressed(Char 'b', _)) -> ()
+    | _ -> failwith "expected 'b'"
+    e3 |> Expect.isNone "no more events"
+
+  testCase "size returns configured dimensions" <| fun () ->
+    let backend, _ = TestBackend.create 80 24 []
+    backend.Size() |> Expect.equal "size" (80, 24)
+
+  testCase "flush is no-op" <| fun () ->
+    let backend, _ = TestBackend.create 10 5 []
+    backend.Flush()
+
+  testCase "profile is safe minimum" <| fun () ->
+    let backend, _ = TestBackend.create 40 10 []
+    backend.Profile.Color |> Expect.equal "basic16" ColorCapability.Basic16
+    backend.Profile.Size |> Expect.equal "size" (40, 10)
+]
+
+type CounterMsg = Increment | Decrement | QuitApp
+
+let programTests = testList "Program" [
+  testCase "simple counter program structure" <| fun () ->
+    let counterProgram: Program<int, CounterMsg> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun msg model ->
+        match msg with
+        | Increment -> (model + 1, Cmd.none)
+        | Decrement -> (model - 1, Cmd.none)
+        | QuitApp -> (model, Cmd.quit)
+      View = fun model -> El.text (sprintf "Count: %d" model)
+      Subscribe = fun _ -> []
+    }
+    let (initModel, initCmd) = counterProgram.Init()
+    initModel |> Expect.equal "init" 0
+    match initCmd with NoCmd -> () | _ -> failwith "expected NoCmd"
+    let (m1, _) = counterProgram.Update Increment 0
+    m1 |> Expect.equal "inc" 1
+    let (m2, _) = counterProgram.Update Decrement 5
+    m2 |> Expect.equal "dec" 4
+    let (_, quitCmd) = counterProgram.Update QuitApp 0
+    match quitCmd with Quit -> () | _ -> failwith "expected Quit"
+
+  testCase "view produces Element" <| fun () ->
+    let prog: Program<string, unit> = {
+      Init = fun () -> ("hello", Cmd.none)
+      Update = fun _ m -> (m, Cmd.none)
+      View = fun model -> El.text model
+      Subscribe = fun _ -> []
+    }
+    match prog.View "test" with
+    | Text("test", _) -> ()
+    | _ -> failwith "expected Text"
+
+  testCase "subscribe returns sub list" <| fun () ->
+    let prog: Program<bool, string> = {
+      Init = fun () -> (false, Cmd.none)
+      Update = fun _ m -> (m, Cmd.none)
+      View = fun _ -> Empty
+      Subscribe = fun active ->
+        match active with
+        | true -> [TimerSub("tick", System.TimeSpan.FromSeconds(1.0), fun () -> "tick")]
+        | false -> []
+    }
+    prog.Subscribe false |> List.length |> Expect.equal "no subs" 0
+    prog.Subscribe true |> List.length |> Expect.equal "one sub" 1
+]
+
+let terminalEventTests = testList "TerminalEvent" [
+  testCase "KeyPressed destructure" <| fun () ->
+    let evt = KeyPressed(Enter, Modifiers.Shift)
+    match evt with
+    | KeyPressed(Enter, mods) ->
+      (mods &&& Modifiers.Shift <> Modifiers.None) |> Expect.isTrue "has shift"
+    | _ -> failwith "expected KeyPressed"
+
+  testCase "Resized destructure" <| fun () ->
+    match Resized(120, 50) with
+    | Resized(w, h) ->
+      w |> Expect.equal "w" 120
+      h |> Expect.equal "h" 50
+    | _ -> failwith "expected Resized"
+
+  testCase "Pasted destructure" <| fun () ->
+    match Pasted "clipboard text" with
+    | Pasted s -> s |> Expect.equal "text" "clipboard text"
+    | _ -> failwith "expected Pasted"
+
+  testCase "MouseInput destructure" <| fun () ->
+    let me = { Button = ScrollUp; X = 3; Y = 7; Modifiers = Modifiers.Alt }
+    match MouseInput me with
+    | MouseInput m ->
+      m.Button |> Expect.equal "button" ScrollUp
+      m.X |> Expect.equal "x" 3
+    | _ -> failwith "expected MouseInput"
+]
+
+let subTests = testList "Sub" [
+  testCase "KeySub handler" <| fun () ->
+    let handler (key, _mods) =
+      match key with
+      | Char 'q' -> Some "quit"
+      | _ -> None
+    let sub = KeySub handler
+    match sub with
+    | KeySub h ->
+      h (Char 'q', Modifiers.None) |> Expect.equal "quit" (Some "quit")
+      h (Char 'a', Modifiers.None) |> Expect.equal "none" None
+    | _ -> failwith "expected KeySub"
+
+  testCase "TimerSub stores interval" <| fun () ->
+    let sub = TimerSub("clock", System.TimeSpan.FromSeconds 1.0, fun () -> "tick")
+    match sub with
+    | TimerSub(id, interval, _) ->
+      id |> Expect.equal "id" "clock"
+      interval |> Expect.equal "interval" (System.TimeSpan.FromSeconds 1.0)
+    | _ -> failwith "expected TimerSub"
+
+  testCase "ResizeSub transforms dimensions" <| fun () ->
+    let sub = ResizeSub(fun (w, h) -> sprintf "%dx%d" w h)
+    match sub with
+    | ResizeSub handler ->
+      handler (80, 24) |> Expect.equal "size" "80x24"
+    | _ -> failwith "expected ResizeSub"
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -1631,5 +1886,14 @@ let allTests = testList "All" [
     renderPaddedTests
     renderKeyedTests
     renderInheritedStyleTests
+  ]
+  testList "Phase 5" [
+    cmdTests
+    inputTypeTests
+    safeProfileTests
+    testBackendTests
+    programTests
+    terminalEventTests
+    subTests
   ]
 ]

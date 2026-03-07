@@ -20,6 +20,8 @@
     <Compile Include="Terminal.fs" />
     <Compile Include="Ansi.fs" />
     <Compile Include="Render.fs" />
+    <Compile Include="Input.fs" />
+    <Compile Include="Tea.fs" />
     <Compile Include="Tests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
