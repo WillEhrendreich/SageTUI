@@ -185,6 +185,11 @@
   },
   "active": "ac394dc03ed8186e",
   "lastOpenFiles": [
+    "README.md",
+    "SageTUI.Tests/obj/Debug/net10.0/i4y1uz0u.z0f~",
+    "SageTUI.Html/obj/Debug/net10.0/xdtemega.myy~",
+    "obj/Debug/net10.0/lbt1kskr.5k0~",
+    "expertPanel/incredible-roadmap-deliberation.md",
     "SageTUI.Tests/obj/Debug/net10.0/mtt213yd.qvb~",
     "SageTUI.Html/obj/Debug/net10.0/f20n1z1m.rjr~",
     "obj/Debug/net10.0/gwlm0kpq.nyz~",
@@ -192,11 +197,7 @@
     "obj/Debug/net10.0/smjwkoy4.nk3~",
     "SageTUI.Tests/obj/Debug/net10.0/mdicsyig.5ec~",
     "SageTUI.Html/obj/Debug/net10.0/fxrowsvx.5ou~",
-    "obj/Debug/net10.0/hcnb03wy.ndq~",
     "expertPanel/next-wave-deliberation.md",
-    "SageTUI.Tests/obj/Debug/net10.0/it3uq5dj.mtd~",
-    "SageTUI.Html/obj/Debug/net10.0/1z5uk2kd.t3q~",
-    "obj/Debug/net10.0/kmcennhj.cpa~",
     "expertPanel/excellence-roadmap-deliberation.md",
     "expertPanel/next-priorities-deliberation.md",
     "expertPanel/sample-review.md",
@@ -219,7 +220,6 @@
     "expertPanel/_tmp/sec_3_9_transitions.md",
     "expertPanel/_tmp/sec_3_8_arena.md",
     "expertPanel/_tmp/sec_3_10_anim.md",
-    "expertPanel/_tmp/sec_1_to_3_5.md",
-    "expertPanel/terminal-compatibility-deliberation.md"
+    "expertPanel/_tmp/sec_1_to_3_5.md"
   ]
 }

@@ -258,3 +258,19 @@ module App =
 
   let run (backend: TerminalBackend) (program: Program<'model, 'msg>) =
     runWith AppConfig.defaults backend program
+
+  let simple
+    (init: unit -> 'model * Cmd<'msg>)
+    (update: 'msg -> 'model -> 'model * Cmd<'msg>)
+    (view: 'model -> Element)
+    : Program<'model, 'msg> =
+    { Init = init; Update = update; View = view; Subscribe = fun _ -> [] }
+
+  let display (view: unit -> Element) =
+    let program : Program<unit, Key> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with Key.Escape -> (), Quit | _ -> (), NoCmd
+        View = fun () -> view ()
+        Subscribe = fun _ -> [KeySub (fun (k, _) -> Some k)] }
+    fun (backend: TerminalBackend) -> run backend program
