@@ -29,6 +29,7 @@
     <Compile Include="Transition.fs" />
     <Compile Include="App.fs" />
     <Compile Include="Widgets.fs" />
+    <Compile Include="Scroll.fs" />
   </ItemGroup>
 
 </Project>

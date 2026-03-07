@@ -213,6 +213,8 @@ module App =
           match sub, event with
           | KeySub handler, KeyPressed(key, mods) ->
             handler (key, mods) |> Option.iter dispatch
+          | MouseSub handler, MouseInput me ->
+            handler me |> Option.iter dispatch
           | ResizeSub handler, Resized(w, h) ->
             handler (w, h) |> dispatch
           | _ -> ()
