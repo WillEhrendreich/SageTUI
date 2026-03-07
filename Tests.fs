@@ -1,5 +1,6 @@
 module SageTUI.Tests
 
+open System.Text
 open Expecto
 open Expecto.Flip
 open SageTUI
@@ -461,19 +462,314 @@ let blurTests = testList "Blur" [
     | _ -> false
 ]
 
+// ============================================================
+// Phase 1 Tests: PackedCell + Buffer + SIMD Diff
+// ============================================================
+
+let packedCellTests = testList "PackedCell" [
+  testCase "size is 16 bytes" <| fun () ->
+    sizeof<PackedCell>
+    |> Expect.equal "sizeof<PackedCell> should be 16" 16
+
+  testCase "empty has space rune" <| fun () ->
+    PackedCell.empty.Rune
+    |> Expect.equal "rune" (int (Rune ' ').Value)
+
+  testCase "empty has zero fg/bg" <| fun () ->
+    PackedCell.empty.Fg |> Expect.equal "fg" 0
+    PackedCell.empty.Bg |> Expect.equal "bg" 0
+
+  testCase "empty has zero attrs" <| fun () ->
+    PackedCell.empty.Attrs |> Expect.equal "attrs" 0us
+
+  testCase "create preserves all fields" <| fun () ->
+    let c = PackedCell.create 65 100 200 7us
+    c.Rune |> Expect.equal "rune" 65
+    c.Fg |> Expect.equal "fg" 100
+    c.Bg |> Expect.equal "bg" 200
+    c.Attrs |> Expect.equal "attrs" 7us
+    c._pad |> Expect.equal "pad" 0us
+
+  testCase "PackedColor roundtrip in cell" <| fun () ->
+    let fg = PackedColor.pack (Named(Red, Bright))
+    let bg = PackedColor.pack (Rgb(10uy, 20uy, 30uy))
+    let c = PackedCell.create (int (Rune 'X').Value) fg bg 0us
+    PackedColor.unpack c.Fg
+    |> Expect.equal "fg color" (Named(Red, Bright))
+    PackedColor.unpack c.Bg
+    |> Expect.equal "bg color" (Rgb(10uy, 20uy, 30uy))
+
+  testCase "TextAttrs roundtrip in cell" <| fun () ->
+    let attrs = TextAttrs.combine TextAttrs.bold TextAttrs.italic
+    let c = PackedCell.create 0 0 0 attrs.Value
+    TextAttrs.has TextAttrs.bold { Value = c.Attrs }
+    |> Expect.isTrue "bold"
+    TextAttrs.has TextAttrs.italic { Value = c.Attrs }
+    |> Expect.isTrue "italic"
+    TextAttrs.has TextAttrs.underline { Value = c.Attrs }
+    |> Expect.isFalse "not underline"
+]
+
+let runeWidthTests = testList "RuneWidth" [
+  testCase "ASCII letter is 1" <| fun () ->
+    RuneWidth.getColumnWidth (Rune 'A') |> Expect.equal "" 1
+
+  testCase "space is 1" <| fun () ->
+    RuneWidth.getColumnWidth (Rune ' ') |> Expect.equal "" 1
+
+  testCase "digit is 1" <| fun () ->
+    RuneWidth.getColumnWidth (Rune '0') |> Expect.equal "" 1
+
+  testCase "CJK ideograph is 2" <| fun () ->
+    RuneWidth.getColumnWidth (Rune 0x4E2D) |> Expect.equal "U+4E2D" 2
+
+  testCase "Hangul syllable is 2" <| fun () ->
+    RuneWidth.getColumnWidth (Rune 0xAC00) |> Expect.equal "U+AC00" 2
+
+  testCase "null is 0" <| fun () ->
+    RuneWidth.getColumnWidth (Rune 0x00) |> Expect.equal "NUL" 0
+
+  testCase "tab is 0" <| fun () ->
+    RuneWidth.getColumnWidth (Rune 0x09) |> Expect.equal "TAB" 0
+]
+
+let bufferBasicTests = testList "Buffer basics" [
+  testCase "create dimensions" <| fun () ->
+    let buf = Buffer.create 80 24
+    buf.Width |> Expect.equal "width" 80
+    buf.Height |> Expect.equal "height" 24
+    buf.Cells.Length |> Expect.equal "cells" (80 * 24)
+
+  testCase "create all empty" <| fun () ->
+    let buf = Buffer.create 10 5
+    buf.Cells |> Array.forall ((=) Buffer.emptyCell)
+    |> Expect.isTrue "all empty"
+
+  testCase "get valid" <| fun () ->
+    let buf = Buffer.create 5 5
+    let cell = PackedCell.create 65 1 2 3us
+    Buffer.set 2 3 cell buf
+    Buffer.get 2 3 buf |> Expect.equal "roundtrip" cell
+
+  testCase "get out-of-bounds returns empty" <| fun () ->
+    let buf = Buffer.create 5 5
+    Buffer.get -1 0 buf |> Expect.equal "neg x" Buffer.emptyCell
+    Buffer.get 0 -1 buf |> Expect.equal "neg y" Buffer.emptyCell
+    Buffer.get 5 0 buf |> Expect.equal "over x" Buffer.emptyCell
+    Buffer.get 0 5 buf |> Expect.equal "over y" Buffer.emptyCell
+
+  testCase "set out-of-bounds is no-op" <| fun () ->
+    let buf = Buffer.create 5 5
+    let before = buf.Cells |> Array.copy
+    Buffer.set -1 0 (PackedCell.create 1 2 3 4us) buf
+    Buffer.set 5 0 (PackedCell.create 1 2 3 4us) buf
+    Buffer.set 0 -1 (PackedCell.create 1 2 3 4us) buf
+    Buffer.set 0 5 (PackedCell.create 1 2 3 4us) buf
+    (buf.Cells = before) |> Expect.isTrue "unchanged"
+
+  testCase "clear resets all cells" <| fun () ->
+    let buf = Buffer.create 5 5
+    Buffer.set 2 2 (PackedCell.create 65 1 2 3us) buf
+    Buffer.clear buf
+    buf.Cells |> Array.forall ((=) Buffer.emptyCell)
+    |> Expect.isTrue "all empty after clear"
+
+  testProperty "set-get roundtrip" <| fun (xb: byte) (yb: byte) (r: int32) (fg: int32) (bg: int32) (a: uint16) ->
+    let w, h = 20, 20
+    let x = int xb % w
+    let y = int yb % h
+    let buf = Buffer.create w h
+    let cell = PackedCell.create r fg bg a
+    Buffer.set x y cell buf
+    Buffer.get x y buf = cell
+
+  testProperty "out-of-bounds get always returns emptyCell" <| fun (xb: int) (yb: int) ->
+    let buf = Buffer.create 10 10
+    let x = if xb >= 0 then xb + 10 else xb
+    let y = if yb >= 0 then yb + 10 else yb
+    Buffer.get x y buf = Buffer.emptyCell
+]
+
+let bufferWriteTests = testList "Buffer writeString" [
+  testCase "write Hello" <| fun () ->
+    let buf = Buffer.create 10 1
+    Buffer.writeString 0 0 0 0 0us "Hello" buf
+    Buffer.toString buf |> Expect.stringStarts "starts with Hello" "Hello"
+
+  testCase "write preserves style" <| fun () ->
+    let fg = PackedColor.pack (Named(Red, Normal))
+    let bg = PackedColor.pack (Rgb(1uy, 2uy, 3uy))
+    let attrs = TextAttrs.bold.Value
+    let buf = Buffer.create 10 1
+    Buffer.writeString 0 0 fg bg attrs "AB" buf
+    let c = Buffer.get 0 0 buf
+    c.Fg |> Expect.equal "fg" fg
+    c.Bg |> Expect.equal "bg" bg
+    c.Attrs |> Expect.equal "attrs" attrs
+
+  testCase "write clips at right edge" <| fun () ->
+    let buf = Buffer.create 3 1
+    Buffer.writeString 0 0 0 0 0us "ABCDE" buf
+    Buffer.toString buf |> Expect.equal "clipped" "ABC"
+
+  testCase "write at offset" <| fun () ->
+    let buf = Buffer.create 10 1
+    Buffer.writeString 3 0 0 0 0us "Hi" buf
+    Buffer.toString buf |> Expect.equal "offset" "   Hi     "
+
+  testCase "write empty string is no-op" <| fun () ->
+    let buf = Buffer.create 5 1
+    Buffer.writeString 0 0 0 0 0us "" buf
+    buf.Cells |> Array.forall ((=) Buffer.emptyCell)
+    |> Expect.isTrue "unchanged"
+
+  testCase "write on second row" <| fun () ->
+    let buf = Buffer.create 5 3
+    Buffer.writeString 0 1 0 0 0us "Row1" buf
+    let c = Buffer.get 0 1 buf
+    c.Rune |> Expect.equal "R" (int (Rune 'R').Value)
+    Buffer.get 0 0 buf |> Expect.equal "row 0 empty" Buffer.emptyCell
+
+  testCase "write out-of-bounds y is no-op" <| fun () ->
+    let buf = Buffer.create 5 2
+    let before = buf.Cells |> Array.copy
+    Buffer.writeString 0 5 0 0 0us "Hello" buf
+    (buf.Cells = before) |> Expect.isTrue "unchanged"
+]
+
+let bufferDiffTests = testList "Buffer diff" [
+  testCase "identical buffers yield empty diff" <| fun () ->
+    let a = Buffer.create 20 10
+    let b = Buffer.create 20 10
+    Buffer.diff a b
+    |> (fun d -> d.Count) |> Expect.equal "count" 0
+
+  testCase "single change yields 1 index" <| fun () ->
+    let a = Buffer.create 20 10
+    let b = Buffer.create 20 10
+    Buffer.set 5 5 (PackedCell.create 65 1 0 0us) b
+    let d = Buffer.diff a b
+    d.Count |> Expect.equal "count" 1
+    d[0] |> Expect.equal "idx" (5 * 20 + 5)
+
+  testCase "multiple scattered changes" <| fun () ->
+    let a = Buffer.create 20 10
+    let b = Buffer.create 20 10
+    Buffer.set 0 0 (PackedCell.create 1 0 0 0us) b
+    Buffer.set 19 9 (PackedCell.create 2 0 0 0us) b
+    Buffer.set 10 5 (PackedCell.create 3 0 0 0us) b
+    Buffer.diff a b |> (fun d -> d.Count) |> Expect.equal "count" 3
+
+  testCase "diff indices are sorted ascending" <| fun () ->
+    let a = Buffer.create 20 10
+    let b = Buffer.create 20 10
+    Buffer.set 19 9 (PackedCell.create 1 0 0 0us) b
+    Buffer.set 0 0 (PackedCell.create 2 0 0 0us) b
+    Buffer.set 10 5 (PackedCell.create 3 0 0 0us) b
+    let d = Buffer.diff a b |> Seq.toList
+    d |> Expect.equal "sorted" (d |> List.sort)
+
+  testCase "all cells changed" <| fun () ->
+    let a = Buffer.create 10 10
+    let b = Buffer.create 10 10
+    for i in 0 .. b.Cells.Length - 1 do
+      b.Cells[i] <- PackedCell.create (i + 1) 1 0 0us
+    Buffer.diff a b |> (fun d -> d.Count) |> Expect.equal "all" 100
+
+  testCase "large buffer exercises chunk-skip" <| fun () ->
+    let a = Buffer.create 80 25
+    let b = Buffer.create 80 25
+    b.Cells[500] <- PackedCell.create 42 0 0 0us
+    let d = Buffer.diff a b
+    d.Count |> Expect.equal "count" 1
+    d[0] |> Expect.equal "idx" 500
+
+  testCase "change in remainder cells" <| fun () ->
+    let a = Buffer.create 17 1
+    let b = Buffer.create 17 1
+    b.Cells[16] <- PackedCell.create 99 0 0 0us
+    let d = Buffer.diff a b
+    d.Count |> Expect.equal "count" 1
+    d[0] |> Expect.equal "idx" 16
+
+  testCase "change in first and last cell" <| fun () ->
+    let a = Buffer.create 50 1
+    let b = Buffer.create 50 1
+    b.Cells[0] <- PackedCell.create 1 0 0 0us
+    b.Cells[49] <- PackedCell.create 2 0 0 0us
+    let d = Buffer.diff a b
+    d.Count |> Expect.equal "count" 2
+    d[0] |> Expect.equal "first" 0
+    d[1] |> Expect.equal "last" 49
+
+  testProperty "self-diff is always empty" <| fun (wb: byte) (hb: byte) ->
+    let w = max 1 (int wb % 50)
+    let h = max 1 (int hb % 50)
+    let buf = Buffer.create w h
+    Buffer.diff buf buf |> (fun d -> d.Count) = 0
+
+  testProperty "set then diff detects the change" <| fun (xb: byte) (yb: byte) (rv: int32) ->
+    let w, h = 20, 20
+    let x = int xb % w
+    let y = int yb % h
+    let a = Buffer.create w h
+    let b = Buffer.create w h
+    let cell = PackedCell.create (abs rv ||| 1) 42 0 0us
+    Buffer.set x y cell b
+    let d = Buffer.diff a b
+    d |> Seq.contains (y * w + x)
+]
+
+let bufferToStringTests = testList "Buffer toString" [
+  testCase "empty buffer is all spaces" <| fun () ->
+    let buf = Buffer.create 3 2
+    Buffer.toString buf |> Expect.equal "spaces" "   \n   "
+
+  testCase "write then toString" <| fun () ->
+    let buf = Buffer.create 5 1
+    Buffer.writeString 0 0 0 0 0us "Hi" buf
+    Buffer.toString buf |> Expect.equal "str" "Hi   "
+
+  testCase "multi-line content" <| fun () ->
+    let buf = Buffer.create 3 2
+    Buffer.writeString 0 0 0 0 0us "ABC" buf
+    Buffer.writeString 0 1 0 0 0us "DEF" buf
+    Buffer.toString buf |> Expect.equal "str" "ABC\nDEF"
+
+  testCase "no trailing newline" <| fun () ->
+    let buf = Buffer.create 2 3
+    let s = Buffer.toString buf
+    s.EndsWith('\n') |> Expect.isFalse "no trailing newline"
+
+  testCase "1x1 buffer" <| fun () ->
+    let buf = Buffer.create 1 1
+    Buffer.writeString 0 0 0 0 0us "X" buf
+    Buffer.toString buf |> Expect.equal "str" "X"
+]
+
 [<Tests>]
-let allTests = testList "Phase 0" [
-  colorTests
-  textAttrsTests
-  styleTests
-  packedColorTests
-  areaTests
-  paddingTests
-  constraintTests
-  elementTests
-  easingTests
-  brailleTests
-  alphaTests
-  terminalCapabilityTests
-  blurTests
+let allTests = testList "All" [
+  testList "Phase 0" [
+    colorTests
+    textAttrsTests
+    styleTests
+    packedColorTests
+    areaTests
+    paddingTests
+    constraintTests
+    elementTests
+    easingTests
+    brailleTests
+    alphaTests
+    terminalCapabilityTests
+    blurTests
+  ]
+  testList "Phase 1" [
+    packedCellTests
+    runeWidthTests
+    bufferBasicTests
+    bufferWriteTests
+    bufferDiffTests
+    bufferToStringTests
+  ]
 ]

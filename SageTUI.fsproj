@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <Compile Include="Color.fs" />
+    <Compile Include="Buffer.fs" />
     <Compile Include="Layout.fs" />
     <Compile Include="Element.fs" />
     <Compile Include="Effects.fs" />
