@@ -211,20 +211,37 @@ module Backend =
 
   let create (profile: TerminalProfile) : TerminalBackend =
     let mutable savedModes = Unchecked.defaultof<RawMode.SavedModes>
-    { Size = fun () -> profile.Size
+    let mutable lastW = Console.WindowWidth
+    let mutable lastH = Console.WindowHeight
+    let checkResize () =
+      let w = Console.WindowWidth
+      let h = Console.WindowHeight
+      match w <> lastW || h <> lastH with
+      | true ->
+        lastW <- w
+        lastH <- h
+        Some (Resized(w, h))
+      | false -> None
+    { Size = fun () -> (Console.WindowWidth, Console.WindowHeight)
       Write = fun s -> Console.Write(s)
       Flush = fun () -> Console.Out.Flush()
       PollEvent = fun timeoutMs ->
-        match Console.KeyAvailable with
-        | true -> Some(readKeyEvent ())
-        | false ->
-          match timeoutMs > 0 with
-          | true ->
-            Threading.Thread.Sleep(timeoutMs)
-            match Console.KeyAvailable with
-            | true -> Some(readKeyEvent ())
+        match checkResize () with
+        | Some r -> Some r
+        | None ->
+          match Console.KeyAvailable with
+          | true -> Some(readKeyEvent ())
+          | false ->
+            match timeoutMs > 0 with
+            | true ->
+              Threading.Thread.Sleep(timeoutMs)
+              match checkResize () with
+              | Some r -> Some r
+              | None ->
+                match Console.KeyAvailable with
+                | true -> Some(readKeyEvent ())
+                | false -> None
             | false -> None
-          | false -> None
       EnterRawMode = fun () -> savedModes <- RawMode.enter profile.Platform
       LeaveRawMode = fun () -> RawMode.leave savedModes
       Profile = profile }
