@@ -278,3 +278,18 @@ module Modal =
 
   let simple (content: Element) =
     view defaults content
+
+module Focus =
+  let tabOrder (keys: string list) (focused: string) (dir: FocusDirection) =
+    match keys with
+    | [] -> focused
+    | _ ->
+      match List.tryFindIndex ((=) focused) keys with
+      | None -> List.head keys
+      | Some idx ->
+        match dir with
+        | FocusNext -> keys.[(idx + 1) % keys.Length]
+        | FocusPrev -> keys.[(idx - 1 + keys.Length) % keys.Length]
+
+  let focusSub (toMsg: FocusDirection -> 'msg) : Sub<'msg> =
+    FocusSub (fun dir -> Some (toMsg dir))

@@ -315,6 +315,41 @@ let modalTests = testList "Modal" [
   }
 ]
 
+let focusTests = testList "Focus" [
+  test "tabOrder advances to next key" {
+    let keys = ["a"; "b"; "c"]
+    Focus.tabOrder keys "a" FocusNext |> Expect.equal "should be b" "b"
+  }
+
+  test "tabOrder wraps to first" {
+    let keys = ["a"; "b"; "c"]
+    Focus.tabOrder keys "c" FocusNext |> Expect.equal "should wrap to a" "a"
+  }
+
+  test "tabOrder goes to previous" {
+    let keys = ["a"; "b"; "c"]
+    Focus.tabOrder keys "b" FocusPrev |> Expect.equal "should be a" "a"
+  }
+
+  test "tabOrder prev wraps to last" {
+    let keys = ["a"; "b"; "c"]
+    Focus.tabOrder keys "a" FocusPrev |> Expect.equal "should wrap to c" "c"
+  }
+
+  test "tabOrder unknown key defaults to first" {
+    let keys = ["a"; "b"; "c"]
+    Focus.tabOrder keys "unknown" FocusNext |> Expect.equal "should be first" "a"
+  }
+
+  test "tabOrder single item stays" {
+    Focus.tabOrder ["only"] "only" FocusNext |> Expect.equal "stays" "only"
+  }
+
+  test "tabOrder empty list keeps current" {
+    Focus.tabOrder [] "x" FocusNext |> Expect.equal "keeps current" "x"
+  }
+]
+
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -325,4 +360,5 @@ let allWidgetTests = testList "Widgets" [
   paragraphTests
   textInputEnhancedTests
   modalTests
+  focusTests
 ]

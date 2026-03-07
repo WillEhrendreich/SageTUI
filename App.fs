@@ -213,6 +213,9 @@ module App =
           match sub, event with
           | KeySub handler, KeyPressed(key, mods) ->
             handler (key, mods) |> Option.iter dispatch
+          | FocusSub handler, KeyPressed(Key.Tab, mods) ->
+            let dir = match mods.HasFlag(Modifiers.Shift) with true -> FocusPrev | false -> FocusNext
+            handler dir |> Option.iter dispatch
           | MouseSub handler, MouseInput me ->
             handler me |> Option.iter dispatch
           | ClickSub handler, MouseInput me ->
