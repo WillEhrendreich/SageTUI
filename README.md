@@ -2,7 +2,7 @@
 
 **Build beautiful terminal UIs in F# with zero ceremony.**
 
-Elm Architecture • SIMD rendering • 980+ tests • Zero external dependencies
+Elm Architecture • SIMD rendering • 990+ tests • Zero external dependencies
 
 <!-- TODO: Add GIF of Dashboard or Kanban sample here -->
 <!-- ![SageTUI Demo](docs/demo.gif) -->
@@ -203,6 +203,7 @@ Run benchmarks yourself: `dotnet run -c Release --project SageTUI.Benchmarks`
 | `06-Kanban` | Drag-and-drop Kanban board |
 | `07-Transitions` | Animated enter/exit transitions |
 | `08-Sparklines` | Real-time sparkline charts |
+| `09-SystemMonitor` | **Flagship demo** — sparklines, progress bars, tabs, scrolling, themes |
 
 ```bash
 cd samples/06-Kanban && dotnet run
