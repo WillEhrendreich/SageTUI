@@ -1278,6 +1278,307 @@ let syncOutputTests = testList "SynchronizedOutput" [
     SynchronizedOutput.wrap profile "content" |> Expect.equal "passthrough" "content"
 ]
 
+// ============================================================
+// Phase 4: Layout Engine + Renderer Tests
+// ============================================================
+
+let area4 w h = { X = 0; Y = 0; Width = w; Height = h }
+let areaAt x y w h = { X = x; Y = y; Width = w; Height = h }
+
+let layoutSolveTests = testList "Layout.solve" [
+  testCase "single Fixed" <| fun () ->
+    Layout.solve 100 [Fixed 30]
+    |> Expect.equal "one fixed" [(0, 30)]
+
+  testCase "two Fixed" <| fun () ->
+    Layout.solve 100 [Fixed 30; Fixed 40]
+    |> Expect.equal "two fixed" [(0, 30); (30, 40)]
+
+  testCase "single Fill takes all" <| fun () ->
+    Layout.solve 80 [Fill]
+    |> Expect.equal "fill" [(0, 80)]
+
+  testCase "two Fill splits evenly" <| fun () ->
+    Layout.solve 80 [Fill; Fill]
+    |> Expect.equal "even" [(0, 40); (40, 40)]
+
+  testCase "three Fill with remainder" <| fun () ->
+    Layout.solve 100 [Fill; Fill; Fill]
+    |> Expect.equal "3 fill" [(0, 34); (34, 33); (67, 33)]
+
+  testCase "Fixed + Fill" <| fun () ->
+    Layout.solve 100 [Fixed 20; Fill]
+    |> Expect.equal "fixed+fill" [(0, 20); (20, 80)]
+
+  testCase "Percentage 50" <| fun () ->
+    Layout.solve 100 [Percentage 50]
+    |> Expect.equal "50%" [(0, 50)]
+
+  testCase "Ratio 1/3" <| fun () ->
+    Layout.solve 90 [Ratio(1, 3)]
+    |> Expect.equal "1/3" [(0, 30)]
+
+  testCase "Min sets floor" <| fun () ->
+    Layout.solve 100 [Min 20]
+    |> Expect.equal "min" [(0, 20)]
+
+  testCase "Max caps" <| fun () ->
+    Layout.solve 100 [Max 50]
+    |> Expect.equal "max" [(0, 50)]
+
+  testCase "Fixed exceeds available" <| fun () ->
+    Layout.solve 10 [Fixed 30]
+    |> Expect.equal "capped" [(0, 10)]
+
+  testCase "empty constraints" <| fun () ->
+    Layout.solve 100 []
+    |> Expect.equal "empty" []
+
+  testCase "complex: Fixed + Fill + Fixed" <| fun () ->
+    Layout.solve 100 [Fixed 20; Fill; Fixed 20]
+    |> Expect.equal "sidebar" [(0, 20); (20, 60); (80, 20)]
+
+  testCase "Percentage + Fill" <| fun () ->
+    Layout.solve 100 [Percentage 30; Fill]
+    |> Expect.equal "pct+fill" [(0, 30); (30, 70)]
+]
+
+let layoutSplitTests = testList "Layout.splitH/splitV" [
+  testCase "splitH even" <| fun () ->
+    Layout.splitH [Fill; Fill] (area4 80 24)
+    |> Expect.equal "h split" [areaAt 0 0 40 24; areaAt 40 0 40 24]
+
+  testCase "splitV even" <| fun () ->
+    Layout.splitV [Fill; Fill] (area4 80 24)
+    |> Expect.equal "v split" [areaAt 0 0 80 12; areaAt 0 12 80 12]
+
+  testCase "splitH with offset area" <| fun () ->
+    Layout.splitH [Fixed 10; Fill] (areaAt 5 3 80 24)
+    |> Expect.equal "offset" [areaAt 5 3 10 24; areaAt 15 3 70 24]
+
+  testCase "splitV with offset area" <| fun () ->
+    Layout.splitV [Fixed 5; Fill] (areaAt 5 3 80 24)
+    |> Expect.equal "offset" [areaAt 5 3 80 5; areaAt 5 8 80 19]
+]
+
+let renderTextTests = testList "Render text" [
+  testCase "Empty renders nothing" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf Empty
+    Buffer.toString buf |> Expect.equal "blank" (String.replicate 10 " " + "\n" + String.replicate 10 " " + "\n" + String.replicate 10 " ")
+
+  testCase "Text renders at position" <| fun () ->
+    let buf = Buffer.create 10 1
+    Render.render (area4 10 1) Style.empty buf (El.text "Hello")
+    let s = Buffer.toString buf
+    s |> Expect.stringStarts "starts with Hello" "Hello"
+
+  testCase "Text with style applies fg" <| fun () ->
+    let buf = Buffer.create 10 1
+    let style = { Style.empty with Fg = Some (Named(Red, Normal)) }
+    Render.render (area4 10 1) Style.empty buf (Text("Hi", style))
+    let cell = Buffer.get 0 0 buf
+    let expectedFg = PackedColor.pack (Named(Red, Normal))
+    cell.Fg |> Expect.equal "fg red" expectedFg
+
+  testCase "Styled wraps fg" <| fun () ->
+    let buf = Buffer.create 10 1
+    let elem = El.text "X" |> El.fg (Named(Blue, Bright))
+    Render.render (area4 10 1) Style.empty buf elem
+    let cell = Buffer.get 0 0 buf
+    cell.Fg |> Expect.equal "fg blue" (PackedColor.pack (Named(Blue, Bright)))
+
+  testCase "zero area renders nothing" <| fun () ->
+    let buf = Buffer.create 10 1
+    Render.render { X = 0; Y = 0; Width = 0; Height = 1 } Style.empty buf (El.text "X")
+    Buffer.toString buf |> Expect.equal "blank" (String.replicate 10 " ")
+]
+
+let renderRowColTests = testList "Render Row/Column" [
+  testCase "Row splits evenly" <| fun () ->
+    let buf = Buffer.create 10 1
+    let elem = Row [El.text "AB"; El.text "CD"]
+    Render.render (area4 10 1) Style.empty buf elem
+    let s = Buffer.toString buf
+    s.[0] |> Expect.equal "A" 'A'
+    s.[1] |> Expect.equal "B" 'B'
+    s.[5] |> Expect.equal "C" 'C'
+    s.[6] |> Expect.equal "D" 'D'
+
+  testCase "Column splits evenly" <| fun () ->
+    let buf = Buffer.create 5 4
+    let elem = Column [El.text "Top"; El.text "Bot"]
+    Render.render (area4 5 4) Style.empty buf elem
+    let cell00 = Buffer.get 0 0 buf
+    cell00.Rune |> Expect.equal "T" (int (System.Text.Rune 'T').Value)
+    let cell02 = Buffer.get 0 2 buf
+    cell02.Rune |> Expect.equal "B" (int (System.Text.Rune 'B').Value)
+
+  testCase "Row with three Fill children" <| fun () ->
+    let buf = Buffer.create 9 1
+    let elem = Row [El.text "A"; El.text "B"; El.text "C"]
+    Render.render (area4 9 1) Style.empty buf elem
+    let s = Buffer.toString buf
+    s.[0] |> Expect.equal "A" 'A'
+    s.[3] |> Expect.equal "B" 'B'
+    s.[6] |> Expect.equal "C" 'C'
+
+  testCase "nested Row in Column" <| fun () ->
+    let buf = Buffer.create 6 2
+    let elem = Column [Row [El.text "AB"; El.text "CD"]; El.text "EF"]
+    Render.render (area4 6 2) Style.empty buf elem
+    let s = Buffer.toString buf
+    s.[0] |> Expect.equal "A" 'A'
+    s.[3] |> Expect.equal "C" 'C'
+    let cell01 = Buffer.get 0 1 buf
+    cell01.Rune |> Expect.equal "E" (int (System.Text.Rune 'E').Value)
+]
+
+let renderOverlayTests = testList "Render Overlay" [
+  testCase "Overlay last wins" <| fun () ->
+    let buf = Buffer.create 5 1
+    let elem = Overlay [El.text "AAAAA"; El.text "BB"]
+    Render.render (area4 5 1) Style.empty buf elem
+    let s = Buffer.toString buf
+    s.[0] |> Expect.equal "B overwrites A" 'B'
+    s.[1] |> Expect.equal "B overwrites A" 'B'
+    s.[2] |> Expect.equal "A remains" 'A'
+]
+
+let renderConstrainedTests = testList "Render Constrained" [
+  testCase "Fixed width constrains child" <| fun () ->
+    let buf = Buffer.create 10 1
+    let elem = Constrained(Fixed 3, El.text "Hello")
+    Render.render (area4 10 1) Style.empty buf elem
+    let s = Buffer.toString buf
+    s.[0] |> Expect.equal "H" 'H'
+    s.[1] |> Expect.equal "e" 'e'
+    s.[2] |> Expect.equal "l" 'l'
+    s.[3] |> Expect.equal "space" ' '
+
+  testCase "Max width caps" <| fun () ->
+    let buf = Buffer.create 10 1
+    let elem = Constrained(Max 2, El.text "Hello")
+    Render.render (area4 10 1) Style.empty buf elem
+    let s = Buffer.toString buf
+    s.[0] |> Expect.equal "H" 'H'
+    s.[1] |> Expect.equal "e" 'e'
+    s.[2] |> Expect.equal "space" ' '
+]
+
+let renderBorderTests = testList "Render Border" [
+  testCase "Light border corners" <| fun () ->
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (Bordered(Light, Empty))
+    let tl = Buffer.get 0 0 buf
+    tl.Rune |> Expect.equal "top-left" (int (System.Text.Rune '\u250C').Value)
+    let tr = Buffer.get 4 0 buf
+    tr.Rune |> Expect.equal "top-right" (int (System.Text.Rune '\u2510').Value)
+    let bl = Buffer.get 0 2 buf
+    bl.Rune |> Expect.equal "bot-left" (int (System.Text.Rune '\u2514').Value)
+    let br = Buffer.get 4 2 buf
+    br.Rune |> Expect.equal "bot-right" (int (System.Text.Rune '\u2518').Value)
+
+  testCase "Light border horizontal bars" <| fun () ->
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (Bordered(Light, Empty))
+    let top = Buffer.get 2 0 buf
+    top.Rune |> Expect.equal "h bar" (int (System.Text.Rune '\u2500').Value)
+
+  testCase "Light border vertical bars" <| fun () ->
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (Bordered(Light, Empty))
+    let left = Buffer.get 0 1 buf
+    left.Rune |> Expect.equal "v bar" (int (System.Text.Rune '\u2502').Value)
+
+  testCase "Bordered child renders inside" <| fun () ->
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (Bordered(Light, El.text "X"))
+    let inner = Buffer.get 1 1 buf
+    inner.Rune |> Expect.equal "X inside" (int (System.Text.Rune 'X').Value)
+
+  testCase "Ascii border" <| fun () ->
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (Bordered(Ascii, Empty))
+    let tl = Buffer.get 0 0 buf
+    tl.Rune |> Expect.equal "+" (int (System.Text.Rune '+').Value)
+    let h = Buffer.get 2 0 buf
+    h.Rune |> Expect.equal "-" (int (System.Text.Rune '-').Value)
+
+  testCase "Heavy border corners" <| fun () ->
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (Bordered(Heavy, Empty))
+    let tl = Buffer.get 0 0 buf
+    tl.Rune |> Expect.equal "heavy tl" (int (System.Text.Rune '\u250F').Value)
+
+  testCase "Rounded border corners" <| fun () ->
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (Bordered(Rounded, Empty))
+    let tl = Buffer.get 0 0 buf
+    tl.Rune |> Expect.equal "rounded tl" (int (System.Text.Rune '\u256D').Value)
+
+  testCase "Double border corners" <| fun () ->
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (Bordered(Double, Empty))
+    let tl = Buffer.get 0 0 buf
+    tl.Rune |> Expect.equal "double tl" (int (System.Text.Rune '\u2554').Value)
+]
+
+let renderPaddedTests = testList "Render Padded" [
+  testCase "padding offsets child" <| fun () ->
+    let buf = Buffer.create 10 5
+    let pad = { Top = 1; Right = 1; Bottom = 1; Left = 2 }
+    let elem = Padded(pad, El.text "X")
+    Render.render (area4 10 5) Style.empty buf elem
+    let cell = Buffer.get 2 1 buf
+    cell.Rune |> Expect.equal "X at (2,1)" (int (System.Text.Rune 'X').Value)
+    let empty = Buffer.get 0 0 buf
+    empty.Rune |> Expect.equal "space at origin" (int (System.Text.Rune ' ').Value)
+
+  testCase "padAll wraps evenly" <| fun () ->
+    let buf = Buffer.create 10 5
+    let elem = El.text "Y" |> El.padAll 2
+    Render.render (area4 10 5) Style.empty buf elem
+    let cell = Buffer.get 2 2 buf
+    cell.Rune |> Expect.equal "Y at (2,2)" (int (System.Text.Rune 'Y').Value)
+]
+
+let renderKeyedTests = testList "Render Keyed" [
+  testCase "Keyed renders child transparently" <| fun () ->
+    let buf = Buffer.create 5 1
+    let elem = El.text "K" |> El.keyed "k1"
+    Render.render (area4 5 1) Style.empty buf elem
+    let cell = Buffer.get 0 0 buf
+    cell.Rune |> Expect.equal "K" (int (System.Text.Rune 'K').Value)
+]
+
+let renderInheritedStyleTests = testList "Render inherited style" [
+  testCase "inherited fg applies to child text" <| fun () ->
+    let buf = Buffer.create 5 1
+    let style = { Style.empty with Fg = Some (Named(Green, Bright)) }
+    Render.render (area4 5 1) style buf (El.text "G")
+    let cell = Buffer.get 0 0 buf
+    cell.Fg |> Expect.equal "green" (PackedColor.pack (Named(Green, Bright)))
+
+  testCase "local style overrides inherited" <| fun () ->
+    let buf = Buffer.create 5 1
+    let inherited = { Style.empty with Fg = Some (Named(Green, Normal)) }
+    let local = { Style.empty with Fg = Some (Named(Red, Normal)) }
+    Render.render (area4 5 1) inherited buf (Text("R", local))
+    let cell = Buffer.get 0 0 buf
+    cell.Fg |> Expect.equal "red overrides" (PackedColor.pack (Named(Red, Normal)))
+
+  testCase "Styled merges with inherited" <| fun () ->
+    let buf = Buffer.create 5 1
+    let inherited = { Style.empty with Fg = Some (Named(Green, Normal)) }
+    let overlay = { Style.empty with Attrs = TextAttrs.bold }
+    let elem = Styled(overlay, El.text "B")
+    Render.render (area4 5 1) inherited buf elem
+    let cell = Buffer.get 0 0 buf
+    cell.Fg |> Expect.equal "inherited fg" (PackedColor.pack (Named(Green, Normal)))
+    cell.Attrs |> Expect.equal "bold" TextAttrs.bold.Value
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -1318,5 +1619,17 @@ let allTests = testList "All" [
     presenterTests
     colorFallbackTests
     syncOutputTests
+  ]
+  testList "Phase 4" [
+    layoutSolveTests
+    layoutSplitTests
+    renderTextTests
+    renderRowColTests
+    renderOverlayTests
+    renderConstrainedTests
+    renderBorderTests
+    renderPaddedTests
+    renderKeyedTests
+    renderInheritedStyleTests
   ]
 ]

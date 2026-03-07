@@ -19,6 +19,7 @@
     <Compile Include="Effects.fs" />
     <Compile Include="Terminal.fs" />
     <Compile Include="Ansi.fs" />
+    <Compile Include="Render.fs" />
     <Compile Include="Tests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
