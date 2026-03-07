@@ -40,8 +40,8 @@ module ArenaRender =
     | 0uy -> 0 // Empty
     | 1uy -> // Text
       let mutable w = 0
-      for i in node.DataStart .. node.DataStart + node.DataLen - 1 do
-        let rune = System.Text.Rune(arena.TextBuf.[i])
+      let text = System.String(arena.TextBuf, node.DataStart, node.DataLen)
+      for rune in text.EnumerateRunes() do
         w <- w + RuneWidth.getColumnWidth rune
       w
     | 2uy -> // Row — sum of children widths

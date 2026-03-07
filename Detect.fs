@@ -162,35 +162,41 @@ module RawMode =
       System.Diagnostics.Process.Start(psi).WaitForExit()
 
 module Backend =
-  let private mapKey (ki: ConsoleKeyInfo) : Key =
+  let private mapKey (ki: ConsoleKeyInfo) : Key option =
     match ki.Key with
-    | ConsoleKey.Escape -> Escape
-    | ConsoleKey.Enter -> Enter
-    | ConsoleKey.Backspace -> Backspace
-    | ConsoleKey.Tab -> Tab
-    | ConsoleKey.UpArrow -> Up
-    | ConsoleKey.DownArrow -> Down
-    | ConsoleKey.LeftArrow -> Left
-    | ConsoleKey.RightArrow -> Right
-    | ConsoleKey.Home -> Home
-    | ConsoleKey.End -> End
-    | ConsoleKey.Delete -> Delete
-    | ConsoleKey.Insert -> Insert
-    | ConsoleKey.PageUp -> PageUp
-    | ConsoleKey.PageDown -> PageDown
-    | ConsoleKey.F1 -> F 1
-    | ConsoleKey.F2 -> F 2
-    | ConsoleKey.F3 -> F 3
-    | ConsoleKey.F4 -> F 4
-    | ConsoleKey.F5 -> F 5
-    | ConsoleKey.F6 -> F 6
-    | ConsoleKey.F7 -> F 7
-    | ConsoleKey.F8 -> F 8
-    | ConsoleKey.F9 -> F 9
-    | ConsoleKey.F10 -> F 10
-    | ConsoleKey.F11 -> F 11
-    | ConsoleKey.F12 -> F 12
-    | _ -> Key.Char ki.KeyChar
+    | ConsoleKey.Escape -> Some Escape
+    | ConsoleKey.Enter -> Some Enter
+    | ConsoleKey.Backspace -> Some Backspace
+    | ConsoleKey.Tab -> Some Tab
+    | ConsoleKey.UpArrow -> Some Up
+    | ConsoleKey.DownArrow -> Some Down
+    | ConsoleKey.LeftArrow -> Some Left
+    | ConsoleKey.RightArrow -> Some Right
+    | ConsoleKey.Home -> Some Home
+    | ConsoleKey.End -> Some End
+    | ConsoleKey.Delete -> Some Delete
+    | ConsoleKey.Insert -> Some Insert
+    | ConsoleKey.PageUp -> Some PageUp
+    | ConsoleKey.PageDown -> Some PageDown
+    | ConsoleKey.F1 -> Some (F 1)
+    | ConsoleKey.F2 -> Some (F 2)
+    | ConsoleKey.F3 -> Some (F 3)
+    | ConsoleKey.F4 -> Some (F 4)
+    | ConsoleKey.F5 -> Some (F 5)
+    | ConsoleKey.F6 -> Some (F 6)
+    | ConsoleKey.F7 -> Some (F 7)
+    | ConsoleKey.F8 -> Some (F 8)
+    | ConsoleKey.F9 -> Some (F 9)
+    | ConsoleKey.F10 -> Some (F 10)
+    | ConsoleKey.F11 -> Some (F 11)
+    | ConsoleKey.F12 -> Some (F 12)
+    | _ ->
+      let c = ki.KeyChar
+      // Guard against lone surrogates and NUL bytes that some ConPTY implementations
+      // inject during startup — these are not valid printable characters.
+      match Char.IsHighSurrogate(c) || Char.IsLowSurrogate(c) || c = '\000' with
+      | true -> None
+      | false -> Some (Key.Char c)
 
   let private mapMods (ki: ConsoleKeyInfo) : Modifiers =
     let mutable m = Modifiers.None
@@ -205,9 +211,13 @@ module Backend =
     | false -> ()
     m
 
-  let private readKeyEvent () : TerminalEvent =
-    let ki = Console.ReadKey(true)
-    KeyPressed(mapKey ki, mapMods ki)
+  /// Attempt to read a key event; returns None if Console.ReadKey throws or returns a
+  /// sentinel ConsoleKeyInfo that indicates stdin was closed (e.g. in some ConPTY setups).
+  let private tryReadKeyEvent () : TerminalEvent option =
+    try
+      let ki = Console.ReadKey(true)
+      mapKey ki |> Option.map (fun key -> KeyPressed(key, mapMods ki))
+    with _ -> None
 
   let create (profile: TerminalProfile) : TerminalBackend =
     let mutable savedModes = Unchecked.defaultof<RawMode.SavedModes>
@@ -230,7 +240,7 @@ module Backend =
         | Some r -> Some r
         | None ->
           match Console.KeyAvailable with
-          | true -> Some(readKeyEvent ())
+          | true -> tryReadKeyEvent ()
           | false ->
             match timeoutMs > 0 with
             | true ->
@@ -239,7 +249,7 @@ module Backend =
               | Some r -> Some r
               | None ->
                 match Console.KeyAvailable with
-                | true -> Some(readKeyEvent ())
+                | true -> tryReadKeyEvent ()
                 | false -> None
             | false -> None
       EnterRawMode = fun () -> savedModes <- RawMode.enter profile.Platform

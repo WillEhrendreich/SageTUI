@@ -232,7 +232,7 @@ let view model =
     | false -> El.empty
     | true ->
       let sparkW = max 1 (panelW - 4)
-      let sparkH = max 1 (chartH - 4)
+      let sparkH = max 1 (min 24 (chartH - 4))
 
       // Title row with name + value
       let title =
@@ -296,4 +296,7 @@ let program : Program<Model, Msg> =
     Subscribe = subscribe }
 
 [<EntryPoint>]
-let main _ = App.run program; 0
+let main _ =
+  let backend = Backend.auto()
+  App.runWith { AppConfig.defaults with ArenaNodes = 16384; ArenaLayout = 16384 } backend program
+  0

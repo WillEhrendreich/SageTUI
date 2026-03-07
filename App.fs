@@ -104,6 +104,20 @@ module App =
     backend.EnterRawMode()
     backend.Write(Ansi.enterAltScreen + Ansi.hideCursor)
 
+    // Support automated recording: SAGETUI_EXIT_AFTER_MS=N quits after N ms.
+    let exitAfterMs =
+      System.Environment.GetEnvironmentVariable("SAGETUI_EXIT_AFTER_MS")
+      |> Option.ofObj
+      |> Option.bind (fun s -> match System.Int32.TryParse(s) with true, n -> Some n | _ -> None)
+    exitAfterMs |> Option.iter (fun ms ->
+      async {
+        do! Async.Sleep ms
+        for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
+        activeSubs.Clear()
+        running <- false
+      } |> Async.Start
+    )
+
     try
       interpretCmd initCmd
       let mutable subs = program.Subscribe model
@@ -254,7 +268,7 @@ module App =
       backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
       backend.Flush()
       backend.LeaveRawMode()
-      raise ex
+      reraise()
 
   /// Run with an explicit backend (for testing or custom backends).
   let runWithBackend (backend: TerminalBackend) (program: Program<'model, 'msg>) =

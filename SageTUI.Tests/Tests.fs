@@ -3074,6 +3074,28 @@ let arenaRenderTests = testList "ArenaRender parity" [
   testCase "empty" <| fun () ->
     let (tree, arena) = arenaRenderHelper Empty 5 1
     arena.Cells |> Expect.sequenceEqual "empty cells match" tree.Cells
+
+  testCase "emoji text does not throw (measureWidth)" <| fun () ->
+    // Emoji are surrogate pairs in .NET char[]. ArenaRender.measureWidth must use
+    // String.EnumerateRunes() instead of Rune(char) to avoid ArgumentOutOfRangeException.
+    let arena = FrameArena.create 256 8192 256
+    let elem = El.text "📋 Todo"
+    let h = Arena.lower arena elem
+    try
+      ArenaRender.measureWidth arena (NodeHandle.value h) |> ignore
+    with ex ->
+      failwithf "measuring emoji text should not throw, but got: %s" ex.Message
+
+  testCase "emoji text renders to buffer without crash" <| fun () ->
+    let elem = El.column [
+      El.text "📋 Todo"
+      El.text "🔨 In Progress"
+      El.text "🔍 Review"
+      El.text "✅ Done"
+    ]
+    let (tree, arena) = arenaRenderHelper elem 40 4
+    // Both render paths produce same cells — and neither crashes on emoji
+    arena.Cells |> Expect.sequenceEqual "emoji column cells match" tree.Cells
 ]
 
 [<Tests>]
