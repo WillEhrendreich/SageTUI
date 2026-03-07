@@ -1,0 +1,20 @@
+﻿Registration Form                                           
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+Name:                                                       
+                                                            
+                                                            
+Email:                                                      
+                                                            
+Role: Developer                                             
+                                                            
+  [Submit focused]                                          
+                                                            
+  ERROR: Name is required                                   
+                                                            
+  ERROR: Invalid email address                              
+                                                            
+                                                            

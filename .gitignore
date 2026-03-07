@@ -18,3 +18,10 @@ API_ERGONOMICS_ANALYSIS.md
 
 # Local NuGet output
 nupkgs/
+
+# Verify snapshot testing (received files are pending review, not committed)
+*.received.*
+
+# Stray analysis files
+SNAPSHOT_TESTING_GUIDE.md
+SNAPSHOT_TEST_REFERENCE.md

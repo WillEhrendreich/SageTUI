@@ -1,0 +1,20 @@
+﻿Registration Form                                           
+                                                            
+                                                            
+                                                            
+                                                            
+                                                            
+Name: Alice                                                 
+                                                            
+                                                            
+Email: alice@example.com                                    
+                                                            
+                                                            
+Role: Developer                                             
+                                                            
+                                                            
+  [Email focused]                                           
+                                                            
+                                                            
+                                                            
+                                                            
