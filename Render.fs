@@ -3,6 +3,16 @@ namespace SageTUI
 open System.Text
 
 module Render =
+  let extractConstraint (elem: Element) =
+    match elem with
+    | Constrained(c, _) -> c
+    | _ -> Fill
+
+  let unwrapConstrained (elem: Element) =
+    match elem with
+    | Constrained(_, child) -> child
+    | other -> other
+
   let rec render (area: Area) (inheritedStyle: Style) (buf: Buffer) (elem: Element) =
     match area.Width <= 0 || area.Height <= 0 with
     | true -> ()
@@ -27,16 +37,18 @@ module Render =
         Buffer.writeString area.X area.Y fg bg attrs (sb.ToString()) buf
 
       | Row children ->
-        let constraints = children |> List.map (fun _ -> Fill)
+        let constraints = children |> List.map extractConstraint
+        let unwrapped = children |> List.map unwrapConstrained
         let areas = Layout.splitH constraints area
         List.iter2 (fun childArea child ->
-          render childArea inheritedStyle buf child) areas children
+          render childArea inheritedStyle buf child) areas unwrapped
 
       | Column children ->
-        let constraints = children |> List.map (fun _ -> Fill)
+        let constraints = children |> List.map extractConstraint
+        let unwrapped = children |> List.map unwrapConstrained
         let areas = Layout.splitV constraints area
         List.iter2 (fun childArea child ->
-          render childArea inheritedStyle buf child) areas children
+          render childArea inheritedStyle buf child) areas unwrapped
 
       | Overlay layers ->
         layers |> List.iter (render area inheritedStyle buf)

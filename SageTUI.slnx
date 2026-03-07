@@ -1,3 +1,4 @@
 <Solution>
-  <Project Path="SageTUI.fsproj" />
+  <Project Path="SageTUI.Library.fsproj" />
+  <Project Path="SageTUI.Tests\SageTUI.Tests.fsproj" />
 </Solution>

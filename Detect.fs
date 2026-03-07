@@ -124,10 +124,12 @@ module RawMode =
   let private ENABLE_LINE_INPUT = 0x0002u
   let private ENABLE_ECHO_INPUT = 0x0004u
 
-  let mutable private savedInputMode = 0u
-  let mutable private savedOutputMode = 0u
+  type SavedModes =
+    { Platform: Platform
+      InputMode: uint32
+      OutputMode: uint32 }
 
-  let enter (platform: Platform) =
+  let enter (platform: Platform) : SavedModes =
     match platform with
     | Windows ->
       let stdin = GetStdHandle(-10)
@@ -136,23 +138,23 @@ module RawMode =
       let mutable outMode = 0u
       GetConsoleMode(stdin, &inMode) |> ignore
       GetConsoleMode(stdout, &outMode) |> ignore
-      savedInputMode <- inMode
-      savedOutputMode <- outMode
       SetConsoleMode(stdin, inMode &&& ~~~(ENABLE_LINE_INPUT ||| ENABLE_ECHO_INPUT ||| ENABLE_PROCESSED_INPUT)) |> ignore
       SetConsoleMode(stdout, outMode ||| ENABLE_VIRTUAL_TERMINAL_PROCESSING) |> ignore
+      { Platform = Windows; InputMode = inMode; OutputMode = outMode }
     | MacOS | Linux ->
       let psi = System.Diagnostics.ProcessStartInfo("stty", "raw -echo")
       psi.RedirectStandardOutput <- true
       psi.UseShellExecute <- false
       System.Diagnostics.Process.Start(psi).WaitForExit()
+      { Platform = platform; InputMode = 0u; OutputMode = 0u }
 
-  let leave (platform: Platform) =
-    match platform with
+  let leave (saved: SavedModes) =
+    match saved.Platform with
     | Windows ->
       let stdin = GetStdHandle(-10)
       let stdout = GetStdHandle(-11)
-      SetConsoleMode(stdin, savedInputMode) |> ignore
-      SetConsoleMode(stdout, savedOutputMode) |> ignore
+      SetConsoleMode(stdin, saved.InputMode) |> ignore
+      SetConsoleMode(stdout, saved.OutputMode) |> ignore
     | MacOS | Linux ->
       let psi = System.Diagnostics.ProcessStartInfo("stty", "sane")
       psi.RedirectStandardOutput <- true

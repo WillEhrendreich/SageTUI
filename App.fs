@@ -7,12 +7,13 @@ open System.Threading
 
 module App =
   let run (backend: TerminalBackend) (program: Program<'model, 'msg>) =
-    let width, height = backend.Size()
+    let mutable width, height = backend.Size()
     let mutable model, initCmd = program.Init()
     let mutable frontBuf = Buffer.create width height
     let mutable backBuf = Buffer.create width height
     let arena = FrameArena.create 4096 65536 4096
     let mutable running = true
+    let mutable needsFullRedraw = true
 
     let msgChannel = ConcurrentQueue<'msg>()
     let dispatch msg = msgChannel.Enqueue(msg)
@@ -26,7 +27,8 @@ module App =
       | OfAsync run ->
         async {
           try do! run dispatch
-          with _ -> ()
+          with ex ->
+            eprintfn "OfAsync error: %s" ex.Message
         } |> Async.Start
       | OfCancellableAsync(id, run) ->
         match activeSubs.TryGetValue(id) with
@@ -90,21 +92,36 @@ module App =
     backend.Write(Ansi.enterAltScreen + Ansi.hideCursor)
 
     interpretCmd initCmd
+    let mutable prevModel = model
+    let mutable subs = program.Subscribe model
+    reconcileSubs subs
 
     while running do
       let mutable msg = Unchecked.defaultof<'msg>
+      let mutable modelChanged = false
       while msgChannel.TryDequeue(&msg) do
         let newModel, cmd = program.Update msg model
         model <- newModel
+        modelChanged <- true
         interpretCmd cmd
 
-      let subs = program.Subscribe model
-      reconcileSubs subs
+      match modelChanged with
+      | true ->
+        subs <- program.Subscribe model
+        reconcileSubs subs
+      | false -> ()
 
       let elem = program.View model
 
       FrameArena.reset arena
       let _rootHandle = Arena.lower arena elem
+
+      match needsFullRedraw with
+      | true ->
+        frontBuf <- Buffer.create width height
+        backBuf <- Buffer.create width height
+        needsFullRedraw <- false
+      | false -> ()
 
       Buffer.clear backBuf
       let area = { X = 0; Y = 0; Width = width; Height = height }
@@ -125,6 +142,12 @@ module App =
 
       match backend.PollEvent 16 with
       | Some event ->
+        match event with
+        | Resized(w, h) ->
+          width <- w
+          height <- h
+          needsFullRedraw <- true
+        | _ -> ()
         for sub in subs do
           match sub, event with
           | KeySub handler, KeyPressed(key, mods) ->
@@ -132,7 +155,8 @@ module App =
           | ResizeSub handler, Resized(w, h) ->
             handler (w, h) |> dispatch
           | _ -> ()
-      | None -> ()
+      | None ->
+        Thread.Sleep 1
 
     backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
     backend.LeaveRawMode()

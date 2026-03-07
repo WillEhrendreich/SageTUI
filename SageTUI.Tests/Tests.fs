@@ -2690,6 +2690,54 @@ let selectViewTests = testList "Select.view" [
     | other -> failwith (sprintf "expected Column, got %A" other)
 ]
 
+let layoutConstraintFixTests = testList "Layout constraint extraction" [
+  testCase "Row with Fixed child allocates exact width" <| fun () ->
+    let buf = Buffer.create 20 3
+    let elem = El.row [
+      El.width 5 (El.text "LEFT")
+      El.text "RIGHT"
+    ]
+    let area = { X = 0; Y = 0; Width = 20; Height = 3 }
+    Render.render area Style.empty buf elem
+    buf.Cells.[0].Rune |> Expect.equal "first cell should be L" (int32 (Rune 'L').Value)
+    buf.Cells.[5].Rune |> Expect.equal "cell at 5 should be R" (int32 (Rune 'R').Value)
+
+  testCase "Row with two Fixed children plus Fill" <| fun () ->
+    let buf = Buffer.create 30 1
+    let elem = El.row [
+      El.width 5 (El.text "A----")
+      El.width 10 (El.text "B---------")
+      El.text "C"
+    ]
+    let area = { X = 0; Y = 0; Width = 30; Height = 1 }
+    Render.render area Style.empty buf elem
+    buf.Cells.[0].Rune |> Expect.equal "A at 0" (int32 (Rune 'A').Value)
+    buf.Cells.[5].Rune |> Expect.equal "B at 5" (int32 (Rune 'B').Value)
+    buf.Cells.[15].Rune |> Expect.equal "C at 15" (int32 (Rune 'C').Value)
+
+  testCase "Column with Fixed child allocates exact height" <| fun () ->
+    let buf = Buffer.create 10 10
+    let elem = El.column [
+      Constrained(Fixed 1, El.text "TOP")
+      El.text "BOT"
+    ]
+    let area = { X = 0; Y = 0; Width = 10; Height = 10 }
+    Render.render area Style.empty buf elem
+    buf.Cells.[0].Rune |> Expect.equal "T at row 0" (int32 (Rune 'T').Value)
+    buf.Cells.[1 * 10].Rune |> Expect.equal "B at row 1" (int32 (Rune 'B').Value)
+
+  testCase "Percentage constraint in Row" <| fun () ->
+    let buf = Buffer.create 100 1
+    let elem = El.row [
+      El.percentage 25 (El.text "Q")
+      El.text "R"
+    ]
+    let area = { X = 0; Y = 0; Width = 100; Height = 1 }
+    Render.render area Style.empty buf elem
+    buf.Cells.[0].Rune |> Expect.equal "Q at 0" (int32 (Rune 'Q').Value)
+    buf.Cells.[25].Rune |> Expect.equal "R at 25" (int32 (Rune 'R').Value)
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -2796,5 +2844,8 @@ let allTests = testList "All" [
     focusRingTests2
     selectBasicTests
     selectViewTests
+  ]
+  testList "Panel fixes" [
+    layoutConstraintFixTests
   ]
 ]
