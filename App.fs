@@ -161,6 +161,8 @@ module App =
       | true ->
         frontBuf <- Buffer.create width height
         backBuf <- Buffer.create width height
+        backend.Write(Ansi.clearScreen)
+        backend.Flush()
         needsFullRedraw <- false
       | false -> ()
 

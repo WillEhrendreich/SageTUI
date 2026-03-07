@@ -8,6 +8,7 @@ module Ansi =
   let moveCursor row col = sprintf "%s%d;%dH" esc (row + 1) (col + 1)
   let hideCursor = sprintf "%s?25l" esc
   let showCursor = sprintf "%s?25h" esc
+  let clearScreen = sprintf "%s2J%sH" esc esc
   let enterAltScreen = sprintf "%s?1049h" esc
   let leaveAltScreen = sprintf "%s?1049l" esc
   let enableMouseTracking = sprintf "%s?1000h%s?1006h" esc esc
