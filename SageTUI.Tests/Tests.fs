@@ -2738,6 +2738,75 @@ let layoutConstraintFixTests = testList "Layout constraint extraction" [
     buf.Cells.[25].Rune |> Expect.equal "R at 25" (int32 (Rune 'R').Value)
 ]
 
+let arenaRenderHelper elem width height =
+  let area = { X = 0; Y = 0; Width = width; Height = height }
+  let treeBuf = Buffer.create width height
+  Render.render area Style.empty treeBuf elem
+  let arenaBuf = Buffer.create width height
+  let arena = FrameArena.create 1024 4096 256
+  let root = Arena.lower arena elem
+  ArenaRender.renderRoot arena root area arenaBuf
+  (treeBuf, arenaBuf)
+
+let arenaRenderTests = testList "ArenaRender parity" [
+  testCase "simple text" <| fun () ->
+    let (tree, arena) = arenaRenderHelper (El.text "Hello") 20 1
+    arena.Cells |> Expect.sequenceEqual "cells match" tree.Cells
+
+  testCase "styled text" <| fun () ->
+    let elem = El.styled { Fg = Some (Named(Red, Bright)); Bg = None; Attrs = TextAttrs.bold } (El.text "Hi")
+    let (tree, arena) = arenaRenderHelper elem 10 1
+    arena.Cells |> Expect.sequenceEqual "styled cells match" tree.Cells
+
+  testCase "row with constraints" <| fun () ->
+    let elem = El.row [
+      El.width 5 (El.text "LEFT")
+      El.text "RIGHT"
+    ]
+    let (tree, arena) = arenaRenderHelper elem 20 1
+    arena.Cells |> Expect.sequenceEqual "row cells match" tree.Cells
+
+  testCase "column" <| fun () ->
+    let elem = El.column [
+      El.text "TOP"
+      El.text "BOT"
+    ]
+    let (tree, arena) = arenaRenderHelper elem 10 4
+    arena.Cells |> Expect.sequenceEqual "column cells match" tree.Cells
+
+  testCase "overlay" <| fun () ->
+    let elem = Overlay [El.text "BASE"; El.text "TOP"]
+    let (tree, arena) = arenaRenderHelper elem 10 1
+    arena.Cells |> Expect.sequenceEqual "overlay cells match" tree.Cells
+
+  testCase "bordered" <| fun () ->
+    let elem = El.bordered Light (El.text "HI")
+    let (tree, arena) = arenaRenderHelper elem 10 5
+    arena.Cells |> Expect.sequenceEqual "bordered cells match" tree.Cells
+
+  testCase "padded" <| fun () ->
+    let elem = El.padded (Padding.all 1) (El.text "X")
+    let (tree, arena) = arenaRenderHelper elem 10 5
+    arena.Cells |> Expect.sequenceEqual "padded cells match" tree.Cells
+
+  testCase "nested row-column with constraints" <| fun () ->
+    let elem = El.row [
+      El.width 10 (El.column [El.text "A"; El.text "B"])
+      El.text "C"
+    ]
+    let (tree, arena) = arenaRenderHelper elem 30 4
+    arena.Cells |> Expect.sequenceEqual "nested cells match" tree.Cells
+
+  testCase "keyed passthrough" <| fun () ->
+    let elem = El.keyed "k1" (El.text "KEY")
+    let (tree, arena) = arenaRenderHelper elem 10 1
+    arena.Cells |> Expect.sequenceEqual "keyed cells match" tree.Cells
+
+  testCase "empty" <| fun () ->
+    let (tree, arena) = arenaRenderHelper Empty 5 1
+    arena.Cells |> Expect.sequenceEqual "empty cells match" tree.Cells
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -2847,5 +2916,6 @@ let allTests = testList "All" [
   ]
   testList "Panel fixes" [
     layoutConstraintFixTests
+    arenaRenderTests
   ]
 ]

@@ -14,6 +14,8 @@ module App =
     let arena = FrameArena.create 4096 65536 4096
     let mutable running = true
     let mutable needsFullRedraw = true
+    let mutable prevKeyedElements = Map.empty<string, Element>
+    let mutable activeTransitions: ActiveTransition list = []
 
     let msgChannel = ConcurrentQueue<'msg>()
     let dispatch msg = msgChannel.Enqueue(msg)
@@ -113,8 +115,46 @@ module App =
 
       let elem = program.View model
 
+      // Reconcile keyed elements for transitions
+      let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+      let newKeyed = Reconcile.findKeyedElements elem
+      let (entering, exiting, _) = Reconcile.reconcile prevKeyedElements newKeyed
+
+      // Capture snapshots for exiting elements and start exit transitions
+      for (key, oldElem) in exiting do
+        match oldElem with
+        | Keyed(_, _, exitTransition, _) ->
+          let snapshot = Array.copy frontBuf.Cells
+          activeTransitions <-
+            { Key = key
+              Transition = exitTransition
+              StartMs = nowMs
+              DurationMs = TransitionDuration.get exitTransition
+              Easing = Ease.cubicInOut
+              SnapshotBefore = snapshot
+              Area = { X = 0; Y = 0; Width = width; Height = height } }
+            :: activeTransitions
+        | _ -> ()
+
+      // Start enter transitions
+      for (key, newElem) in entering do
+        match newElem with
+        | Keyed(_, enterTransition, _, _) ->
+          activeTransitions <-
+            { Key = key
+              Transition = enterTransition
+              StartMs = nowMs
+              DurationMs = TransitionDuration.get enterTransition
+              Easing = Ease.cubicInOut
+              SnapshotBefore = Array.create (width * height) PackedCell.empty
+              Area = { X = 0; Y = 0; Width = width; Height = height } }
+            :: activeTransitions
+        | _ -> ()
+
+      prevKeyedElements <- newKeyed
+
       FrameArena.reset arena
-      let _rootHandle = Arena.lower arena elem
+      let rootHandle = Arena.lower arena elem
 
       match needsFullRedraw with
       | true ->
@@ -125,7 +165,25 @@ module App =
 
       Buffer.clear backBuf
       let area = { X = 0; Y = 0; Width = width; Height = height }
-      Render.render area Style.empty backBuf elem
+      ArenaRender.renderRoot arena rootHandle area backBuf
+
+      // Apply active transitions
+      activeTransitions |> List.iter (fun at ->
+        let t = ActiveTransition.progress nowMs at
+        match at.Transition with
+        | Fade _ ->
+          TransitionFx.applyFade t backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+        | ColorMorph _ ->
+          TransitionFx.applyColorMorph t at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+        | Wipe(dir, _) ->
+          TransitionFx.applyWipe t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+        | Dissolve _ ->
+          let order = TransitionFx.fisherYatesShuffle (at.Key.GetHashCode()) (at.Area.Width * at.Area.Height)
+          TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+        | _ -> ())
+
+      // Remove completed transitions
+      activeTransitions <- activeTransitions |> List.filter (fun at -> not (ActiveTransition.isDone nowMs at))
 
       let changes = Buffer.diff frontBuf backBuf
 

@@ -20,11 +20,12 @@
     <Compile Include="Terminal.fs" />
     <Compile Include="Ansi.fs" />
     <Compile Include="Render.fs" />
+    <Compile Include="ArenaRender.fs" />
     <Compile Include="Input.fs" />
     <Compile Include="Tea.fs" />
     <Compile Include="Detect.fs" />
-    <Compile Include="App.fs" />
     <Compile Include="Transition.fs" />
+    <Compile Include="App.fs" />
     <Compile Include="Widgets.fs" />
   </ItemGroup>
 
