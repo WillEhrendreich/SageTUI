@@ -2168,7 +2168,7 @@ let appRunTests = testList "App.run" [
       KeyPressed(Key.Char 'q', Modifiers.None)
     ]
     let backend, getOutput = TestBackend.create 20 3 events
-    App.run backend counterProgram2
+    App.runWithBackend backend counterProgram2
     let output = getOutput()
     output.Contains(Ansi.enterAltScreen) |> Expect.isTrue "entered alt screen"
     output.Contains(Ansi.leaveAltScreen) |> Expect.isTrue "left alt screen"
@@ -2180,14 +2180,14 @@ let appRunTests = testList "App.run" [
       KeyPressed(Key.Char 'q', Modifiers.None)
     ]
     let backend, getOutput = TestBackend.create 20 3 events
-    App.run backend counterProgram2
+    App.runWithBackend backend counterProgram2
     let output = getOutput()
     output.Contains("Count:") |> Expect.isTrue "has count output"
 
   testCase "immediate quit produces minimal output" <| fun () ->
     let events = [KeyPressed(Key.Char 'q', Modifiers.None)]
     let backend, getOutput = TestBackend.create 10 1 events
-    App.run backend counterProgram2
+    App.runWithBackend backend counterProgram2
     let output = getOutput()
     output.Contains(Ansi.enterAltScreen) |> Expect.isTrue "entered alt"
     output.Contains(Ansi.leaveAltScreen) |> Expect.isTrue "left alt"
@@ -2195,7 +2195,7 @@ let appRunTests = testList "App.run" [
   testCase "no events except quit terminates" <| fun () ->
     let events = [KeyPressed(Key.Char 'q', Modifiers.None)]
     let backend, _ = TestBackend.create 10 1 events
-    App.run backend counterProgram2
+    App.runWithBackend backend counterProgram2
 ]
 
 let cmdInterpretTests = testList "Cmd interpret" [
@@ -2211,7 +2211,7 @@ let cmdInterpretTests = testList "Cmd interpret" [
       Subscribe = fun _ -> []
     }
     let backend, _ = TestBackend.create 20 1 []
-    App.run backend prog
+    App.runWithBackend backend prog
 
   testCase "Delay dispatches after timeout" <| fun () ->
     let prog: Program<bool, string> = {
@@ -2224,7 +2224,7 @@ let cmdInterpretTests = testList "Cmd interpret" [
       Subscribe = fun _ -> []
     }
     let backend, _ = TestBackend.create 20 1 []
-    App.run backend prog
+    App.runWithBackend backend prog
 ]
 
 let subscriptionTests2 = testList "Subscriptions" [
@@ -2245,7 +2245,7 @@ let subscriptionTests2 = testList "Subscriptions" [
         | false -> []
     }
     let backend, _ = TestBackend.create 20 1 []
-    App.run backend prog
+    App.runWithBackend backend prog
 ]
 
 let eventDispatchTests = testList "Event dispatch" [
@@ -2270,7 +2270,7 @@ let eventDispatchTests = testList "Event dispatch" [
       KeyPressed(Key.Char 'q', Modifiers.None)
     ]
     let backend, _ = TestBackend.create 10 1 events
-    App.run backend prog
+    App.runWithBackend backend prog
 
   testCase "resize events dispatched to ResizeSub" <| fun () ->
     let prog: Program<string, string> = {
@@ -2293,7 +2293,7 @@ let eventDispatchTests = testList "Event dispatch" [
       KeyPressed(Key.Char 'q', Modifiers.None)
     ]
     let backend, _ = TestBackend.create 20 1 events
-    App.run backend prog
+    App.runWithBackend backend prog
 ]
 
 // ============================================================

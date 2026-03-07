@@ -210,15 +210,4 @@ let program : Program<Model, Msg> =
     Subscribe = subscribe }
 
 [<EntryPoint>]
-let main _argv =
-  let profile =
-    Detect.fromEnvironment
-      (fun k -> System.Environment.GetEnvironmentVariable(k) |> Option.ofObj)
-      (fun () -> System.Console.WindowWidth, System.Console.WindowHeight)
-    |> Detect.adjustForMultiplexer
-      (fun k -> System.Environment.GetEnvironmentVariable(k) |> Option.ofObj)
-    |> UserOverride.apply
-      (fun k -> System.Environment.GetEnvironmentVariable(k) |> Option.ofObj)
-  let backend = Backend.create profile
-  App.run backend program
-  0
+let main _ = App.run program; 0

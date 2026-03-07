@@ -245,3 +245,13 @@ module Backend =
       EnterRawMode = fun () -> savedModes <- RawMode.enter profile.Platform
       LeaveRawMode = fun () -> RawMode.leave savedModes
       Profile = profile }
+
+  /// Auto-detect terminal capabilities and create a backend. Zero ceremony.
+  let auto () : TerminalBackend =
+    let envReader k = System.Environment.GetEnvironmentVariable(k) |> Option.ofObj
+    let sizeGetter () = System.Console.WindowWidth, System.Console.WindowHeight
+    let profile =
+      Detect.fromEnvironment envReader sizeGetter
+      |> Detect.adjustForMultiplexer envReader
+      |> UserOverride.apply envReader
+    create profile

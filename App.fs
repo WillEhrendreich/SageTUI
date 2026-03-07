@@ -256,9 +256,16 @@ module App =
       backend.LeaveRawMode()
       raise ex
 
-  let run (backend: TerminalBackend) (program: Program<'model, 'msg>) =
+  /// Run with an explicit backend (for testing or custom backends).
+  let runWithBackend (backend: TerminalBackend) (program: Program<'model, 'msg>) =
     runWith AppConfig.defaults backend program
 
+  /// Run a program. Auto-detects terminal capabilities. This is the main entry point.
+  let run (program: Program<'model, 'msg>) =
+    let backend = Backend.auto()
+    runWith AppConfig.defaults backend program
+
+  /// Create a Program from init/update/view (no subscriptions).
   let simple
     (init: unit -> 'model * Cmd<'msg>)
     (update: 'msg -> 'model -> 'model * Cmd<'msg>)
@@ -266,6 +273,7 @@ module App =
     : Program<'model, 'msg> =
     { Init = init; Update = update; View = view; Subscribe = fun _ -> [] }
 
+  /// Display a static element. Press Escape to quit.
   let display (view: unit -> Element) =
     let program : Program<unit, Key> =
       { Init = fun () -> (), NoCmd
@@ -273,4 +281,4 @@ module App =
           match msg with Key.Escape -> (), Quit | _ -> (), NoCmd
         View = fun () -> view ()
         Subscribe = fun _ -> [KeySub (fun (k, _) -> Some k)] }
-    fun (backend: TerminalBackend) -> run backend program
+    run program

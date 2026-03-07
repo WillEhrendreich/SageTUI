@@ -286,20 +286,11 @@ let subscribe _model =
       | Char '4' -> Some (Focus 3)
       | _ -> None) ]
 
+let program : Program<Model, Msg> =
+  { Init = init
+    Update = update
+    View = view
+    Subscribe = subscribe }
+
 [<EntryPoint>]
-let main _argv =
-  let profile =
-    Detect.fromEnvironment
-      (fun k -> Environment.GetEnvironmentVariable(k) |> Option.ofObj)
-      (fun () -> Console.WindowWidth, Console.WindowHeight)
-    |> Detect.adjustForMultiplexer
-      (fun k -> Environment.GetEnvironmentVariable(k) |> Option.ofObj)
-    |> UserOverride.apply
-      (fun k -> Environment.GetEnvironmentVariable(k) |> Option.ofObj)
-  let backend = Backend.create profile
-  App.run backend
-    { Init = init
-      Update = update
-      View = view
-      Subscribe = subscribe }
-  0
+let main _ = App.run program; 0

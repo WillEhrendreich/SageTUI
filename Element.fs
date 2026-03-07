@@ -134,6 +134,16 @@ module El =
   // Gap helper
   let gap n elem = Gapped(n, elem)
 
+  // Canvas helpers
+  let canvas (draw: int -> int -> PixelBuffer) =
+    Canvas { Draw = draw; Mode = HalfBlock; Fallback = None }
+
+  let canvasBraille (draw: int -> int -> PixelBuffer) =
+    Canvas { Draw = draw; Mode = Braille; Fallback = None }
+
+  let canvasWithMode (mode: CanvasMode) (draw: int -> int -> PixelBuffer) =
+    Canvas { Draw = draw; Mode = mode; Fallback = None }
+
   // Formatted text
   let textf fmt = Printf.ksprintf text fmt
 
