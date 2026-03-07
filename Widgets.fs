@@ -382,3 +382,141 @@ module Toast =
     |> El.styled model.Style
     |> El.bordered Light
     |> El.padHV 1 0
+
+type TreeNode<'a> =
+  | Leaf of 'a
+  | Branch of 'a * children: TreeNode<'a> list
+
+module TreeNode =
+  let value node =
+    match node with
+    | Leaf v -> v
+    | Branch(v, _) -> v
+
+  let children node =
+    match node with
+    | Leaf _ -> []
+    | Branch(_, cs) -> cs
+
+  let isLeaf node =
+    match node with
+    | Leaf _ -> true
+    | Branch _ -> false
+
+type TreeState = {
+  Expanded: Set<int list>
+  Cursor: int list
+}
+
+module TreeView =
+  let init () =
+    { Expanded = Set.empty; Cursor = [0] }
+
+  let isExpanded (path: int list) (state: TreeState) =
+    state.Expanded.Contains path
+
+  let toggleExpand (path: int list) (state: TreeState) =
+    match state.Expanded.Contains path with
+    | true -> { state with Expanded = state.Expanded.Remove path }
+    | false -> { state with Expanded = state.Expanded.Add path }
+
+  let expand (path: int list) (state: TreeState) =
+    { state with Expanded = state.Expanded.Add path }
+
+  let collapse (path: int list) (state: TreeState) =
+    { state with Expanded = state.Expanded.Remove path }
+
+  let expandAll (nodes: TreeNode<'a> list) (state: TreeState) =
+    let rec paths prefix nodes =
+      nodes |> List.mapi (fun i node ->
+        let p = prefix @ [i]
+        match node with
+        | Leaf _ -> []
+        | Branch(_, cs) -> p :: paths p cs)
+      |> List.concat
+    { state with Expanded = paths [] nodes |> Set.ofList }
+
+  // Flatten tree into (path, node, depth) list respecting expanded state
+  let private flatten (nodes: TreeNode<'a> list) (state: TreeState) =
+    let result = ResizeArray<int list * TreeNode<'a> * int>()
+    let rec walk prefix depth items =
+      items |> List.iteri (fun i node ->
+        let path = prefix @ [i]
+        result.Add(path, node, depth)
+        match node with
+        | Branch(_, cs) when state.Expanded.Contains path ->
+          walk path (depth + 1) cs
+        | _ -> ())
+    walk [] 0 nodes
+    result |> Seq.toList
+
+  let visiblePaths (nodes: TreeNode<'a> list) (state: TreeState) =
+    flatten nodes state |> List.map (fun (p, _, _) -> p)
+
+  let moveCursorUp (nodes: TreeNode<'a> list) (state: TreeState) =
+    let visible = visiblePaths nodes state
+    match List.tryFindIndex ((=) state.Cursor) visible with
+    | Some idx when idx > 0 -> { state with Cursor = visible.[idx - 1] }
+    | _ -> state
+
+  let moveCursorDown (nodes: TreeNode<'a> list) (state: TreeState) =
+    let visible = visiblePaths nodes state
+    match List.tryFindIndex ((=) state.Cursor) visible with
+    | Some idx when idx < visible.Length - 1 -> { state with Cursor = visible.[idx + 1] }
+    | _ -> state
+
+  let cursorNode (nodes: TreeNode<'a> list) (state: TreeState) =
+    let rec find prefix items =
+      items |> List.mapi (fun i node ->
+        let path = prefix @ [i]
+        match path = state.Cursor with
+        | true -> Some node
+        | false ->
+          match node with
+          | Branch(_, cs) -> find path cs
+          | Leaf _ -> None)
+      |> List.tryPick id
+    find [] nodes
+
+  let handleKey (key: Key) (nodes: TreeNode<'a> list) (state: TreeState) =
+    match key with
+    | Key.Up -> moveCursorUp nodes state
+    | Key.Down -> moveCursorDown nodes state
+    | Key.Right ->
+      match cursorNode nodes state with
+      | Some(Branch _) -> expand state.Cursor state
+      | _ -> state
+    | Key.Left ->
+      match isExpanded state.Cursor state with
+      | true -> collapse state.Cursor state
+      | false ->
+        // Move to parent
+        match state.Cursor with
+        | _ :: _ when state.Cursor.Length > 1 ->
+          { state with Cursor = state.Cursor |> List.take (state.Cursor.Length - 1) }
+        | _ -> state
+    | Key.Enter ->
+      match cursorNode nodes state with
+      | Some(Branch _) -> toggleExpand state.Cursor state
+      | _ -> state
+    | _ -> state
+
+  let view (toString: 'a -> string) (focused: bool) (nodes: TreeNode<'a> list) (state: TreeState) =
+    let items = flatten nodes state
+    items
+    |> List.map (fun (path, node, depth) ->
+      let isCursor = path = state.Cursor
+      let prefix =
+        match node with
+        | Leaf _ -> "  "
+        | Branch(_, cs) ->
+          match isExpanded path state with
+          | true -> "▾ "
+          | false -> "▸ "
+      let indent = String.replicate (depth * 2) " "
+      let label = toString (TreeNode.value node)
+      let el = El.text (sprintf "%s%s%s" indent prefix label)
+      match isCursor && focused with
+      | true -> el |> El.bold |> El.reverse
+      | false -> el)
+    |> El.column

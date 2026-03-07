@@ -195,3 +195,28 @@ module El =
     wordWrap maxWidth s
     |> List.map (styledText style)
     |> column
+
+  /// Memoize a view function: returns cached Element when input reference hasn't changed.
+  /// Use at module level: `let lazyCounter = El.lazy' Counter.view`
+  let lazy' (viewFn: 'a -> Element) : ('a -> Element) =
+    let mutable prev: struct('a * Element) voption = ValueNone
+    fun model ->
+      match prev with
+      | ValueSome struct(oldModel, oldElem) when obj.ReferenceEquals(oldModel :> obj, model :> obj) -> oldElem
+      | _ ->
+        let elem = viewFn model
+        prev <- ValueSome struct(model, elem)
+        elem
+
+  /// Memoize a 2-argument view function.
+  let lazy2 (viewFn: 'a -> 'b -> Element) : ('a -> 'b -> Element) =
+    let mutable prev: struct('a * 'b * Element) voption = ValueNone
+    fun a b ->
+      match prev with
+      | ValueSome struct(oldA, oldB, oldElem)
+        when obj.ReferenceEquals(oldA :> obj, a :> obj)
+          && obj.ReferenceEquals(oldB :> obj, b :> obj) -> oldElem
+      | _ ->
+        let elem = viewFn a b
+        prev <- ValueSome struct(a, b, elem)
+        elem

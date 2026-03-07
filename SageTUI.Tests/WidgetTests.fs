@@ -481,6 +481,264 @@ let toastTests = testList "Toast" [
   }
 ]
 
+let treeViewTests = testList "TreeView" [
+  let sampleTree = [
+    Branch("src", [
+      Branch("components", [
+        Leaf "Button.fs"
+        Leaf "Modal.fs"
+      ])
+      Leaf "App.fs"
+    ])
+    Leaf "README.md"
+  ]
+
+  test "init starts at first item" {
+    let state = TreeView.init ()
+    state.Cursor |> Expect.equal "cursor at root" [0]
+    state.Expanded |> Expect.isEmpty "nothing expanded"
+  }
+
+  test "flatten only shows top-level when collapsed" {
+    let state = TreeView.init ()
+    let paths = TreeView.visiblePaths sampleTree state
+    paths |> Expect.hasLength "two top-level items" 2
+    paths.[0] |> Expect.equal "first" [0]
+    paths.[1] |> Expect.equal "second" [1]
+  }
+
+  test "expand shows children" {
+    let state = TreeView.init () |> TreeView.expand [0]
+    let paths = TreeView.visiblePaths sampleTree state
+    paths |> Expect.hasLength "src + 2 children + readme" 4
+    paths.[1] |> Expect.equal "components" [0; 0]
+    paths.[2] |> Expect.equal "App.fs" [0; 1]
+  }
+
+  test "expand nested shows grandchildren" {
+    let state =
+      TreeView.init ()
+      |> TreeView.expand [0]
+      |> TreeView.expand [0; 0]
+    let paths = TreeView.visiblePaths sampleTree state
+    paths |> Expect.hasLength "src + components + 2 leaves + App + readme" 6
+    paths.[2] |> Expect.equal "Button.fs" [0; 0; 0]
+    paths.[3] |> Expect.equal "Modal.fs" [0; 0; 1]
+  }
+
+  test "collapse hides children" {
+    let state =
+      TreeView.init ()
+      |> TreeView.expand [0]
+      |> TreeView.collapse [0]
+    let paths = TreeView.visiblePaths sampleTree state
+    paths |> Expect.hasLength "back to two" 2
+  }
+
+  test "toggleExpand toggles" {
+    let state =
+      TreeView.init ()
+      |> TreeView.toggleExpand [0]
+    TreeView.isExpanded [0] state |> Expect.isTrue "expanded"
+    let state2 = TreeView.toggleExpand [0] state
+    TreeView.isExpanded [0] state2 |> Expect.isFalse "collapsed"
+  }
+
+  test "expandAll expands all branches" {
+    let state = TreeView.init () |> TreeView.expandAll sampleTree
+    TreeView.isExpanded [0] state |> Expect.isTrue "src expanded"
+    TreeView.isExpanded [0; 0] state |> Expect.isTrue "components expanded"
+    let paths = TreeView.visiblePaths sampleTree state
+    paths |> Expect.hasLength "all 6 nodes" 6
+  }
+
+  test "moveCursorDown moves to next visible" {
+    let state = TreeView.init () |> TreeView.moveCursorDown sampleTree
+    state.Cursor |> Expect.equal "moved to readme" [1]
+  }
+
+  test "moveCursorDown at bottom stays" {
+    let state =
+      TreeView.init ()
+      |> TreeView.moveCursorDown sampleTree
+      |> TreeView.moveCursorDown sampleTree
+    state.Cursor |> Expect.equal "stays at last" [1]
+  }
+
+  test "moveCursorUp moves to previous visible" {
+    let state =
+      TreeView.init ()
+      |> TreeView.moveCursorDown sampleTree
+      |> TreeView.moveCursorUp sampleTree
+    state.Cursor |> Expect.equal "back to first" [0]
+  }
+
+  test "moveCursorUp at top stays" {
+    let state = TreeView.init () |> TreeView.moveCursorUp sampleTree
+    state.Cursor |> Expect.equal "stays at first" [0]
+  }
+
+  test "cursorNode returns correct node" {
+    let node = TreeView.cursorNode sampleTree (TreeView.init ())
+    match node with
+    | Some(Branch(v, _)) -> v |> Expect.equal "src" "src"
+    | _ -> failtest "expected Branch src"
+  }
+
+  test "handleKey Right expands branch" {
+    let state = TreeView.init () |> TreeView.handleKey Key.Right sampleTree
+    TreeView.isExpanded [0] state |> Expect.isTrue "expanded"
+  }
+
+  test "handleKey Left collapses expanded branch" {
+    let state =
+      TreeView.init ()
+      |> TreeView.expand [0]
+      |> TreeView.handleKey Key.Left sampleTree
+    TreeView.isExpanded [0] state |> Expect.isFalse "collapsed"
+  }
+
+  test "handleKey Left on collapsed moves to parent" {
+    let state =
+      TreeView.init ()
+      |> TreeView.expand [0]
+      |> fun s -> { s with Cursor = [0; 0] }
+      |> TreeView.handleKey Key.Left sampleTree
+    state.Cursor |> Expect.equal "moved to parent" [0]
+  }
+
+  test "handleKey Enter toggles branch" {
+    let state = TreeView.init () |> TreeView.handleKey Key.Enter sampleTree
+    TreeView.isExpanded [0] state |> Expect.isTrue "toggled open"
+    let state2 = TreeView.handleKey Key.Enter sampleTree state
+    TreeView.isExpanded [0] state2 |> Expect.isFalse "toggled closed"
+  }
+
+  test "handleKey Up/Down navigates" {
+    let state =
+      TreeView.init ()
+      |> TreeView.handleKey Key.Down sampleTree
+    state.Cursor |> Expect.equal "down" [1]
+    let state2 = TreeView.handleKey Key.Up sampleTree state
+    state2.Cursor |> Expect.equal "up" [0]
+  }
+
+  test "view renders tree with indentation" {
+    let state =
+      TreeView.init ()
+      |> TreeView.expand [0]
+    let elem = TreeView.view id true sampleTree state
+    match elem with
+    | Column items ->
+      items |> Expect.hasLength "4 visible" 4
+    | _ -> failtest "expected Column"
+  }
+
+  test "view shows expand/collapse markers" {
+    let state = TreeView.init ()
+    let elem = TreeView.view id true sampleTree state
+    match elem with
+    | Column items ->
+      // First item is cursor: Styled(reverse, Styled(bold, Text(...)))
+      let rec extractText el =
+        match el with
+        | Text(t, _) -> Some t
+        | Styled(_, inner) -> extractText inner
+        | _ -> None
+      match extractText items.[0] with
+      | Some t -> t |> Expect.stringContains "collapsed marker" "▸"
+      | None -> failtest "could not extract text"
+    | _ -> failtest "expected Column"
+  }
+
+  test "view shows expanded marker after expand" {
+    let state = TreeView.init () |> TreeView.expand [0]
+    let elem = TreeView.view id true sampleTree state
+    match elem with
+    | Column items ->
+      let rec extractText el =
+        match el with
+        | Text(t, _) -> Some t
+        | Styled(_, inner) -> extractText inner
+        | _ -> None
+      match extractText items.[0] with
+      | Some t -> t |> Expect.stringContains "expanded marker" "▾"
+      | None -> failtest "could not extract text"
+    | _ -> failtest "expected Column"
+  }
+
+  test "cursor item is bold+reverse when focused" {
+    let state = TreeView.init ()
+    let elem = TreeView.view id true sampleTree state
+    match elem with
+    | Column items ->
+      match items.[0] with
+      | Styled(_, Styled(_, _)) -> () // bold + reverse = 2 nested Styled
+      | Styled(_, _) -> ()
+      | _ -> failtest "expected Styled for cursor"
+    | _ -> failtest "expected Column"
+  }
+]
+
+let lazyTests = testList "El.lazy'" [
+  test "lazy' returns same element for same reference" {
+    let viewFn (model: string) = El.text model
+    let memoized = El.lazy' viewFn
+    let model = "hello"
+    let e1 = memoized model
+    let e2 = memoized model
+    obj.ReferenceEquals(e1, e2) |> Expect.isTrue "same reference should cache"
+  }
+
+  test "lazy' recomputes for different reference" {
+    let mutable callCount = 0
+    let viewFn (model: string) =
+      callCount <- callCount + 1
+      El.text model
+    let memoized = El.lazy' viewFn
+    memoized "a" |> ignore
+    memoized "b" |> ignore
+    callCount |> Expect.equal "called twice" 2
+  }
+
+  test "lazy' only caches last result" {
+    let mutable callCount = 0
+    let viewFn (model: string) =
+      callCount <- callCount + 1
+      El.text model
+    let memoized = El.lazy' viewFn
+    let m = "test"
+    memoized m |> ignore
+    memoized m |> ignore
+    memoized m |> ignore
+    callCount |> Expect.equal "called once" 1
+  }
+
+  test "lazy2 caches with two args" {
+    let mutable callCount = 0
+    let viewFn (a: string) (b: string) =
+      callCount <- callCount + 1
+      El.text (sprintf "%s:%s" a b)
+    let memoized = El.lazy2 viewFn
+    let s = "x"
+    let t = "y"
+    memoized s t |> ignore
+    memoized s t |> ignore
+    callCount |> Expect.equal "called once for same refs" 1
+  }
+
+  test "lazy2 recomputes when either arg changes" {
+    let mutable callCount = 0
+    let viewFn (a: string) (b: string) =
+      callCount <- callCount + 1
+      El.text (sprintf "%s:%s" a b)
+    let memoized = El.lazy2 viewFn
+    memoized "x" "a" |> ignore
+    memoized "y" "a" |> ignore
+    callCount |> Expect.equal "called twice" 2
+  }
+]
+
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -497,4 +755,6 @@ let allWidgetTests = testList "Widgets" [
   radioGroupTests
   spinnerTests
   toastTests
+  treeViewTests
+  lazyTests
 ]
