@@ -293,3 +293,92 @@ module Focus =
 
   let focusSub (toMsg: FocusDirection -> 'msg) : Sub<'msg> =
     FocusSub (fun dir -> Some (toMsg dir))
+
+module Checkbox =
+  let toggle (value: bool) = not value
+
+  let view (label: string) (focused: bool) (checked': bool) =
+    let box = match checked' with true -> "[✓]" | false -> "[ ]"
+    let el = El.text (sprintf "%s %s" box label)
+    match focused with true -> el |> El.bold | false -> el
+
+module Toggle =
+  let toggle (value: bool) = not value
+
+  let view (onLabel: string) (offLabel: string) (focused: bool) (value: bool) =
+    let display = match value with true -> sprintf "● %s" onLabel | false -> sprintf "○ %s" offLabel
+    let el = El.text display
+    match focused with true -> el |> El.bold | false -> el
+
+type RadioGroupModel<'a> = {
+  Options: 'a list
+  Selected: int
+}
+
+module RadioGroup =
+  let create (options: 'a list) = { Options = options; Selected = 0 }
+
+  let moveUp (model: RadioGroupModel<'a>) =
+    { model with Selected = max 0 (model.Selected - 1) }
+
+  let moveDown (model: RadioGroupModel<'a>) =
+    { model with Selected = min (model.Options.Length - 1) (model.Selected + 1) }
+
+  let selectedValue (model: RadioGroupModel<'a>) =
+    match model.Options.Length > 0 with
+    | true -> Some model.Options.[model.Selected]
+    | false -> None
+
+  let handleKey (key: Key) (model: RadioGroupModel<'a>) =
+    match key with
+    | Key.Up -> moveUp model
+    | Key.Down -> moveDown model
+    | _ -> model
+
+  let view (toString: 'a -> string) (focused: bool) (model: RadioGroupModel<'a>) =
+    model.Options
+    |> List.mapi (fun i opt ->
+      let prefix = match i = model.Selected with true -> "◉ " | false -> "○ "
+      let el = El.text (prefix + toString opt)
+      match i = model.Selected && focused with true -> el |> El.bold | false -> el)
+    |> El.column
+
+module SpinnerWidget =
+  let private frames = [| "⠋"; "⠙"; "⠹"; "⠸"; "⠼"; "⠴"; "⠦"; "⠧"; "⠇"; "⠏" |]
+  let private dots = [| "⣾"; "⣽"; "⣻"; "⢿"; "⡿"; "⣟"; "⣯"; "⣷" |]
+  let private bars = [| "▉"; "▊"; "▋"; "▌"; "▍"; "▎"; "▏"; "▎"; "▍"; "▌"; "▋"; "▊" |]
+
+  let view (tick: int) =
+    El.text frames.[tick % frames.Length]
+
+  let viewDots (tick: int) =
+    El.text dots.[tick % dots.Length]
+
+  let viewBars (tick: int) =
+    El.text bars.[tick % bars.Length]
+
+module Toast =
+  type ToastModel = {
+    Message: string
+    RemainingTicks: int
+    Style: Style
+  }
+
+  let create (message: string) (ticks: int) =
+    { Message = message; RemainingTicks = ticks; Style = Style.empty }
+
+  let createStyled (message: string) (ticks: int) (style: Style) =
+    { Message = message; RemainingTicks = ticks; Style = style }
+
+  let tick (model: ToastModel) =
+    match model.RemainingTicks > 0 with
+    | true -> Some { model with RemainingTicks = model.RemainingTicks - 1 }
+    | false -> None
+
+  let isExpired (model: ToastModel) = model.RemainingTicks <= 0
+
+  let view (model: ToastModel) =
+    El.text model.Message
+    |> El.styled model.Style
+    |> El.bordered Light
+    |> El.padHV 1 0

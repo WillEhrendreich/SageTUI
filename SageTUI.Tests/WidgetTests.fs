@@ -350,6 +350,137 @@ let focusTests = testList "Focus" [
   }
 ]
 
+let checkboxTests = testList "Checkbox" [
+  test "toggle flips true to false" {
+    Checkbox.toggle true |> Expect.isFalse "should be false"
+  }
+
+  test "toggle flips false to true" {
+    Checkbox.toggle false |> Expect.isTrue "should be true"
+  }
+
+  test "view checked shows checkmark" {
+    let elem = Checkbox.view "Accept" false true
+    match elem with
+    | Text(t, _) -> t |> Expect.stringContains "has checkmark" "✓"
+    | _ -> failtest "expected Text"
+  }
+
+  test "view unchecked shows empty box" {
+    let elem = Checkbox.view "Accept" false false
+    match elem with
+    | Text(t, _) -> t |> Expect.stringContains "has empty box" "[ ]"
+    | _ -> failtest "expected Text"
+  }
+]
+
+let toggleTests = testList "Toggle" [
+  test "toggle flips value" {
+    Toggle.toggle true |> Expect.isFalse "should toggle"
+  }
+
+  test "view on shows on label" {
+    let elem = Toggle.view "On" "Off" false true
+    match elem with
+    | Text(t, _) -> t |> Expect.stringContains "has on label" "On"
+    | _ -> failtest "expected Text"
+  }
+
+  test "view off shows off label" {
+    let elem = Toggle.view "On" "Off" false false
+    match elem with
+    | Text(t, _) -> t |> Expect.stringContains "has off label" "Off"
+    | _ -> failtest "expected Text"
+  }
+]
+
+let radioGroupTests = testList "RadioGroup" [
+  test "create starts at index 0" {
+    let model = RadioGroup.create ["A"; "B"; "C"]
+    model.Selected |> Expect.equal "starts at 0" 0
+  }
+
+  test "moveDown advances" {
+    let model = RadioGroup.create ["A"; "B"; "C"] |> RadioGroup.moveDown
+    model.Selected |> Expect.equal "moved to 1" 1
+  }
+
+  test "moveDown clamps at end" {
+    let model = { Options = ["A"; "B"]; Selected = 1 } |> RadioGroup.moveDown
+    model.Selected |> Expect.equal "stays at 1" 1
+  }
+
+  test "moveUp decrements" {
+    let model = { Options = ["A"; "B"; "C"]; Selected = 2 } |> RadioGroup.moveUp
+    model.Selected |> Expect.equal "moved to 1" 1
+  }
+
+  test "moveUp clamps at 0" {
+    let model = RadioGroup.create ["A"; "B"] |> RadioGroup.moveUp
+    model.Selected |> Expect.equal "stays at 0" 0
+  }
+
+  test "selectedValue returns current" {
+    let model = { Options = ["X"; "Y"; "Z"]; Selected = 1 }
+    RadioGroup.selectedValue model |> Expect.equal "Y selected" (Some "Y")
+  }
+
+  test "handleKey Up moves up" {
+    let model = { Options = ["A"; "B"]; Selected = 1 } |> RadioGroup.handleKey Key.Up
+    model.Selected |> Expect.equal "moved up" 0
+  }
+
+  test "handleKey Down moves down" {
+    let model = RadioGroup.create ["A"; "B"] |> RadioGroup.handleKey Key.Down
+    model.Selected |> Expect.equal "moved down" 1
+  }
+]
+
+let spinnerTests = testList "SpinnerWidget" [
+  test "view returns element" {
+    let elem = SpinnerWidget.view 0
+    match elem with Text(_, _) -> () | _ -> failtest "expected Text"
+  }
+
+  test "view cycles frames" {
+    let e0 = SpinnerWidget.view 0
+    let e1 = SpinnerWidget.view 1
+    match e0, e1 with
+    | Text(a, _), Text(b, _) -> a |> Expect.isNotNull "not null"; (a <> b) |> Expect.isTrue "frames differ"
+    | _ -> failtest "expected Text"
+  }
+]
+
+let toastTests = testList "Toast" [
+  test "create sets message and ticks" {
+    let t = Toast.create "Hello" 5
+    t.Message |> Expect.equal "message" "Hello"
+    t.RemainingTicks |> Expect.equal "ticks" 5
+  }
+
+  test "tick decrements" {
+    let t = Toast.create "Hi" 3 |> Toast.tick
+    match t with
+    | Some t' -> t'.RemainingTicks |> Expect.equal "decremented" 2
+    | None -> failtest "should not expire yet"
+  }
+
+  test "tick returns None when expired" {
+    let t = Toast.create "Bye" 1 |> Toast.tick
+    match t with
+    | Some t' -> Toast.tick t' |> Expect.isNone "should expire"
+    | None -> failtest "should have one more tick"
+  }
+
+  test "isExpired true at 0" {
+    Toast.create "x" 0 |> Toast.isExpired |> Expect.isTrue "expired"
+  }
+
+  test "isExpired false when ticks remain" {
+    Toast.create "x" 5 |> Toast.isExpired |> Expect.isFalse "not expired"
+  }
+]
+
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -361,4 +492,9 @@ let allWidgetTests = testList "Widgets" [
   textInputEnhancedTests
   modalTests
   focusTests
+  checkboxTests
+  toggleTests
+  radioGroupTests
+  spinnerTests
+  toastTests
 ]

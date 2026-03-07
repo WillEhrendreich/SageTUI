@@ -31,7 +31,15 @@ type FrameArena =
     mutable LayoutPos: int
     mutable Generation: int
     CanvasDraws: System.Collections.Generic.List<CanvasConfig>
-    HitMap: System.Collections.Generic.List<HitEntry> }
+    HitMap: System.Collections.Generic.List<HitEntry>
+    mutable PeakNodes: int
+    mutable PeakChars: int
+    mutable PeakLayout: int }
+
+type ArenaStats =
+  { NodeCapacity: int; NodeCount: int; PeakNodes: int
+    CharCapacity: int; CharPos: int; PeakChars: int
+    LayoutCapacity: int; LayoutPos: int; PeakLayout: int }
 
 module FrameArena =
   let create maxNodes maxChars maxLayoutScratch =
@@ -43,9 +51,20 @@ module FrameArena =
       LayoutPos = 0
       Generation = 0
       CanvasDraws = System.Collections.Generic.List<CanvasConfig>()
-      HitMap = System.Collections.Generic.List<HitEntry>() }
+      HitMap = System.Collections.Generic.List<HitEntry>()
+      PeakNodes = 0
+      PeakChars = 0
+      PeakLayout = 0 }
 
-  let reset arena =
+  let stats (arena: FrameArena) : ArenaStats =
+    { NodeCapacity = arena.Nodes.Length; NodeCount = arena.NodeCount; PeakNodes = arena.PeakNodes
+      CharCapacity = arena.TextBuf.Length; CharPos = arena.TextPos; PeakChars = arena.PeakChars
+      LayoutCapacity = arena.LayoutScratch.Length; LayoutPos = arena.LayoutPos; PeakLayout = arena.PeakLayout }
+
+  let reset (arena: FrameArena) =
+    arena.PeakNodes <- max arena.PeakNodes arena.NodeCount
+    arena.PeakChars <- max arena.PeakChars arena.TextPos
+    arena.PeakLayout <- max arena.PeakLayout arena.LayoutPos
     arena.NodeCount <- 0
     arena.TextPos <- 0
     arena.LayoutPos <- 0
@@ -53,7 +72,7 @@ module FrameArena =
     arena.CanvasDraws.Clear()
     arena.HitMap.Clear()
 
-  let allocNode arena =
+  let allocNode (arena: FrameArena) =
     if arena.NodeCount >= arena.Nodes.Length then
       failwith (sprintf "FrameArena overflow: %d nodes exceeds capacity %d"
         arena.NodeCount arena.Nodes.Length)
