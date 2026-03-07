@@ -8,11 +8,13 @@
 
   <ItemGroup>
     <Compile Include="Tests.fs" />
+    <Compile Include="HtmlTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SageTUI.Library.fsproj" />
+    <ProjectReference Include="..\SageTUI.Html\SageTUI.Html.fsproj" />
   </ItemGroup>
 
   <ItemGroup>
