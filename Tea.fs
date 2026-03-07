@@ -3,6 +3,7 @@ namespace SageTUI
 open System
 open System.Threading
 
+/// A command to be executed by the runtime. Commands produce messages asynchronously.
 type Cmd<'msg> =
   | NoCmd
   | Batch of Cmd<'msg> list
@@ -12,13 +13,21 @@ type Cmd<'msg> =
   | Delay of milliseconds: int * 'msg
   | Quit
 
+/// Command constructors and combinators.
 module Cmd =
+  /// No-op command.
   let none = NoCmd
+  /// Combine multiple commands into one.
   let batch cmds = Batch cmds
+  /// Run an async function that dispatches messages.
   let ofAsync f = OfAsync f
+  /// Run a cancellable async function with a subscription ID.
   let ofCancellableAsync id f = OfCancellableAsync(id, f)
+  /// Cancel a subscription by ID.
   let cancel id = CancelSub id
+  /// Dispatch a message after a delay in milliseconds.
   let delay ms msg = Delay(ms, msg)
+  /// Quit the application.
   let quit = Quit
 
   let rec map (f: 'a -> 'b) (cmd: Cmd<'a>) : Cmd<'b> =
@@ -32,6 +41,7 @@ module Cmd =
     | Delay(ms, msg) -> Delay(ms, f msg)
     | Quit -> Quit
 
+/// A subscription that connects external events to messages.
 type Sub<'msg> =
   | KeySub of (Key * Modifiers -> 'msg option)
   | MouseSub of (MouseEvent -> 'msg option)
@@ -45,6 +55,7 @@ and FocusDirection =
   | FocusNext
   | FocusPrev
 
+/// The Elm Architecture program definition. Init/Update/View/Subscribe.
 type Program<'model, 'msg> = {
   Init: unit -> 'model * Cmd<'msg>
   Update: 'msg -> 'model -> 'model * Cmd<'msg>

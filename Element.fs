@@ -1,13 +1,16 @@
 namespace SageTUI
 
+/// Canvas pixel encoding mode.
 type CanvasMode = Braille | HalfBlock | PixelProtocol
 
+/// A buffer of RGBA pixels for canvas rendering.
 type PixelBuffer = {
   Width: int
   Height: int
   Pixels: Color array
 }
 
+/// Configuration for a Canvas element.
 type CanvasConfig = {
   Draw: int -> int -> PixelBuffer
   Mode: CanvasMode
@@ -31,6 +34,7 @@ type Transition =
   | Sequence of Transition list
   | Custom of (float -> int -> int -> int)
 
+/// The core UI element type. All views are trees of Element values.
 [<NoEquality; NoComparison>]
 type Element =
   | Empty
@@ -47,58 +51,89 @@ type Element =
   | Aligned of HAlign * VAlign * Element
   | Gapped of int * Element
 
+/// Element constructors and combinators. All functions return Element values.
 module El =
+  /// An empty element that renders nothing.
   let empty = Empty
+  /// Create a plain text element.
   let text s = Text(s, Style.empty)
+  /// Create a text element with explicit styling.
   let styledText style s = Text(s, style)
+  /// Arrange children horizontally in a row.
   let row children = Row children
+  /// Arrange children vertically in a column.
   let column children = Column children
+  /// Layer elements on top of each other (last = frontmost).
   let overlay layers = Overlay layers
+  /// Apply a Style to an element.
   let styled style elem = Styled(style, elem)
 
+  /// Set foreground color.
   let fg color elem =
     Styled({ Style.empty with Fg = Some color }, elem)
 
+  /// Set background color.
   let bg color elem =
     Styled({ Style.empty with Bg = Some color }, elem)
 
+  /// Make text bold.
   let bold elem =
     Styled({ Style.empty with Attrs = TextAttrs.bold }, elem)
 
+  /// Make text dim.
   let dim elem =
     Styled({ Style.empty with Attrs = TextAttrs.dim }, elem)
 
+  /// Make text italic.
   let italic elem =
     Styled({ Style.empty with Attrs = TextAttrs.italic }, elem)
 
+  /// Underline text.
   let underline elem =
     Styled({ Style.empty with Attrs = TextAttrs.underline }, elem)
 
+  /// Reverse foreground and background colors.
   let reverse elem =
     Styled({ Style.empty with Attrs = TextAttrs.reverse }, elem)
 
+  /// Strike through text.
   let strikethrough elem =
     Styled({ Style.empty with Attrs = TextAttrs.strikethrough }, elem)
 
+  /// Set exact width in cells.
   let width n elem = Constrained(Fixed n, elem)
+  /// Set minimum width in cells.
   let minWidth n elem = Constrained(Min n, elem)
+  /// Set maximum width in cells.
   let maxWidth n elem = Constrained(Max n, elem)
+  /// Set exact height in rows.
   let height n elem = Column [Constrained(Fixed n, elem)]
+  /// Set minimum height in rows.
   let minHeight n elem = Column [Constrained(Min n, elem)]
+  /// Set maximum height in rows.
   let maxHeight n elem = Column [Constrained(Max n, elem)]
+  /// Fill all available space.
   let fill elem = Constrained(Fill, elem)
+  /// Size as a percentage of available space.
   let percentage pct elem = Constrained(Percentage pct, elem)
+  /// Size as a ratio (num/den) of available space.
   let ratio num den elem = Constrained(Ratio(num, den), elem)
+  /// Wrap in a border with the given style.
   let bordered style elem = Bordered(style, elem)
+  /// Wrap in a light border.
   let border elem = Bordered(Light, elem)
+  /// Add padding around an element.
   let padded p elem = Padded(p, elem)
 
+  /// Add equal padding on all sides.
   let padAll n elem =
     Padded({ Top = n; Right = n; Bottom = n; Left = n }, elem)
 
+  /// Add horizontal and vertical padding.
   let padHV h v elem =
     Padded({ Top = v; Right = h; Bottom = v; Left = h }, elem)
 
+  /// Tag an element with a key for transition tracking.
   let keyed key elem =
     Keyed(key, Fade 0<ms>, Fade 0<ms>, elem)
 

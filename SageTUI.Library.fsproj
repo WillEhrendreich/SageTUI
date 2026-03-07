@@ -4,7 +4,24 @@
     <OutputType>Library</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <NoWarn>FS0075</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>SageTUI</PackageId>
+    <Version>0.1.0-preview.1</Version>
+    <Authors>SageTUI Contributors</Authors>
+    <Description>A high-performance F# terminal UI library with Elm Architecture, SIMD-accelerated rendering, flexbox layout, and 970+ tests.</Description>
+    <PackageTags>fsharp;tui;terminal;elm-architecture;functional;simd;layout;cli</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/SageTUI/SageTUI</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/SageTUI/SageTUI</PackageProjectUrl>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <Watch Include="**\*.fs" />
