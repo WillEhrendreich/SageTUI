@@ -154,9 +154,175 @@ let tableTests = testList "Table" [
   }
 ]
 
+let colorShortcutTests = testList "Color shortcuts" [
+  test "Color.red is Named Red Normal" {
+    Color.red |> Expect.equal "red" (Named(BaseColor.Red, Normal))
+  }
+  test "Color.brightCyan is Named Cyan Bright" {
+    Color.brightCyan |> Expect.equal "brightCyan" (Named(BaseColor.Cyan, Bright))
+  }
+  test "Color.rgb constructs Rgb" {
+    Color.rgb 255uy 128uy 0uy |> Expect.equal "rgb" (Rgb(255uy, 128uy, 0uy))
+  }
+  test "Color.hex 6-digit" {
+    Color.hex "#FF8000" |> Expect.equal "hex6" (Rgb(255uy, 128uy, 0uy))
+  }
+  test "Color.hex 3-digit" {
+    Color.hex "#F00" |> Expect.equal "hex3" (Rgb(255uy, 0uy, 0uy))
+  }
+  test "Color.hex without hash" {
+    Color.hex "00FF00" |> Expect.equal "nohash" (Rgb(0uy, 255uy, 0uy))
+  }
+  test "Color.hex invalid returns Default" {
+    Color.hex "xyz" |> Expect.equal "invalid" Default
+  }
+  test "all 16 colors exist" {
+    let colors = [
+      Color.black; Color.red; Color.green; Color.yellow
+      Color.blue; Color.magenta; Color.cyan; Color.white
+      Color.brightBlack; Color.brightRed; Color.brightGreen; Color.brightYellow
+      Color.brightBlue; Color.brightMagenta; Color.brightCyan; Color.brightWhite
+    ]
+    List.length colors |> Expect.equal "16 colors" 16
+  }
+]
+
+let textfTests = testList "El.textf" [
+  test "formats integer" {
+    match El.textf "Score: %d" 42 with
+    | Text(t, _) -> t |> Expect.equal "formatted" "Score: 42"
+    | _ -> failtest "expected Text"
+  }
+  test "formats string" {
+    match El.textf "Hello %s!" "world" with
+    | Text(t, _) -> t |> Expect.equal "formatted" "Hello world!"
+    | _ -> failtest "expected Text"
+  }
+  test "formats float" {
+    match El.textf "%.1f%%" 99.9 with
+    | Text(t, _) -> t |> Expect.equal "formatted" "99.9%"
+    | _ -> failtest "expected Text"
+  }
+]
+
+let paragraphTests = testList "El.paragraph" [
+  test "short text stays one line" {
+    match El.paragraph 80 "hello world" with
+    | Column [Text(t, _)] -> t |> Expect.equal "one line" "hello world"
+    | other -> failtest (sprintf "expected single-line Column, got %A" other)
+  }
+  test "long text wraps at word boundary" {
+    match El.paragraph 10 "hello beautiful world" with
+    | Column lines ->
+      List.length lines |> Expect.equal "wraps to multiple lines" 3
+      match List.head lines with
+      | Text(t, _) -> t |> Expect.equal "first line" "hello"
+      | _ -> failtest "expected Text"
+    | _ -> failtest "expected Column"
+  }
+  test "respects newlines in input" {
+    match El.paragraph 80 "line1\nline2\nline3" with
+    | Column lines -> List.length lines |> Expect.equal "3 lines" 3
+    | _ -> failtest "expected Column"
+  }
+  test "zero width produces empty lines" {
+    match El.paragraph 0 "hello" with
+    | Column lines -> (List.length lines, 1) |> Expect.isGreaterThanOrEqual "at least 1 line"
+    | _ -> failtest "expected Column"
+  }
+  test "word longer than width gets char-wrapped" {
+    match El.paragraph 5 "abcdefghij" with
+    | Column lines ->
+      (List.length lines, 1) |> Expect.isGreaterThan "wraps long word"
+    | _ -> failtest "expected Column"
+  }
+  test "empty string produces one empty line" {
+    match El.paragraph 80 "" with
+    | Column [Text(t, _)] -> t |> Expect.equal "empty" ""
+    | _ -> failtest "expected single empty Text"
+  }
+  test "paragraphStyled applies style" {
+    let style = { Style.empty with Fg = Some Color.red }
+    match El.paragraphStyled style 80 "hello" with
+    | Column [Text(_, s)] -> s.Fg |> Expect.equal "red fg" (Some Color.red)
+    | _ -> failtest "expected styled Text"
+  }
+]
+
+let textInputEnhancedTests = testList "TextInput enhanced" [
+  test "paste inserts at cursor" {
+    let model = TextInput.ofString "hello world"
+    let model = { model with Cursor = 5 }
+    let result = TextInput.handlePaste " beautiful" model
+    result.Text |> Expect.equal "pasted" "hello beautiful world"
+    result.Cursor |> Expect.equal "cursor after paste" 15
+  }
+  test "paste replaces newlines with spaces" {
+    let model = TextInput.empty
+    let result = TextInput.handlePaste "line1\nline2\r\nline3" model
+    result.Text |> Expect.equal "flattened" "line1 line2 line3"
+  }
+  test "paste at start" {
+    let model = TextInput.ofString "world"
+    let model = { model with Cursor = 0 }
+    let result = TextInput.handlePaste "hello " model
+    result.Text |> Expect.equal "prepended" "hello world"
+  }
+  test "insertText at end" {
+    let model = TextInput.ofString "hello"
+    let result = TextInput.insertText " world" model
+    result.Text |> Expect.equal "appended" "hello world"
+  }
+  test "viewWithPlaceholder shows placeholder when empty" {
+    let model = TextInput.empty
+    let elem = TextInput.viewWithPlaceholder "Type here..." false model
+    match elem with
+    | Styled(s, Styled(_, Text(t, _))) ->
+      t |> Expect.equal "placeholder" "Type here..."
+    | Styled(s, Text(t, _)) ->
+      t |> Expect.equal "placeholder" "Type here..."
+    | other -> failtest (sprintf "expected dim placeholder, got %A" other)
+  }
+  test "viewWithPlaceholder shows text when not empty" {
+    let model = TextInput.ofString "hello"
+    let elem = TextInput.viewWithPlaceholder "Type here..." false model
+    match elem with
+    | Text(t, _) -> t |> Expect.equal "shows text" "hello"
+    | _ -> failtest "expected Text with content"
+  }
+]
+
+let modalTests = testList "Modal" [
+  test "simple modal wraps in Overlay" {
+    let elem = Modal.simple (El.text "Confirm?")
+    match elem with
+    | Overlay layers -> List.length layers |> Expect.equal "backdrop + content" 2
+    | _ -> failtest "expected Overlay"
+  }
+  test "modal without backdrop returns centered content" {
+    let config = { Modal.defaults with Backdrop = None }
+    let elem = Modal.view config (El.text "Hello")
+    match elem with
+    | Aligned(HAlign.HCenter, VAlign.VCenter, _) -> ()
+    | _ -> failtest "expected centered content"
+  }
+  test "modal with maxWidth constrains" {
+    let config = { Modal.defaults with MaxWidth = Some 40 }
+    let elem = Modal.view config (El.text "Hello")
+    match elem with
+    | Overlay [_; Aligned(_, _, Constrained(Max 40, _))] -> ()
+    | other -> failtest (sprintf "expected max width constraint, got %A" other)
+  }
+]
+
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
   tabsTests
   tableTests
+  colorShortcutTests
+  textfTests
+  paragraphTests
+  textInputEnhancedTests
+  modalTests
 ]

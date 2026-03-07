@@ -48,6 +48,42 @@ module Style =
   let withUnderline style =
     { style with Attrs = TextAttrs.combine style.Attrs TextAttrs.underline }
 
+module Color =
+  let black = Named(BaseColor.Black, Normal)
+  let red = Named(BaseColor.Red, Normal)
+  let green = Named(BaseColor.Green, Normal)
+  let yellow = Named(BaseColor.Yellow, Normal)
+  let blue = Named(BaseColor.Blue, Normal)
+  let magenta = Named(BaseColor.Magenta, Normal)
+  let cyan = Named(BaseColor.Cyan, Normal)
+  let white = Named(BaseColor.White, Normal)
+  let brightBlack = Named(BaseColor.Black, Bright)
+  let brightRed = Named(BaseColor.Red, Bright)
+  let brightGreen = Named(BaseColor.Green, Bright)
+  let brightYellow = Named(BaseColor.Yellow, Bright)
+  let brightBlue = Named(BaseColor.Blue, Bright)
+  let brightMagenta = Named(BaseColor.Magenta, Bright)
+  let brightCyan = Named(BaseColor.Cyan, Bright)
+  let brightWhite = Named(BaseColor.White, Bright)
+  let rgb r g b = Rgb(r, g, b)
+
+  let hex (s: string) =
+    try
+      let s = match s.StartsWith('#') with true -> s.Substring(1) | false -> s
+      match s.Length with
+      | 3 ->
+        let r = System.Convert.ToByte(System.String(s.[0], 2), 16)
+        let g = System.Convert.ToByte(System.String(s.[1], 2), 16)
+        let b = System.Convert.ToByte(System.String(s.[2], 2), 16)
+        Rgb(r, g, b)
+      | 6 ->
+        let r = System.Convert.ToByte(s.[0..1], 16)
+        let g = System.Convert.ToByte(s.[2..3], 16)
+        let b = System.Convert.ToByte(s.[4..5], 16)
+        Rgb(r, g, b)
+      | _ -> Default
+    with _ -> Default
+
 module PackedColor =
   let pack (c: Color) : int =
     match c with

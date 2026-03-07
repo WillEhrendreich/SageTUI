@@ -185,17 +185,18 @@
   },
   "active": "ac394dc03ed8186e",
   "lastOpenFiles": [
-    "SageTUI.Tests/bin/Debug/net10.0/SageTUI.Tests.pdb",
-    "SageTUI.Tests/obj/Debug/net10.0/ref/SageTUI.Tests.dll",
-    "SageTUI.Tests/bin/Debug/net10.0/SageTUI.Tests.dll",
-    "SageTUI.Tests/bin/Debug/net10.0/SageTUI.Tests.runtimeconfig.json",
-    "SageTUI.Tests/obj/Debug/net10.0/SageTUI.Tests.genruntimeconfig.cache",
-    "SageTUI.Tests/bin/Debug/net10.0/SageTUI.Tests.deps.json",
-    "SageTUI.Tests/bin/Debug/net10.0/SageTUI.Tests.exe",
-    "SageTUI.Tests/obj/Debug/net10.0/SageTUI..C05E7FC0.Up2Date",
-    "SageTUI.Tests/bin/Debug/net10.0/SageTUI.Html.xml",
-    "SageTUI.Tests/bin/Debug/net10.0/SageTUI.Library.pdb",
-    "SageTUI.Tests/bin/Debug/net10.0/SageTUI.Html.pdb",
+    "expertPanel/excellence-roadmap-deliberation.md",
+    "SageTUI.Tests/bin/Debug/net10.0/AngleSharp.dll",
+    "SageTUI.Tests/bin/Debug/net10.0/Falco.Markup.dll",
+    "SageTUI.Tests/bin/Debug/net10.0/FsCheck.dll",
+    "SageTUI.Tests/bin/Debug/net10.0/Expecto.dll",
+    "SageTUI.Tests/bin/Debug/net10.0/FSharp.Core.dll",
+    "SageTUI.Tests/obj/Debug/net10.0/2eymw5cq.34s~",
+    "obj/Debug/net10.0/xxsvzkhi.sfr~",
+    "SageTUI.Tests/obj/Debug/net10.0/jdvm2nc4.yfd~",
+    "SageTUI.Tests/obj/Debug/net10.0/fo42s3fb.3un~",
+    "obj/Debug/net10.0/z1jdcafl.spv~",
+    "expertPanel/next-priorities-deliberation.md",
     "expertPanel/sample-review.md",
     "samples/README.md",
     "expertPanel/css-engine-deliberation.md",
@@ -219,7 +220,6 @@
     "expertPanel/_tmp/sec_1_to_3_5.md",
     "expertPanel/terminal-compatibility-deliberation.md",
     "expertPanel/impossible-revisited-deliberation.md",
-    "expertPanel/visual-flair-deliberation.md",
-    "expertPanel/view-transitions-deliberation.md"
+    "expertPanel/visual-flair-deliberation.md"
   ]
 }

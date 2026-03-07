@@ -10,6 +10,11 @@ module TextInput =
 
   let ofString s = { Text = s; Cursor = String.length s }
 
+  let insertText (s: string) (model: TextInputModel) =
+    let before = match model.Cursor > 0 with true -> model.Text.[..model.Cursor - 1] | false -> ""
+    let after = match model.Cursor < model.Text.Length with true -> model.Text.[model.Cursor..] | false -> ""
+    { Text = before + s + after; Cursor = model.Cursor + s.Length }
+
   let handleKey (key: Key) (model: TextInputModel) =
     match key with
     | Key.Char c ->
@@ -40,6 +45,10 @@ module TextInput =
       { model with Cursor = model.Text.Length }
     | _ -> model
 
+  let handlePaste (text: string) (model: TextInputModel) =
+    let clean = text.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ")
+    insertText clean model
+
   let view (focused: bool) (model: TextInputModel) =
     let displayText =
       match model.Text.Length = 0 with
@@ -48,6 +57,15 @@ module TextInput =
     match focused with
     | true -> El.text displayText |> El.underline
     | false -> El.text displayText
+
+  let viewWithPlaceholder (placeholder: string) (focused: bool) (model: TextInputModel) =
+    match model.Text.Length = 0 with
+    | true ->
+      match focused with
+      | true -> El.text placeholder |> El.dim |> El.underline
+      | false -> El.text placeholder |> El.dim
+    | false ->
+      view focused model
 
 type FocusRing<'a> = {
   Items: 'a list
@@ -221,3 +239,42 @@ module Table =
           rowEl |> El.bg (Color.Named(BaseColor.Blue, Intensity.Normal))
         | _ -> rowEl)
     El.column (header :: separator :: dataRows)
+
+type ModalConfig = {
+  Backdrop: Color option
+  BorderStyle: BorderStyle
+  MaxWidth: int option
+  MaxHeight: int option
+}
+
+module Modal =
+  let defaults = {
+    Backdrop = Some (Color.Named(BaseColor.Black, Normal))
+    BorderStyle = Light
+    MaxWidth = None
+    MaxHeight = None
+  }
+
+  let view (config: ModalConfig) (content: Element) =
+    let inner =
+      content
+      |> El.bordered config.BorderStyle
+      |> (fun el ->
+        match config.MaxWidth with
+        | Some w -> el |> El.maxWidth w
+        | None -> el)
+      |> (fun el ->
+        match config.MaxHeight with
+        | Some h -> el |> El.maxHeight h
+        | None -> el)
+      |> El.center
+    match config.Backdrop with
+    | Some color ->
+      El.overlay [
+        El.text " " |> El.bg color |> El.fill
+        inner
+      ]
+    | None -> inner
+
+  let simple (content: Element) =
+    view defaults content

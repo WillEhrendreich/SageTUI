@@ -133,3 +133,65 @@ module El =
 
   // Gap helper
   let gap n elem = Gapped(n, elem)
+
+  // Formatted text
+  let textf fmt = Printf.ksprintf text fmt
+
+  // Text wrapping (composition — no new DU case)
+  let private wordWrap (maxWidth: int) (s: string) =
+    match maxWidth <= 0 with
+    | true -> [ "" ]
+    | false ->
+      let lines = System.Collections.Generic.List<string>()
+      for rawLine in s.Split('\n') do
+        let words = rawLine.Split(' ')
+        let current = System.Text.StringBuilder()
+        let mutable col = 0
+        for word in words do
+          let wordLen =
+            let mutable w = 0
+            for rune in word.EnumerateRunes() do
+              w <- w + (match rune.Value with v when v >= 0x1100 && (v <= 0x115F || (v >= 0x2E80 && v <= 0x9FFF) || (v >= 0xAC00 && v <= 0xD7A3) || (v >= 0xF900 && v <= 0xFAFF) || (v >= 0xFE10 && v <= 0xFE6F) || (v >= 0xFF01 && v <= 0xFF60) || (v >= 0xFFE0 && v <= 0xFFE6) || (v >= 0x20000 && v <= 0x2FFFD) || (v >= 0x30000 && v <= 0x3FFFD)) -> 2 | _ -> 1)
+            w
+          match col with
+          | 0 ->
+            match wordLen > maxWidth with
+            | true ->
+              let mutable charCol = 0
+              for rune in word.EnumerateRunes() do
+                let rw = match rune.Value with v when v >= 0x1100 && (v <= 0x115F || (v >= 0x2E80 && v <= 0x9FFF) || (v >= 0xAC00 && v <= 0xD7A3)) -> 2 | _ -> 1
+                match charCol + rw > maxWidth with
+                | true ->
+                  lines.Add(current.ToString())
+                  current.Clear() |> ignore
+                  current.Append(rune.ToString()) |> ignore
+                  charCol <- rw
+                | false ->
+                  current.Append(rune.ToString()) |> ignore
+                  charCol <- charCol + rw
+              col <- charCol
+            | false ->
+              current.Append(word) |> ignore
+              col <- wordLen
+          | _ ->
+            match col + 1 + wordLen > maxWidth with
+            | true ->
+              lines.Add(current.ToString())
+              current.Clear() |> ignore
+              current.Append(word) |> ignore
+              col <- wordLen
+            | false ->
+              current.Append(' ').Append(word) |> ignore
+              col <- col + 1 + wordLen
+        lines.Add(current.ToString())
+      lines |> Seq.toList
+
+  let paragraph (maxWidth: int) (s: string) =
+    wordWrap maxWidth s
+    |> List.map text
+    |> column
+
+  let paragraphStyled (style: Style) (maxWidth: int) (s: string) =
+    wordWrap maxWidth s
+    |> List.map (styledText style)
+    |> column
