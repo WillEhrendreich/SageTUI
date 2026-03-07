@@ -106,6 +106,16 @@ module HtmlRender =
       Elem.div
         [ Attr.style "background:#333;color:#999" ]
         [ Text.raw "[canvas]" ]
+    | Aligned (hAlign, vAlign, child) ->
+      let hCss = match hAlign with HAlign.Left -> "flex-start" | HAlign.HCenter -> "center" | HAlign.Right -> "flex-end"
+      let vCss = match vAlign with VAlign.Top -> "flex-start" | VAlign.VCenter -> "center" | VAlign.Bottom -> "flex-end"
+      Elem.div
+        [ Attr.style (sprintf "display:flex;justify-content:%s;align-items:%s" hCss vCss) ]
+        [ render child ]
+    | Gapped (gap, child) ->
+      Elem.div
+        [ Attr.style (sprintf "gap:%dch" gap) ]
+        [ render child ]
 
   /// Render Element to HTML string
   let renderToString (el: Element) : string =

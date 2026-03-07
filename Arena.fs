@@ -176,6 +176,20 @@ module Arena =
       arena.Nodes.[idx] <-
         mkNode 10uy 0UL 0us (packCanvasMode config.Mode) 0s -1 -1 0 0
       h
+    | Aligned(hAlign, vAlign, child) ->
+      let h = FrameArena.allocNode arena
+      let (NodeHandle idx) = h
+      let (NodeHandle ci) = lower arena child
+      let hb = match hAlign with HAlign.Left -> 0uy | HAlign.HCenter -> 1uy | HAlign.Right -> 2uy
+      let vb = match vAlign with VAlign.Top -> 0uy | VAlign.VCenter -> 1uy | VAlign.Bottom -> 2uy
+      arena.Nodes.[idx] <- mkNode 11uy 0UL 0us hb (int16 vb) ci -1 0 0
+      h
+    | Gapped(gap, child) ->
+      let h = FrameArena.allocNode arena
+      let (NodeHandle idx) = h
+      let (NodeHandle ci) = lower arena child
+      arena.Nodes.[idx] <- mkNode 12uy 0UL 0us 0uy (int16 gap) ci -1 0 0
+      h
 
   and lowerChildren (arena: FrameArena) (children: Element list) : int =
     match children with

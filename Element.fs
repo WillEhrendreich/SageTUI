@@ -44,6 +44,8 @@ type Element =
   | Padded of Padding * Element
   | Keyed of key: string * enter: Transition * exit: Transition * Element
   | Canvas of CanvasConfig
+  | Aligned of HAlign * VAlign * Element
+  | Gapped of int * Element
 
 module El =
   let empty = Empty
@@ -117,3 +119,17 @@ module El =
 
   let viewTransition key elem =
     Keyed(key, ColorMorph 200<ms>, Fade 0<ms>, elem)
+
+  // Alignment helpers
+  let align h v elem = Aligned(h, v, elem)
+  let alignLeft elem = Aligned(HAlign.Left, VAlign.Top, elem)
+  let alignCenter elem = Aligned(HAlign.HCenter, VAlign.Top, elem)
+  let alignRight elem = Aligned(HAlign.Right, VAlign.Top, elem)
+  let alignTop elem = Aligned(HAlign.Left, VAlign.Top, elem)
+  let alignMiddle elem = Aligned(HAlign.Left, VAlign.VCenter, elem)
+  let alignBottom elem = Aligned(HAlign.Left, VAlign.Bottom, elem)
+  let center elem = Aligned(HAlign.HCenter, VAlign.VCenter, elem)
+  let alignBottomRight elem = Aligned(HAlign.Right, VAlign.Bottom, elem)
+
+  // Gap helper
+  let gap n elem = Gapped(n, elem)

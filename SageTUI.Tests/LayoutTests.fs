@@ -747,6 +747,123 @@ let edgeCaseTests = testList "Layout edge cases" [
 ]
 
 // ═══════════════════════════════════════════════════════════════════════
+// PHASE 11: Alignment
+// ═══════════════════════════════════════════════════════════════════════
+
+let alignmentTests = testList "Alignment" [
+  testCase "HCenter text in row" <| fun () ->
+    // "Hi" (2 chars) centered in 10-wide area → at column 4
+    let buf = renderToBuffer 10 1 (El.alignCenter (El.text "Hi"))
+    charAt 4 0 buf |> Expect.equal "H at center" 'H'
+    charAt 5 0 buf |> Expect.equal "i at center" 'i'
+    charAt 3 0 buf |> Expect.equal "space before" ' '
+
+  testCase "Right-aligned text" <| fun () ->
+    // "AB" (2 chars) right-aligned in 10-wide area → at column 8
+    let buf = renderToBuffer 10 1 (El.alignRight (El.text "AB"))
+    charAt 8 0 buf |> Expect.equal "A at right" 'A'
+    charAt 9 0 buf |> Expect.equal "B at right" 'B'
+
+  testCase "Bottom-aligned text" <| fun () ->
+    // text bottom-aligned in 5-tall area → at row 4
+    let buf = renderToBuffer 10 5 (El.alignBottom (El.text "X"))
+    charAt 0 4 buf |> Expect.equal "X at bottom" 'X'
+    charAt 0 0 buf |> Expect.equal "empty at top" ' '
+
+  testCase "Center text both axes" <| fun () ->
+    // "Hi" centered in 10x5 → col 4, row 2
+    let buf = renderToBuffer 10 5 (El.center (El.text "Hi"))
+    charAt 4 2 buf |> Expect.equal "H centered" 'H'
+    charAt 5 2 buf |> Expect.equal "i centered" 'i'
+
+  testCase "Bottom-right aligned text" <| fun () ->
+    // "Z" in 10x5 → col 9, row 4
+    let buf = renderToBuffer 10 5 (El.alignBottomRight (El.text "Z"))
+    charAt 9 4 buf |> Expect.equal "Z at bottom-right" 'Z'
+
+  testCase "Left-top is default (no offset)" <| fun () ->
+    let buf = renderToBuffer 10 5 (El.alignLeft (El.text "A"))
+    charAt 0 0 buf |> Expect.equal "A at top-left" 'A'
+
+  testCase "Oversized content clamps" <| fun () ->
+    // "ABCDE" (5 chars) in 3-wide → only "ABC" visible
+    let buf = renderToBuffer 3 1 (El.alignCenter (El.text "ABCDE"))
+    charAt 0 0 buf |> Expect.equal "A clamped" 'A'
+    charAt 1 0 buf |> Expect.equal "B clamped" 'B'
+    charAt 2 0 buf |> Expect.equal "C clamped" 'C'
+
+  testCase "Centered column in row" <| fun () ->
+    let elem = El.align HAlign.HCenter VAlign.Top (El.column [El.text "A"; El.text "B"])
+    let buf = renderToBuffer 10 5 elem
+    // Column content is 1 wide, 2 tall; centered H → col 4
+    charAt 4 0 buf |> Expect.equal "A centered" 'A'
+    charAt 4 1 buf |> Expect.equal "B below A" 'B'
+
+  testCase "Arena parity: centered text" <| fun () ->
+    let elem = El.center (El.text "Hi")
+    let (tree, arena) = arenaHelper elem 10 5
+    arena.Cells |> Expect.sequenceEqual "arena matches tree" tree.Cells
+
+  testCase "Arena parity: bottom-right aligned" <| fun () ->
+    let elem = El.alignBottomRight (El.text "Z")
+    let (tree, arena) = arenaHelper elem 10 5
+    arena.Cells |> Expect.sequenceEqual "arena matches tree" tree.Cells
+]
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 12: Gap
+// ═══════════════════════════════════════════════════════════════════════
+
+let gapTests = testList "Gap" [
+  testCase "Row with gap — texts separated" <| fun () ->
+    // Two texts "A" and "B" in 10-wide row with gap 2
+    // Without gap: "A" at 0..4, "B" at 5..9 (Fill splits evenly)
+    // With gap 2: usable=8, each gets 4. "A" at 0, "B" at 6
+    let elem = El.gap 2 (El.row [El.text "A"; El.text "B"])
+    let buf = renderToBuffer 10 1 elem
+    charAt 0 0 buf |> Expect.equal "A at 0" 'A'
+    charAt 6 0 buf |> Expect.equal "B at 6" 'B'
+    // Gap area should be empty
+    charAt 4 0 buf |> Expect.equal "gap space 1" ' '
+    charAt 5 0 buf |> Expect.equal "gap space 2" ' '
+
+  testCase "Column with gap — texts separated" <| fun () ->
+    // Two texts in 10-tall column with gap 2
+    // usable=8, each gets 4. First at row 0, second at row 6
+    let elem = El.gap 2 (El.column [El.text "X"; El.text "Y"])
+    let buf = renderToBuffer 5 10 elem
+    charAt 0 0 buf |> Expect.equal "X at row 0" 'X'
+    charAt 0 6 buf |> Expect.equal "Y at row 6" 'Y'
+    charAt 0 4 buf |> Expect.equal "gap row 1" ' '
+    charAt 0 5 buf |> Expect.equal "gap row 2" ' '
+
+  testCase "Gap with fixed children" <| fun () ->
+    // Row: Fixed(3) "AB" + Fill "CD" in 10 wide with gap 2
+    // usable=8, Fixed(3)=3, Fill gets 5. Offsets: 0, 3+2=5
+    let elem = El.gap 2 (El.row [El.width 3 (El.text "AB"); El.text "CD"])
+    let buf = renderToBuffer 10 1 elem
+    charAt 0 0 buf |> Expect.equal "A" 'A'
+    charAt 1 0 buf |> Expect.equal "B" 'B'
+    charAt 5 0 buf |> Expect.equal "C" 'C'
+    charAt 6 0 buf |> Expect.equal "D" 'D'
+
+  testCase "Gap on non-Row/Column passes through" <| fun () ->
+    let elem = El.gap 2 (El.text "Hi")
+    let buf = renderToBuffer 10 1 elem
+    charAt 0 0 buf |> Expect.equal "H" 'H'
+
+  testCase "Arena parity: row with gap" <| fun () ->
+    let elem = El.gap 2 (El.row [El.text "A"; El.text "B"])
+    let (tree, arena) = arenaHelper elem 10 1
+    arena.Cells |> Expect.sequenceEqual "arena matches tree" tree.Cells
+
+  testCase "Arena parity: column with gap" <| fun () ->
+    let elem = El.gap 2 (El.column [El.text "X"; El.text "Y"])
+    let (tree, arena) = arenaHelper elem 5 10
+    arena.Cells |> Expect.sequenceEqual "arena matches tree" tree.Cells
+]
+
+// ═══════════════════════════════════════════════════════════════════════
 // Combined test list for export
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -763,4 +880,6 @@ let allLayoutTests = testList "MDN CSS Layout Compliance" [
   compositeLayoutTests
   arenaParityTests
   edgeCaseTests
+  alignmentTests
+  gapTests
 ]

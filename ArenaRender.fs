@@ -82,6 +82,10 @@ module ArenaRender =
       measureWidth arena node.FirstChild + pad.Left + pad.Right
     | 9uy -> // Keyed
       measureWidth arena node.FirstChild
+    | 11uy -> // Aligned — passthrough
+      measureWidth arena node.FirstChild
+    | 12uy -> // Gapped — passthrough
+      measureWidth arena node.FirstChild
     | _ -> 0
 
   /// Measure intrinsic height of an arena node.
@@ -123,6 +127,10 @@ module ArenaRender =
       let pad = unpackPadding node.DataStart node.DataLen
       measureHeight arena node.FirstChild + pad.Top + pad.Bottom
     | 9uy -> // Keyed
+      measureHeight arena node.FirstChild
+    | 11uy -> // Aligned — passthrough
+      measureHeight arena node.FirstChild
+    | 12uy -> // Gapped — passthrough
       measureHeight arena node.FirstChild
     | _ -> 0
 
@@ -248,6 +256,68 @@ module ArenaRender =
         render arena node.FirstChild area inheritedFg inheritedBg inheritedAttrs buf
 
       | 10uy -> eprintfn "Canvas rendering not yet implemented"
+
+      | 11uy -> // Aligned
+        let hAlign = match node.ConstraintKind with | 1uy -> HAlign.HCenter | 2uy -> HAlign.Right | _ -> HAlign.Left
+        let vAlign = match int node.ConstraintVal with | 1 -> VAlign.VCenter | 2 -> VAlign.Bottom | _ -> VAlign.Top
+        let cw = measureWidth arena node.FirstChild
+        let ch = measureHeight arena node.FirstChild
+        let aligned = Layout.alignArea hAlign vAlign cw ch area
+        render arena node.FirstChild aligned inheritedFg inheritedBg inheritedAttrs buf
+
+      | 12uy -> // Gapped
+        let gap = int node.ConstraintVal
+        let childNode = arena.Nodes.[node.FirstChild]
+        match childNode.Kind with
+        | 2uy -> // Row inside Gapped
+          let n = countChildren arena childNode.FirstChild
+          let constraints = Array.zeroCreate<Constraint> n
+          let childNodes = Array.zeroCreate<int> n
+          let contentWidths = Array.zeroCreate<int> n
+          let mutable idx = childNode.FirstChild
+          let mutable i = 0
+          while idx >= 0 do
+            let cn = arena.Nodes.[idx]
+            match cn.Kind with
+            | 6uy ->
+              constraints.[i] <- unpackConstraint cn.ConstraintKind cn.ConstraintVal
+              childNodes.[i] <- cn.FirstChild
+              contentWidths.[i] <- measureWidth arena cn.FirstChild
+            | _ ->
+              constraints.[i] <- Fill
+              childNodes.[i] <- idx
+              contentWidths.[i] <- measureWidth arena idx
+            idx <- cn.NextSibling
+            i <- i + 1
+          let areas = Layout.splitHWithGap gap (Array.toList constraints) (Array.toList contentWidths) area
+          List.iteri (fun j childArea ->
+            render arena childNodes.[j] childArea inheritedFg inheritedBg inheritedAttrs buf) areas
+        | 3uy -> // Column inside Gapped
+          let n = countChildren arena childNode.FirstChild
+          let constraints = Array.zeroCreate<Constraint> n
+          let childNodes = Array.zeroCreate<int> n
+          let contentHeights = Array.zeroCreate<int> n
+          let mutable idx = childNode.FirstChild
+          let mutable i = 0
+          while idx >= 0 do
+            let cn = arena.Nodes.[idx]
+            match cn.Kind with
+            | 6uy ->
+              constraints.[i] <- unpackConstraint cn.ConstraintKind cn.ConstraintVal
+              childNodes.[i] <- cn.FirstChild
+              contentHeights.[i] <- measureHeight arena cn.FirstChild
+            | _ ->
+              constraints.[i] <- Fill
+              childNodes.[i] <- idx
+              contentHeights.[i] <- measureHeight arena idx
+            idx <- cn.NextSibling
+            i <- i + 1
+          let areas = Layout.splitVWithGap gap (Array.toList constraints) (Array.toList contentHeights) area
+          List.iteri (fun j childArea ->
+            render arena childNodes.[j] childArea inheritedFg inheritedBg inheritedAttrs buf) areas
+        | _ ->
+          render arena node.FirstChild area inheritedFg inheritedBg inheritedAttrs buf
+
       | _ -> ()
 
   let renderRoot (arena: FrameArena) (rootHandle: NodeHandle) (area: Area) (buf: Buffer) =

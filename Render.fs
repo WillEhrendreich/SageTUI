@@ -79,3 +79,28 @@ module Render =
         render area inheritedStyle buf child
 
       | Canvas _ -> eprintfn "Canvas rendering not yet implemented"
+
+      | Aligned(hAlign, vAlign, child) ->
+        let cw = Measure.measureWidth child
+        let ch = Measure.measureHeight child
+        let aligned = Layout.alignArea hAlign vAlign cw ch area
+        render aligned inheritedStyle buf child
+
+      | Gapped(gap, child) ->
+        match child with
+        | Row children ->
+          let constraints = children |> List.map extractConstraint
+          let unwrapped = children |> List.map unwrapConstrained
+          let contentWidths = Measure.childWidths children
+          let areas = Layout.splitHWithGap gap constraints contentWidths area
+          List.iter2 (fun childArea c ->
+            render childArea inheritedStyle buf c) areas unwrapped
+        | Column children ->
+          let constraints = children |> List.map extractConstraint
+          let unwrapped = children |> List.map unwrapConstrained
+          let contentHeights = Measure.childHeights children
+          let areas = Layout.splitVWithGap gap constraints contentHeights area
+          List.iter2 (fun childArea c ->
+            render childArea inheritedStyle buf c) areas unwrapped
+        | other ->
+          render area inheritedStyle buf other

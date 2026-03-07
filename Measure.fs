@@ -33,6 +33,8 @@ module Measure =
     | Padded(p, child) -> measureWidth child + p.Left + p.Right
     | Keyed(_, _, _, child) -> measureWidth child
     | Canvas _ -> 0
+    | Aligned(_, _, child) -> measureWidth child
+    | Gapped(_, child) -> measureWidth child
 
   let rec measureHeight (elem: Element) : int =
     match elem with
@@ -60,6 +62,8 @@ module Measure =
     | Padded(p, child) -> measureHeight child + p.Top + p.Bottom
     | Keyed(_, _, _, child) -> measureHeight child
     | Canvas _ -> 0
+    | Aligned(_, _, child) -> measureHeight child
+    | Gapped(_, child) -> measureHeight child
 
   /// Measure content sizes for children in a Row context (width dimension).
   let childWidths (children: Element list) : int list =

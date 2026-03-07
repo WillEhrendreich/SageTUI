@@ -18,7 +18,8 @@ let rec countLeaves (el: Element) =
     cs |> List.sumBy countLeaves
   | Element.Styled (_, c) | Element.Constrained (_, c)
   | Element.Bordered (_, c) | Element.Padded (_, c)
-  | Element.Keyed (_, _, _, c) -> countLeaves c
+  | Element.Keyed (_, _, _, c)
+  | Element.Aligned (_, _, c) | Element.Gapped (_, c) -> countLeaves c
   | Element.Canvas _ -> 1
 
 let isRow el = match el with Element.Row _ -> true | _ -> false

@@ -2,6 +2,11 @@ namespace SageTUI
 
 type Area = { X: int; Y: int; Width: int; Height: int }
 
+[<RequireQualifiedAccess>]
+type HAlign = Left | HCenter | Right
+[<RequireQualifiedAccess>]
+type VAlign = Top | VCenter | Bottom
+
 type Constraint =
   | Fixed of int
   | Min of int
@@ -179,3 +184,39 @@ module Layout =
   let shrinkForBorder (area: Area) =
     { X = area.X + 1; Y = area.Y + 1
       Width = max 0 (area.Width - 2); Height = max 0 (area.Height - 2) }
+
+  let alignArea (hAlign: HAlign) (vAlign: VAlign) (contentW: int) (contentH: int) (area: Area) : Area =
+    let x =
+      match hAlign with
+      | HAlign.Left -> area.X
+      | HAlign.HCenter -> area.X + max 0 (area.Width - contentW) / 2
+      | HAlign.Right -> area.X + max 0 (area.Width - contentW)
+    let y =
+      match vAlign with
+      | VAlign.Top -> area.Y
+      | VAlign.VCenter -> area.Y + max 0 (area.Height - contentH) / 2
+      | VAlign.Bottom -> area.Y + max 0 (area.Height - contentH)
+    let w = min contentW area.Width
+    let h = min contentH area.Height
+    { X = max area.X x; Y = max area.Y y; Width = w; Height = h }
+
+  let solveWithGap (gap: int) (available: int) (constraints: Constraint list) (contentSizes: int list) : (int * int) list =
+    let n = List.length constraints
+    match n <= 1 with
+    | true -> solveWithContent available constraints contentSizes
+    | false ->
+      let totalGap = gap * (n - 1)
+      let usable = max 0 (available - totalGap)
+      let solved = solveWithContent usable constraints contentSizes
+      solved |> List.mapi (fun i (offset, size) ->
+        (offset + i * gap, size))
+
+  let splitHWithGap (gap: int) (constraints: Constraint list) (contentWidths: int list) (area: Area) : Area list =
+    solveWithGap gap area.Width constraints contentWidths
+    |> List.map (fun (offset, width) ->
+      { X = area.X + offset; Y = area.Y; Width = width; Height = area.Height })
+
+  let splitVWithGap (gap: int) (constraints: Constraint list) (contentHeights: int list) (area: Area) : Area list =
+    solveWithGap gap area.Height constraints contentHeights
+    |> List.map (fun (offset, height) ->
+      { X = area.X; Y = area.Y + offset; Width = area.Width; Height = height })
