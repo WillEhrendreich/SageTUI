@@ -23,6 +23,7 @@
     <Compile Include="Input.fs" />
     <Compile Include="Tea.fs" />
     <Compile Include="Detect.fs" />
+    <Compile Include="App.fs" />
     <Compile Include="Tests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

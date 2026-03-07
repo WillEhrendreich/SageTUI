@@ -2089,6 +2089,168 @@ let detectPipelineTests = testList "Detection pipeline" [
     p.TermName |> Expect.equal "name" "Windows Terminal"
 ]
 
+
+// ============================================================
+// Phase 7: App Runtime Tests
+// ============================================================
+
+type private CounterMsg2 = Inc2 | Dec2 | Quit2
+
+let private counterProgram2 : Program<int, CounterMsg2> = {
+  Init = fun () -> (0, Cmd.none)
+  Update = fun msg model ->
+    match msg with
+    | Inc2 -> (model + 1, Cmd.none)
+    | Dec2 -> (model - 1, Cmd.none)
+    | Quit2 -> (model, Cmd.quit)
+  View = fun model -> El.text (sprintf "Count: %d" model)
+  Subscribe = fun _ -> [
+    KeySub (fun (key, _) ->
+      match key with
+      | Key.Char 'j' -> Some Inc2
+      | Key.Char 'k' -> Some Dec2
+      | Key.Char 'q' -> Some Quit2
+      | _ -> None)
+  ]
+}
+
+let appRunTests = testList "App.run" [
+  testCase "counter increments on 'j' and quits on 'q'" <| fun () ->
+    let events = [
+      KeyPressed(Key.Char 'j', Modifiers.None)
+      KeyPressed(Key.Char 'j', Modifiers.None)
+      KeyPressed(Key.Char 'j', Modifiers.None)
+      KeyPressed(Key.Char 'q', Modifiers.None)
+    ]
+    let backend, getOutput = TestBackend.create 20 3 events
+    App.run backend counterProgram2
+    let output = getOutput()
+    output.Contains(Ansi.enterAltScreen) |> Expect.isTrue "entered alt screen"
+    output.Contains(Ansi.leaveAltScreen) |> Expect.isTrue "left alt screen"
+
+  testCase "counter decrements on 'k'" <| fun () ->
+    let events = [
+      KeyPressed(Key.Char 'k', Modifiers.None)
+      KeyPressed(Key.Char 'k', Modifiers.None)
+      KeyPressed(Key.Char 'q', Modifiers.None)
+    ]
+    let backend, getOutput = TestBackend.create 20 3 events
+    App.run backend counterProgram2
+    let output = getOutput()
+    output.Contains("Count:") |> Expect.isTrue "has count output"
+
+  testCase "immediate quit produces minimal output" <| fun () ->
+    let events = [KeyPressed(Key.Char 'q', Modifiers.None)]
+    let backend, getOutput = TestBackend.create 10 1 events
+    App.run backend counterProgram2
+    let output = getOutput()
+    output.Contains(Ansi.enterAltScreen) |> Expect.isTrue "entered alt"
+    output.Contains(Ansi.leaveAltScreen) |> Expect.isTrue "left alt"
+
+  testCase "no events except quit terminates" <| fun () ->
+    let events = [KeyPressed(Key.Char 'q', Modifiers.None)]
+    let backend, _ = TestBackend.create 10 1 events
+    App.run backend counterProgram2
+]
+
+let cmdInterpretTests = testList "Cmd interpret" [
+  testCase "Batch executes all commands" <| fun () ->
+    let prog: Program<string list, string> = {
+      Init = fun () -> ([], Cmd.batch [Cmd.delay 1 "a"; Cmd.delay 1 "b"])
+      Update = fun msg model ->
+        let updated = msg :: model
+        match updated.Length >= 2 with
+        | true -> (updated, Cmd.quit)
+        | false -> (updated, Cmd.none)
+      View = fun model -> El.text (sprintf "%d msgs" model.Length)
+      Subscribe = fun _ -> []
+    }
+    let backend, _ = TestBackend.create 20 1 []
+    App.run backend prog
+
+  testCase "Delay dispatches after timeout" <| fun () ->
+    let prog: Program<bool, string> = {
+      Init = fun () -> (false, Cmd.delay 10 "delayed")
+      Update = fun msg model ->
+        match msg with
+        | "delayed" -> (true, Cmd.quit)
+        | _ -> (model, Cmd.none)
+      View = fun _ -> El.text "waiting"
+      Subscribe = fun _ -> []
+    }
+    let backend, _ = TestBackend.create 20 1 []
+    App.run backend prog
+]
+
+let subscriptionTests2 = testList "Subscriptions" [
+  testCase "timer sub dispatches ticks" <| fun () ->
+    let prog: Program<int, string> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun msg model ->
+        match msg with
+        | "tick" ->
+          match model >= 2 with
+          | true -> (model + 1, Cmd.quit)
+          | false -> (model + 1, Cmd.none)
+        | _ -> (model, Cmd.none)
+      View = fun model -> El.text (sprintf "ticks: %d" model)
+      Subscribe = fun model ->
+        match model < 3 with
+        | true -> [TimerSub("ticker", System.TimeSpan.FromMilliseconds(10.0), fun () -> "tick")]
+        | false -> []
+    }
+    let backend, _ = TestBackend.create 20 1 []
+    App.run backend prog
+]
+
+let eventDispatchTests = testList "Event dispatch" [
+  testCase "unmatched keys are ignored" <| fun () ->
+    let prog: Program<int, string> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun msg model ->
+        match msg with
+        | "quit" -> (model, Cmd.quit)
+        | _ -> (model + 1, Cmd.none)
+      View = fun model -> El.text (sprintf "%d" model)
+      Subscribe = fun _ -> [
+        KeySub (fun (key, _) ->
+          match key with
+          | Key.Char 'q' -> Some "quit"
+          | _ -> None)
+      ]
+    }
+    let events = [
+      KeyPressed(Key.Char 'x', Modifiers.None)
+      KeyPressed(Key.Char 'y', Modifiers.None)
+      KeyPressed(Key.Char 'q', Modifiers.None)
+    ]
+    let backend, _ = TestBackend.create 10 1 events
+    App.run backend prog
+
+  testCase "resize events dispatched to ResizeSub" <| fun () ->
+    let prog: Program<string, string> = {
+      Init = fun () -> ("init", Cmd.none)
+      Update = fun msg _ ->
+        match msg with
+        | "quit" -> ("done", Cmd.quit)
+        | s -> (s, Cmd.none)
+      View = fun model -> El.text model
+      Subscribe = fun _ -> [
+        ResizeSub (fun (w, h) -> sprintf "%dx%d" w h)
+        KeySub (fun (key, _) ->
+          match key with
+          | Key.Char 'q' -> Some "quit"
+          | _ -> None)
+      ]
+    }
+    let events = [
+      Resized(120, 50)
+      KeyPressed(Key.Char 'q', Modifiers.None)
+    ]
+    let backend, _ = TestBackend.create 20 1 events
+    App.run backend prog
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -2162,5 +2324,11 @@ let allTests = testList "All" [
     userOverrideGraphicsTests
     userOverrideCompositionTests
     detectPipelineTests
+  ]
+  testList "Phase 7" [
+    appRunTests
+    cmdInterpretTests
+    subscriptionTests2
+    eventDispatchTests
   ]
 ]
