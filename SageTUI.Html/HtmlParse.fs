@@ -33,6 +33,24 @@ module HtmlParse =
         | (true, rv), (true, gv), (true, bv) -> Some (Color.Rgb(rv, gv, bv))
         | _ -> None
       | _ -> None
+    | s when s.StartsWith("oklch(") && s.EndsWith(")") ->
+      let inner = s.[6..s.Length-2].Trim()
+      let parts = inner.Split([|' '; ','|], System.StringSplitOptions.RemoveEmptyEntries)
+      match parts with
+      | [| lStr; cStr; hStr |] ->
+        let lVal =
+          match lStr.EndsWith("%") with
+          | true -> System.Double.TryParse(lStr.[..lStr.Length-2]) |> fun (ok, v) -> match ok with true -> Some (v / 100.0) | false -> None
+          | false -> System.Double.TryParse(lStr) |> fun (ok, v) -> match ok with true -> Some v | false -> None
+        let cVal = System.Double.TryParse(cStr) |> fun (ok, v) -> match ok with true -> Some v | false -> None
+        let hRaw = match hStr.EndsWith("deg") with true -> hStr.[..hStr.Length-4] | false -> hStr
+        let hVal = System.Double.TryParse(hRaw) |> fun (ok, v) -> match ok with true -> Some v | false -> None
+        match lVal, cVal, hVal with
+        | Some l, Some c, Some h ->
+          let (r, g, b) = Oklch.toRgb l c h
+          Some (Color.Rgb(r, g, b))
+        | _ -> None
+      | _ -> None
     | _ -> None
 
   let private parseStylePairs (css: string) : (string * string) list =
