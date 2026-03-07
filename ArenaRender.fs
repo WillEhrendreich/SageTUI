@@ -255,7 +255,13 @@ module ArenaRender =
       | 9uy -> // Keyed (pass through to child)
         render arena node.FirstChild area inheritedFg inheritedBg inheritedAttrs buf
 
-      | 10uy -> eprintfn "Canvas rendering not yet implemented"
+      | 10uy -> // Canvas
+        let drawIdx = node.DataStart
+        match drawIdx >= 0 && drawIdx < arena.CanvasDraws.Count with
+        | true ->
+          let config = arena.CanvasDraws.[drawIdx]
+          CanvasRender.renderToBuffer config area buf
+        | false -> ()
 
       | 11uy -> // Aligned
         let hAlign = match node.ConstraintKind with | 1uy -> HAlign.HCenter | 2uy -> HAlign.Right | _ -> HAlign.Left

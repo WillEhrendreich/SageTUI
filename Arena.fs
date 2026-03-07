@@ -27,7 +27,8 @@ type FrameArena =
     mutable TextPos: int
     LayoutScratch: int array
     mutable LayoutPos: int
-    mutable Generation: int }
+    mutable Generation: int
+    CanvasDraws: System.Collections.Generic.List<CanvasConfig> }
 
 module FrameArena =
   let create maxNodes maxChars maxLayoutScratch =
@@ -37,13 +38,15 @@ module FrameArena =
       TextPos = 0
       LayoutScratch = Array.zeroCreate maxLayoutScratch
       LayoutPos = 0
-      Generation = 0 }
+      Generation = 0
+      CanvasDraws = System.Collections.Generic.List<CanvasConfig>() }
 
   let reset arena =
     arena.NodeCount <- 0
     arena.TextPos <- 0
     arena.LayoutPos <- 0
     arena.Generation <- arena.Generation + 1
+    arena.CanvasDraws.Clear()
 
   let allocNode arena =
     if arena.NodeCount >= arena.Nodes.Length then
@@ -173,8 +176,10 @@ module Arena =
     | Canvas config ->
       let h = FrameArena.allocNode arena
       let (NodeHandle idx) = h
+      let drawIdx = arena.CanvasDraws.Count
+      arena.CanvasDraws.Add(config)
       arena.Nodes.[idx] <-
-        mkNode 10uy 0UL 0us (packCanvasMode config.Mode) 0s -1 -1 0 0
+        mkNode 10uy 0UL 0us (packCanvasMode config.Mode) 0s -1 -1 drawIdx 0
       h
     | Aligned(hAlign, vAlign, child) ->
       let h = FrameArena.allocNode arena

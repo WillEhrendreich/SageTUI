@@ -78,7 +78,8 @@ module Render =
       | Keyed(_, _, _, child) ->
         render area inheritedStyle buf child
 
-      | Canvas _ -> eprintfn "Canvas rendering not yet implemented"
+      | Canvas config ->
+        CanvasRender.renderToBuffer config area buf
 
       | Aligned(hAlign, vAlign, child) ->
         let cw = Measure.measureWidth child
