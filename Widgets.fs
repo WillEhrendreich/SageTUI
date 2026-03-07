@@ -118,3 +118,106 @@ module Select =
         | None -> "(none)"
       El.text (sprintf "▾ %s" display)
       |> (match focused with true -> El.underline | false -> id)
+
+type ProgressBarConfig = {
+  Percent: float
+  Width: int
+  FilledChar: char
+  EmptyChar: char
+  FilledColor: Color option
+  EmptyColor: Color option
+  ShowLabel: bool
+}
+
+module ProgressBar =
+  let defaults = {
+    Percent = 0.0
+    Width = 20
+    FilledChar = '█'
+    EmptyChar = '░'
+    FilledColor = None
+    EmptyColor = None
+    ShowLabel = true
+  }
+
+  let view (config: ProgressBarConfig) =
+    let pct = config.Percent |> max 0.0 |> min 1.0
+    let filled = int (float config.Width * pct)
+    let empty = config.Width - filled
+    let bar =
+      System.String(config.FilledChar, filled) +
+      System.String(config.EmptyChar, empty)
+    let barEl =
+      match config.FilledColor, config.EmptyColor with
+      | Some fc, Some ec ->
+        let filledEl =
+          El.text (System.String(config.FilledChar, filled)) |> El.fg fc
+        let emptyEl =
+          El.text (System.String(config.EmptyChar, empty)) |> El.fg ec
+        El.row [ filledEl; emptyEl ]
+      | Some fc, None -> El.text bar |> El.fg fc
+      | None, Some ec -> El.text bar |> El.fg ec
+      | None, None -> El.text bar
+    match config.ShowLabel with
+    | true ->
+      let label = sprintf " %d%%" (int (pct * 100.0))
+      El.row [ barEl; El.text label ]
+    | false -> barEl
+
+type TabsConfig<'a> = {
+  Items: 'a list
+  ActiveIndex: int
+  ToString: 'a -> string
+  ActiveColor: Color option
+  InactiveColor: Color option
+}
+
+module Tabs =
+  let view (config: TabsConfig<'a>) =
+    config.Items
+    |> List.mapi (fun i item ->
+      let label = sprintf " %s " (config.ToString item)
+      let isActive = i = config.ActiveIndex
+      match isActive with
+      | true ->
+        let el = El.text label |> El.bold
+        match config.ActiveColor with
+        | Some c -> el |> El.fg c
+        | None -> el
+      | false ->
+        let el = El.text label
+        match config.InactiveColor with
+        | Some c -> el |> El.fg c
+        | None -> el)
+    |> El.row
+
+type TableColumn<'a> = {
+  Header: string
+  Width: int
+  Render: 'a -> Element
+}
+
+module Table =
+  let view (columns: TableColumn<'a> list) (rows: 'a list) (selectedRow: int option) =
+    let header =
+      columns
+      |> List.map (fun col ->
+        El.text col.Header |> El.bold |> El.width col.Width)
+      |> El.row
+    let separator =
+      columns
+      |> List.map (fun col ->
+        El.text (System.String('─', col.Width)) |> El.width col.Width)
+      |> El.row
+    let dataRows =
+      rows
+      |> List.mapi (fun i row ->
+        let rowEl =
+          columns
+          |> List.map (fun col -> col.Render row |> El.width col.Width)
+          |> El.row
+        match selectedRow with
+        | Some si when si = i ->
+          rowEl |> El.bg (Color.Named(BaseColor.Blue, Intensity.Normal))
+        | _ -> rowEl)
+    El.column (header :: separator :: dataRows)

@@ -11,6 +11,7 @@
     <Compile Include="LayoutTests.fs" />
     <Compile Include="ScrollTests.fs" />
     <Compile Include="CanvasTests.fs" />
+    <Compile Include="WidgetTests.fs" />
     <Compile Include="HtmlTests.fs" />
     <Compile Include="CssTests.fs" />
     <Compile Include="Program.fs" />
