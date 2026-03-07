@@ -15,6 +15,7 @@
     <Compile Include="Buffer.fs" />
     <Compile Include="Layout.fs" />
     <Compile Include="Element.fs" />
+    <Compile Include="Arena.fs" />
     <Compile Include="Effects.fs" />
     <Compile Include="Terminal.fs" />
     <Compile Include="Tests.fs" />

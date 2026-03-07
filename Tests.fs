@@ -747,6 +747,297 @@ let bufferToStringTests = testList "Buffer toString" [
     Buffer.toString buf |> Expect.equal "str" "X"
 ]
 
+// ============================================================
+// Phase 2: Frame Arena Tests
+// ============================================================
+
+let arenaInfraTests = testList "FrameArena infra" [
+  testCase "create initial state" <| fun () ->
+    let a = FrameArena.create 100 1000 500
+    a.NodeCount |> Expect.equal "nodes" 0
+    a.TextPos |> Expect.equal "text" 0
+    a.LayoutPos |> Expect.equal "layout" 0
+    a.Generation |> Expect.equal "gen" 0
+    a.Nodes.Length |> Expect.equal "capacity" 100
+
+  testCase "allocNode increments" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let h0 = FrameArena.allocNode a
+    NodeHandle.value h0 |> Expect.equal "h0" 0
+    a.NodeCount |> Expect.equal "count1" 1
+    let h1 = FrameArena.allocNode a
+    NodeHandle.value h1 |> Expect.equal "h1" 1
+    a.NodeCount |> Expect.equal "count2" 2
+
+  testCase "allocNode overflow throws" <| fun () ->
+    let a = FrameArena.create 2 100 50
+    FrameArena.allocNode a |> ignore
+    FrameArena.allocNode a |> ignore
+    let threw =
+      try FrameArena.allocNode a |> ignore; false
+      with _ -> true
+    threw |> Expect.isTrue "should throw on overflow"
+
+  testCase "allocText copies text" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let (s, l) = FrameArena.allocText "Hello" a
+    s |> Expect.equal "start" 0
+    l |> Expect.equal "len" 5
+    a.TextPos |> Expect.equal "pos" 5
+    System.String(a.TextBuf, s, l) |> Expect.equal "text" "Hello"
+
+  testCase "allocText sequential" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let (s1, _) = FrameArena.allocText "AB" a
+    let (s2, l2) = FrameArena.allocText "CD" a
+    s1 |> Expect.equal "s1" 0
+    s2 |> Expect.equal "s2" 2
+    System.String(a.TextBuf, s2, l2) |> Expect.equal "t2" "CD"
+
+  testCase "reset clears and bumps gen" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    FrameArena.allocNode a |> ignore
+    FrameArena.allocText "Hi" a |> ignore
+    FrameArena.reset a
+    a.NodeCount |> Expect.equal "nodes" 0
+    a.TextPos |> Expect.equal "text" 0
+    a.LayoutPos |> Expect.equal "layout" 0
+    a.Generation |> Expect.equal "gen" 1
+
+  testCase "reset preserves capacity" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    FrameArena.allocNode a |> ignore
+    FrameArena.reset a
+    a.Nodes.Length |> Expect.equal "cap" 10
+    a.TextBuf.Length |> Expect.equal "text cap" 100
+
+  testCase "multiple resets increment gen" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    FrameArena.reset a
+    FrameArena.reset a
+    FrameArena.reset a
+    a.Generation |> Expect.equal "gen" 3
+]
+
+let arenaLowerTests = testList "Arena.lower" [
+  testCase "lower Empty" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let h = Arena.lower a Empty
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 0uy
+    n.FirstChild |> Expect.equal "child" -1
+    n.NextSibling |> Expect.equal "sib" -1
+
+  testCase "lower Text" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let style = { Fg = Some (Named(Red, Bright)); Bg = None; Attrs = TextAttrs.bold }
+    let h = Arena.lower a (Text("hi", style))
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 1uy
+    n.DataLen |> Expect.equal "len" 2
+    System.String(a.TextBuf, n.DataStart, n.DataLen) |> Expect.equal "text" "hi"
+    n.AttrsPacked |> Expect.equal "attrs" TextAttrs.bold.Value
+
+  testCase "lower Row links 3 children" <| fun () ->
+    let a = FrameArena.create 20 200 100
+    let h = Arena.lower a (Row [
+      Text("A", Style.empty); Text("B", Style.empty); Text("C", Style.empty)
+    ])
+    let root = FrameArena.getNode h a
+    root.Kind |> Expect.equal "kind" 2uy
+    (root.FirstChild >= 0) |> Expect.isTrue "has child"
+    let c0 = a.Nodes.[root.FirstChild]
+    c0.Kind |> Expect.equal "c0" 1uy
+    (c0.NextSibling >= 0) |> Expect.isTrue "c0 next"
+    let c1 = a.Nodes.[c0.NextSibling]
+    c1.Kind |> Expect.equal "c1" 1uy
+    (c1.NextSibling >= 0) |> Expect.isTrue "c1 next"
+    let c2 = a.Nodes.[c1.NextSibling]
+    c2.Kind |> Expect.equal "c2" 1uy
+    c2.NextSibling |> Expect.equal "c2 end" -1
+
+  testCase "lower Column" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let h = Arena.lower a (Column [Text("X", Style.empty)])
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 3uy
+    (n.FirstChild >= 0) |> Expect.isTrue "has child"
+
+  testCase "lower Overlay" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let h = Arena.lower a (Overlay [Empty; Empty])
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 4uy
+    (n.FirstChild >= 0) |> Expect.isTrue "has children"
+
+  testCase "lower Styled packs color" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let style = Style.empty |> Style.withFg (Rgb(255uy, 0uy, 0uy))
+    let h = Arena.lower a (Styled(style, Empty))
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 5uy
+    (n.FirstChild >= 0) |> Expect.isTrue "has child"
+    let fg = Arena.unpackStyleFg n.StylePacked
+    PackedColor.unpack fg |> Expect.equal "fg" (Rgb(255uy, 0uy, 0uy))
+
+  testCase "lower Constrained Fixed" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let h = Arena.lower a (Constrained(Fixed 42, Empty))
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 6uy
+    n.ConstraintKind |> Expect.equal "ck" 0uy
+    n.ConstraintVal |> Expect.equal "cv" 42s
+
+  testCase "lower Constrained Fill" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let h = Arena.lower a (Constrained(Fill, Empty))
+    let n = FrameArena.getNode h a
+    n.ConstraintKind |> Expect.equal "ck" 4uy
+    n.ConstraintVal |> Expect.equal "cv" 0s
+
+  testCase "lower Bordered Rounded" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let h = Arena.lower a (Bordered(Rounded, Empty))
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 7uy
+    n.ConstraintKind |> Expect.equal "border" 3uy
+
+  testCase "lower Padded" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let p = { Top = 1; Right = 2; Bottom = 3; Left = 4 }
+    let h = Arena.lower a (Padded(p, Empty))
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 8uy
+    (n.DataStart >>> 16) |> Expect.equal "top" 1
+    (n.DataStart &&& 0xFFFF) |> Expect.equal "right" 2
+    (n.DataLen >>> 16) |> Expect.equal "bottom" 3
+    (n.DataLen &&& 0xFFFF) |> Expect.equal "left" 4
+
+  testCase "lower Keyed stores key" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let h = Arena.lower a (Keyed("item-1", Fade 200<ms>, Fade 0<ms>, Empty))
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 9uy
+    System.String(a.TextBuf, n.DataStart, n.DataLen) |> Expect.equal "key" "item-1"
+    n.ConstraintKind |> Expect.equal "enter" 0uy
+    int16 n.ConstraintVal |> Expect.equal "exit" 0s
+    (n.FirstChild >= 0) |> Expect.isTrue "has child"
+
+  testCase "lower Canvas" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let cfg = { Draw = (fun _ _ -> { Width = 0; Height = 0; Pixels = [||] })
+                Mode = HalfBlock; Fallback = Some Braille }
+    let h = Arena.lower a (Canvas cfg)
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 10uy
+    n.ConstraintKind |> Expect.equal "mode" 1uy
+
+  testCase "node count matches element count" <| fun () ->
+    let a = FrameArena.create 100 1000 500
+    Arena.lower a (Row [
+      Text("A", Style.empty)
+      Column [Text("B", Style.empty); Text("C", Style.empty)]
+      Empty
+    ]) |> ignore
+    a.NodeCount |> Expect.equal "total" 6
+
+  testCase "deeply nested structure" <| fun () ->
+    let a = FrameArena.create 100 1000 500
+    let tree = Styled(Style.empty, Bordered(Light, Padded(Padding.zero, Text("deep", Style.empty))))
+    let h = Arena.lower a tree
+    let root = FrameArena.getNode h a
+    root.Kind |> Expect.equal "styled" 5uy
+    let c1 = a.Nodes.[root.FirstChild]
+    c1.Kind |> Expect.equal "bordered" 7uy
+    let c2 = a.Nodes.[c1.FirstChild]
+    c2.Kind |> Expect.equal "padded" 8uy
+    let leaf = a.Nodes.[c2.FirstChild]
+    leaf.Kind |> Expect.equal "text" 1uy
+    a.NodeCount |> Expect.equal "nodes" 4
+
+  testCase "reset then reuse arena" <| fun () ->
+    let a = FrameArena.create 100 1000 500
+    Arena.lower a (Text("frame1", Style.empty)) |> ignore
+    a.NodeCount |> Expect.equal "f1" 1
+    FrameArena.reset a
+    Arena.lower a (Row [Text("a", Style.empty); Text("b", Style.empty)]) |> ignore
+    a.NodeCount |> Expect.equal "f2" 3
+    a.Generation |> Expect.equal "gen" 1
+
+  testCase "empty children list" <| fun () ->
+    let a = FrameArena.create 10 100 50
+    let h = Arena.lower a (Row [])
+    let n = FrameArena.getNode h a
+    n.Kind |> Expect.equal "kind" 2uy
+    n.FirstChild |> Expect.equal "no children" -1
+]
+
+let packStyleTests = testList "packStylePair" [
+  testCase "empty style packs to zero" <| fun () ->
+    Arena.packStylePair Style.empty |> Expect.equal "zero" 0UL
+
+  testCase "fg in upper 32 bits" <| fun () ->
+    let style = { Style.empty with Fg = Some (Named(Red, Normal)) }
+    let packed = Arena.packStylePair style
+    PackedColor.unpack (Arena.unpackStyleFg packed)
+    |> Expect.equal "fg" (Named(Red, Normal))
+    Arena.unpackStyleBg packed |> Expect.equal "bg zero" 0
+
+  testCase "bg in lower 32 bits" <| fun () ->
+    let style = { Style.empty with Bg = Some (Rgb(1uy, 2uy, 3uy)) }
+    let packed = Arena.packStylePair style
+    Arena.unpackStyleFg packed |> Expect.equal "fg zero" 0
+    PackedColor.unpack (Arena.unpackStyleBg packed)
+    |> Expect.equal "bg" (Rgb(1uy, 2uy, 3uy))
+
+  testCase "both fg and bg" <| fun () ->
+    let style =
+      { Fg = Some (Named(Blue, Bright))
+        Bg = Some (Ansi256 42uy)
+        Attrs = TextAttrs.none }
+    let packed = Arena.packStylePair style
+    PackedColor.unpack (Arena.unpackStyleFg packed)
+    |> Expect.equal "fg" (Named(Blue, Bright))
+    PackedColor.unpack (Arena.unpackStyleBg packed)
+    |> Expect.equal "bg" (Ansi256 42uy)
+
+  testProperty "Rgb roundtrip through packStylePair" <| fun (r: byte) (g: byte) (b: byte) ->
+    let c = Rgb(r, g, b)
+    let style = { Fg = Some c; Bg = Some c; Attrs = TextAttrs.none }
+    let packed = Arena.packStylePair style
+    let fg = PackedColor.unpack (Arena.unpackStyleFg packed)
+    let bg = PackedColor.unpack (Arena.unpackStyleBg packed)
+    fg = c && bg = c
+]
+
+let constraintPackTests = testList "packConstraint" [
+  testCase "Fixed" <| fun () ->
+    let (k, v) = Arena.packConstraint (Fixed 42)
+    k |> Expect.equal "k" 0uy
+    v |> Expect.equal "v" 42s
+
+  testCase "Min" <| fun () ->
+    Arena.packConstraint (Min 10) |> fst |> Expect.equal "k" 1uy
+
+  testCase "Max" <| fun () ->
+    Arena.packConstraint (Max 100) |> fst |> Expect.equal "k" 2uy
+
+  testCase "Percentage" <| fun () ->
+    let (k, v) = Arena.packConstraint (Percentage 50)
+    k |> Expect.equal "k" 3uy
+    v |> Expect.equal "v" 50s
+
+  testCase "Fill" <| fun () ->
+    let (k, v) = Arena.packConstraint Fill
+    k |> Expect.equal "k" 4uy
+    v |> Expect.equal "v" 0s
+
+  testCase "Ratio" <| fun () ->
+    let (k, v) = Arena.packConstraint (Ratio(1, 3))
+    k |> Expect.equal "k" 5uy
+    v |> Expect.equal "v" 259s
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -771,5 +1062,11 @@ let allTests = testList "All" [
     bufferWriteTests
     bufferDiffTests
     bufferToStringTests
+  ]
+  testList "Phase 2" [
+    arenaInfraTests
+    arenaLowerTests
+    packStyleTests
+    constraintPackTests
   ]
 ]
