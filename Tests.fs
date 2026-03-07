@@ -1038,6 +1038,246 @@ let constraintPackTests = testList "packConstraint" [
     v |> Expect.equal "v" 259s
 ]
 
+// ============================================================
+// Phase 3: Terminal Backend Tests
+// ============================================================
+
+let e = "\x1b["
+
+let ansiCursorTests = testList "Ansi cursor/screen" [
+  testCase "moveCursor 0 0" <| fun () ->
+    Ansi.moveCursor 0 0 |> Expect.equal "origin" (sprintf "%s1;1H" e)
+
+  testCase "moveCursor 5 10" <| fun () ->
+    Ansi.moveCursor 5 10 |> Expect.equal "5,10" (sprintf "%s6;11H" e)
+
+  testCase "hideCursor" <| fun () ->
+    Ansi.hideCursor |> Expect.stringContains "esc" "?25l"
+
+  testCase "showCursor" <| fun () ->
+    Ansi.showCursor |> Expect.stringContains "esc" "?25h"
+
+  testCase "enterAltScreen" <| fun () ->
+    Ansi.enterAltScreen |> Expect.stringContains "esc" "?1049h"
+
+  testCase "leaveAltScreen" <| fun () ->
+    Ansi.leaveAltScreen |> Expect.stringContains "esc" "?1049l"
+
+  testCase "resetStyle" <| fun () ->
+    Ansi.resetStyle |> Expect.equal "reset" (sprintf "%s0m" e)
+]
+
+let ansiFgTests = testList "Ansi fgColor" [
+  testCase "Default" <| fun () ->
+    Ansi.fgColor Default |> Expect.equal "default" (sprintf "%s39m" e)
+
+  testCase "Named Red Normal" <| fun () ->
+    Ansi.fgColor (Named(Red, Normal)) |> Expect.equal "red" (sprintf "%s31m" e)
+
+  testCase "Named Red Bright" <| fun () ->
+    Ansi.fgColor (Named(Red, Bright)) |> Expect.equal "bright red" (sprintf "%s91m" e)
+
+  testCase "Named Black Normal" <| fun () ->
+    Ansi.fgColor (Named(Black, Normal)) |> Expect.equal "black" (sprintf "%s30m" e)
+
+  testCase "Named White Bright" <| fun () ->
+    Ansi.fgColor (Named(White, Bright)) |> Expect.equal "bright white" (sprintf "%s97m" e)
+
+  testCase "Ansi256 42" <| fun () ->
+    Ansi.fgColor (Ansi256 42uy) |> Expect.equal "256" (sprintf "%s38;5;42m" e)
+
+  testCase "Rgb 255 128 0" <| fun () ->
+    Ansi.fgColor (Rgb(255uy, 128uy, 0uy)) |> Expect.equal "rgb" (sprintf "%s38;2;255;128;0m" e)
+]
+
+let ansiBgTests = testList "Ansi bgColor" [
+  testCase "Default" <| fun () ->
+    Ansi.bgColor Default |> Expect.equal "default" (sprintf "%s49m" e)
+
+  testCase "Named Blue Normal" <| fun () ->
+    Ansi.bgColor (Named(Blue, Normal)) |> Expect.equal "blue" (sprintf "%s44m" e)
+
+  testCase "Named Blue Bright" <| fun () ->
+    Ansi.bgColor (Named(Blue, Bright)) |> Expect.equal "bright blue" (sprintf "%s104m" e)
+
+  testCase "Ansi256 100" <| fun () ->
+    Ansi.bgColor (Ansi256 100uy) |> Expect.equal "256" (sprintf "%s48;5;100m" e)
+
+  testCase "Rgb 0 255 0" <| fun () ->
+    Ansi.bgColor (Rgb(0uy, 255uy, 0uy)) |> Expect.equal "rgb" (sprintf "%s48;2;0;255;0m" e)
+]
+
+let ansiAttrsTests = testList "Ansi textAttrs" [
+  testCase "none produces empty" <| fun () ->
+    Ansi.textAttrs TextAttrs.none |> Expect.equal "empty" ""
+
+  testCase "bold" <| fun () ->
+    Ansi.textAttrs TextAttrs.bold |> Expect.equal "bold" (sprintf "%s1m" e)
+
+  testCase "dim" <| fun () ->
+    Ansi.textAttrs TextAttrs.dim |> Expect.equal "dim" (sprintf "%s2m" e)
+
+  testCase "italic" <| fun () ->
+    Ansi.textAttrs TextAttrs.italic |> Expect.equal "italic" (sprintf "%s3m" e)
+
+  testCase "underline" <| fun () ->
+    Ansi.textAttrs TextAttrs.underline |> Expect.equal "underline" (sprintf "%s4m" e)
+
+  testCase "bold+italic combined" <| fun () ->
+    let combined = TextAttrs.combine TextAttrs.bold TextAttrs.italic
+    let s = Ansi.textAttrs combined
+    s |> Expect.stringContains "has bold" (sprintf "%s1m" e)
+    s |> Expect.stringContains "has italic" (sprintf "%s3m" e)
+
+  testCase "packed roundtrip" <| fun () ->
+    Ansi.textAttrsPacked TextAttrs.bold.Value
+    |> Expect.equal "bold" (sprintf "%s1m" e)
+]
+
+let ansiAllBaseColorsTests = testList "Ansi all 8 base colors" [
+  testCase "all fg normal codes" <| fun () ->
+    let bases = [Black; Red; Green; Yellow; Blue; Magenta; Cyan; White]
+    let codes = bases |> List.map (fun b -> Ansi.fgColor (Named(b, Normal)))
+    codes |> List.length |> Expect.equal "count" 8
+    codes |> List.forall (fun s -> s.StartsWith(e)) |> Expect.isTrue "all start with esc"
+
+  testCase "all bg bright codes" <| fun () ->
+    let bases = [Black; Red; Green; Yellow; Blue; Magenta; Cyan; White]
+    let codes = bases |> List.map (fun b -> Ansi.bgColor (Named(b, Bright)))
+    codes |> List.length |> Expect.equal "count" 8
+    codes |> List.forall (fun s -> s.Contains("10") || s.Contains("100") || s.Contains("101") || s.Contains("102") || s.Contains("103") || s.Contains("104") || s.Contains("105") || s.Contains("106") || s.Contains("107"))
+    |> Expect.isTrue "all bright bg codes"
+]
+
+let presenterTests = testList "Presenter" [
+  testCase "empty changes produces empty string" <| fun () ->
+    let buf = Buffer.create 10 5
+    Presenter.present (ResizeArray<int>()) buf |> Expect.equal "empty" ""
+
+  testCase "single change includes cursor move and char" <| fun () ->
+    let buf = Buffer.create 10 5
+    let fg = PackedColor.pack (Named(Red, Normal))
+    buf.Cells[23] <- PackedCell.create (int (System.Text.Rune 'X').Value) fg 0 0us
+    let changes = ResizeArray<int>([23])
+    let s = Presenter.present changes buf
+    s |> Expect.stringContains "has cursor move" (Ansi.moveCursor 2 3)
+    s |> Expect.stringContains "has char" "X"
+
+  testCase "contiguous cells skip cursor move" <| fun () ->
+    let buf = Buffer.create 10 5
+    buf.Cells[0] <- PackedCell.create (int (System.Text.Rune 'A').Value) 0 0 0us
+    buf.Cells[1] <- PackedCell.create (int (System.Text.Rune 'B').Value) 0 0 0us
+    let changes = ResizeArray<int>([0; 1])
+    let s = Presenter.present changes buf
+    s |> Expect.stringContains "has AB" "AB"
+
+  testCase "non-contiguous cells emit multiple moves" <| fun () ->
+    let buf = Buffer.create 10 5
+    buf.Cells[0] <- PackedCell.create (int (System.Text.Rune 'A').Value) 0 0 0us
+    buf.Cells[5] <- PackedCell.create (int (System.Text.Rune 'B').Value) 0 0 0us
+    let changes = ResizeArray<int>([0; 5])
+    let s = Presenter.present changes buf
+    s |> Expect.stringContains "has first move" (Ansi.moveCursor 0 0)
+    s |> Expect.stringContains "has second move" (Ansi.moveCursor 0 5)
+
+  testCase "style change emits reset + style codes" <| fun () ->
+    let buf = Buffer.create 10 5
+    let fg1 = PackedColor.pack (Named(Red, Normal))
+    let fg2 = PackedColor.pack (Named(Blue, Normal))
+    buf.Cells[0] <- PackedCell.create (int (System.Text.Rune 'R').Value) fg1 0 0us
+    buf.Cells[1] <- PackedCell.create (int (System.Text.Rune 'B').Value) fg2 0 0us
+    let changes = ResizeArray<int>([0; 1])
+    let s = Presenter.present changes buf
+    s |> Expect.stringContains "has R" "R"
+    s |> Expect.stringContains "has B" "B"
+    let resetCount = s.Split(Ansi.resetStyle).Length - 1
+    (resetCount >= 2) |> Expect.isTrue "style changes emit resets"
+
+  testCase "same style across contiguous cells: no redundant style" <| fun () ->
+    let buf = Buffer.create 10 5
+    let fg = PackedColor.pack (Named(Red, Normal))
+    buf.Cells[0] <- PackedCell.create (int (System.Text.Rune 'A').Value) fg 0 0us
+    buf.Cells[1] <- PackedCell.create (int (System.Text.Rune 'B').Value) fg 0 0us
+    let changes = ResizeArray<int>([0; 1])
+    let s = Presenter.present changes buf
+    let resetCount = s.Split(Ansi.resetStyle).Length - 1
+    resetCount |> Expect.equal "one style set" 1
+]
+
+let mkProfile color =
+  { Color = color; Unicode = UnicodeCapability.FullUnicode
+    Graphics = GraphicsCapability.TextOnly; Input = InputCapability.BasicKeys
+    Output = OutputCapability.RawMode; Size = (80, 25); TermName = "xterm"; Platform = Linux }
+
+let colorFallbackTests = testList "ColorFallback" [
+  testCase "TrueColor passes through Rgb" <| fun () ->
+    ColorFallback.resolve (mkProfile ColorCapability.TrueColor) (Rgb(100uy, 200uy, 50uy))
+    |> Expect.equal "pass through" (Rgb(100uy, 200uy, 50uy))
+
+  testCase "Indexed256 converts Rgb to Ansi256" <| fun () ->
+    let result = ColorFallback.resolve (mkProfile ColorCapability.Indexed256) (Rgb(255uy, 0uy, 0uy))
+    match result with
+    | Ansi256 _ -> ()
+    | other -> failwith (sprintf "expected Ansi256, got %A" other)
+
+  testCase "Basic16 converts Rgb to Named" <| fun () ->
+    let result = ColorFallback.resolve (mkProfile ColorCapability.Basic16) (Rgb(255uy, 0uy, 0uy))
+    match result with
+    | Named(Red, Bright) -> ()
+    | other -> failwith (sprintf "expected Named Red Bright, got %A" other)
+
+  testCase "NoColor converts Rgb to Default" <| fun () ->
+    ColorFallback.resolve (mkProfile ColorCapability.NoColor) (Rgb(100uy, 200uy, 50uy))
+    |> Expect.equal "default" Default
+
+  testCase "NoColor converts Ansi256 to Default" <| fun () ->
+    ColorFallback.resolve (mkProfile ColorCapability.NoColor) (Ansi256 42uy)
+    |> Expect.equal "default" Default
+
+  testCase "Named passes through on Basic16" <| fun () ->
+    ColorFallback.resolve (mkProfile ColorCapability.Basic16) (Named(Red, Normal))
+    |> Expect.equal "passthrough" (Named(Red, Normal))
+
+  testCase "Default always passes through" <| fun () ->
+    ColorFallback.resolve (mkProfile ColorCapability.NoColor) Default
+    |> Expect.equal "default" Default
+
+  testCase "redmeanDistance identical colors is zero" <| fun () ->
+    ColorFallback.redmeanDistance (100uy, 100uy, 100uy) (100uy, 100uy, 100uy)
+    |> Expect.equal "zero" 0.0
+
+  testCase "redmeanDistance black-white is large" <| fun () ->
+    let d = ColorFallback.redmeanDistance (0uy, 0uy, 0uy) (255uy, 255uy, 255uy)
+    (d > 500.0) |> Expect.isTrue "large distance"
+
+  testCase "toBasic16 pure white maps to White Bright" <| fun () ->
+    ColorFallback.toBasic16 (255uy, 255uy, 255uy)
+    |> Expect.equal "white" (White, Bright)
+
+  testCase "toBasic16 pure black maps to Black Normal" <| fun () ->
+    ColorFallback.toBasic16 (0uy, 0uy, 0uy)
+    |> Expect.equal "black" (Black, Normal)
+]
+
+let syncOutputTests = testList "SynchronizedOutput" [
+  testCase "wraps with sync when capable" <| fun () ->
+    let profile =
+      { Color = ColorCapability.TrueColor; Unicode = UnicodeCapability.FullUnicode
+        Graphics = GraphicsCapability.TextOnly; Input = InputCapability.BasicKeys
+        Output = OutputCapability.SynchronizedOutput; Size = (80, 25); TermName = "wt"; Platform = Windows }
+    let result = SynchronizedOutput.wrap profile "content"
+    result |> Expect.stringStarts "begins with sync" SynchronizedOutput.beginSync
+    result |> Expect.stringEnds "ends with sync" SynchronizedOutput.endSync
+    result |> Expect.stringContains "has content" "content"
+
+  testCase "no wrap when not supported" <| fun () ->
+    let profile =
+      { Color = ColorCapability.TrueColor; Unicode = UnicodeCapability.FullUnicode
+        Graphics = GraphicsCapability.TextOnly; Input = InputCapability.BasicKeys
+        Output = OutputCapability.RawMode; Size = (80, 25); TermName = "xterm"; Platform = Linux }
+    SynchronizedOutput.wrap profile "content" |> Expect.equal "passthrough" "content"
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -1068,5 +1308,15 @@ let allTests = testList "All" [
     arenaLowerTests
     packStyleTests
     constraintPackTests
+  ]
+  testList "Phase 3" [
+    ansiCursorTests
+    ansiFgTests
+    ansiBgTests
+    ansiAttrsTests
+    ansiAllBaseColorsTests
+    presenterTests
+    colorFallbackTests
+    syncOutputTests
   ]
 ]
