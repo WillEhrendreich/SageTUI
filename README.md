@@ -325,6 +325,8 @@ Run benchmarks yourself: `dotnet run -c Release --project SageTUI.Benchmarks`
 └─────────────────────────────────────────┘
 ```
 
+For a deep-dive into the render pipeline, element cases, arena design, and SIMD diff, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Samples
 
 The sample suite is tiered so the strongest experiences lead the front door:

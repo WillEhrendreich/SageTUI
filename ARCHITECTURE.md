@@ -1,10 +1,21 @@
-# SageTUI Quick Reference
+# SageTUI Architecture
 
-SageTUI is implemented and actively tested.
-Use this file as a fast map to the runtime, layout model, and rendering pipeline.
+Internal technical reference for contributors. Describes the runtime, element model, rendering pipeline, and performance characteristics.
 
-## THE 9 ELEMENT CASES
-Empty | Text | Row | Column | Overlay | Styled | Constrained | Bordered | Padded
+## ELEMENT CASES (10)
+
+`Empty | Text | Row | Column | Overlay | Styled | Constrained | Bordered | Padded | Keyed | Canvas`
+
+- **Empty** — zero-size placeholder
+- **Text** — a string with a Style (fg, bg, attrs)
+- **Row / Column** — flex containers; children laid out left-right or top-down
+- **Overlay** — children stacked in Z-order (last child on top)
+- **Styled** — applies a Style diff to a subtree
+- **Constrained** — wraps a child with a layout Constraint
+- **Bordered** — draws a box border (Light, Heavy, Double, Rounded, Ascii)
+- **Padded** — applies Padding (top/right/bottom/left) around a child
+- **Keyed** — associates a string key with optional enter/exit Transitions
+- **Canvas** — raw pixel buffer rendered via HalfBlock (▀/▄) or Braille (⠿) mode
 
 ## COLORS: Full Terminal Color Space
 - Default (terminal default)

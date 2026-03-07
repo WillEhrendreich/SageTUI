@@ -737,6 +737,29 @@ let lazyTests = testList "El.lazy'" [
     memoized "y" "a" |> ignore
     callCount |> Expect.equal "called twice" 2
   }
+
+  test "lazy' caches correctly with value-type (int) model" {
+    let mutable callCount = 0
+    let viewFn (n: int) =
+      callCount <- callCount + 1
+      El.text (string n)
+    let memoized = El.lazy' viewFn
+    memoized 42 |> ignore
+    memoized 42 |> ignore
+    memoized 42 |> ignore
+    callCount |> Expect.equal "int model should cache (value-type equality)" 1
+  }
+
+  test "lazy' recomputes when int model changes" {
+    let mutable callCount = 0
+    let viewFn (n: int) =
+      callCount <- callCount + 1
+      El.text (string n)
+    let memoized = El.lazy' viewFn
+    memoized 1 |> ignore
+    memoized 2 |> ignore
+    callCount |> Expect.equal "different ints should recompute" 2
+  }
 ]
 
 type TestFormModel = { Name: string; Age: int; Active: bool }

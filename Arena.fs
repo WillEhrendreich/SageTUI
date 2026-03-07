@@ -81,6 +81,11 @@ module FrameArena =
     NodeHandle idx
 
   let allocText (text: string) arena =
+    if arena.TextPos + text.Length > arena.TextBuf.Length then
+      failwith (sprintf
+        "FrameArena text overflow: tried to write %d chars at position %d but capacity is %d. \
+         Increase AppConfig.ArenaChars (current: %d) in your AppConfig."
+        text.Length arena.TextPos arena.TextBuf.Length arena.TextBuf.Length)
     let start = arena.TextPos
     text.CopyTo(0, arena.TextBuf, start, text.Length)
     arena.TextPos <- arena.TextPos + text.Length

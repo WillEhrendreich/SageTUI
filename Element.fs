@@ -241,13 +241,16 @@ module El =
     |> List.map (styledText style)
     |> column
 
-  /// Memoize a view function: returns cached Element when input reference hasn't changed.
+  /// Memoize a view function: returns cached Element when input equals the previous input.
+  /// Uses structural equality (EqualityComparer<'a>.Default) so value types and F# records
+  /// are compared correctly. Declare at module level to persist the cache across renders.
   /// Use at module level: `let lazyCounter = El.lazy' Counter.view`
   let lazy' (viewFn: 'a -> Element) : ('a -> Element) =
     let mutable prev: struct('a * Element) voption = ValueNone
     fun model ->
       match prev with
-      | ValueSome struct(oldModel, oldElem) when obj.ReferenceEquals(oldModel :> obj, model :> obj) -> oldElem
+      | ValueSome struct(oldModel, oldElem)
+        when System.Collections.Generic.EqualityComparer<'a>.Default.Equals(oldModel, model) -> oldElem
       | _ ->
         let elem = viewFn model
         prev <- ValueSome struct(model, elem)
@@ -259,8 +262,8 @@ module El =
     fun a b ->
       match prev with
       | ValueSome struct(oldA, oldB, oldElem)
-        when obj.ReferenceEquals(oldA :> obj, a :> obj)
-          && obj.ReferenceEquals(oldB :> obj, b :> obj) -> oldElem
+        when System.Collections.Generic.EqualityComparer<'a>.Default.Equals(oldA, a)
+          && System.Collections.Generic.EqualityComparer<'b>.Default.Equals(oldB, b) -> oldElem
       | _ ->
         let elem = viewFn a b
         prev <- ValueSome struct(a, b, elem)

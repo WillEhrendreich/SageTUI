@@ -46,11 +46,18 @@ module Cmd =
   let ofMsg (msg: 'msg) : Cmd<'msg> = Delay(0, msg)
 
   /// Run a Task and dispatch the result as a message.
+  /// If the task throws, the exception is logged to stderr and re-raised, crashing the app
+  /// with a visible error rather than silently swallowing the failure.
+  /// For controlled error handling, use <see cref="ofTaskResult"/> instead.
   let ofTask (task: unit -> Threading.Tasks.Task<'a>) (toMsg: 'a -> 'msg) : Cmd<'msg> =
     OfAsync(fun dispatch ->
       async {
-        let! result = task() |> Async.AwaitTask
-        dispatch (toMsg result)
+        try
+          let! result = task() |> Async.AwaitTask
+          dispatch (toMsg result)
+        with ex ->
+          eprintfn "SageTUI: unhandled exception in Cmd.ofTask: %s" ex.Message
+          Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw()
       })
 
   /// Run a Task with success/error message mapping.

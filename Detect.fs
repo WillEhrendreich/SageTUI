@@ -84,13 +84,19 @@ module Detect =
 
 module UserOverride =
   let apply (envReader: string -> string option) (profile: TerminalProfile) : TerminalProfile =
+    // NO_COLOR (https://no-color.org): if set to any value, disable all ANSI color output.
+    // Checked first; takes precedence over SAGETUI_COLOR.
+    let hasNoColor = envReader "NO_COLOR" |> Option.isSome
     let color =
-      match envReader "SAGETUI_COLOR" with
-      | Some "none" -> ColorCapability.NoColor
-      | Some "16" -> ColorCapability.Basic16
-      | Some "256" -> ColorCapability.Indexed256
-      | Some "true" | Some "truecolor" -> ColorCapability.TrueColor
-      | _ -> profile.Color
+      match hasNoColor with
+      | true -> ColorCapability.NoColor
+      | false ->
+        match envReader "SAGETUI_COLOR" with
+        | Some "none" -> ColorCapability.NoColor
+        | Some "16" -> ColorCapability.Basic16
+        | Some "256" -> ColorCapability.Indexed256
+        | Some "true" | Some "truecolor" -> ColorCapability.TrueColor
+        | _ -> profile.Color
 
     let unicode =
       match envReader "SAGETUI_UNICODE" with
