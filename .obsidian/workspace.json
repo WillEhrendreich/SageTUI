@@ -185,6 +185,7 @@
   },
   "active": "ac394dc03ed8186e",
   "lastOpenFiles": [
+    "LICENSE",
     "bin/Debug/net10.0/SageTUI.Library.xml",
     "bin/Release/SageTUI.0.1.0-preview.1.nupkg",
     "obj/Release/SageTUI.0.1.0-preview.1.nuspec",
@@ -195,7 +196,6 @@
     "bin/Release/net10.0/SageTUI.Library.dll",
     "bin/Release/net10.0/SageTUI.Library.deps.json",
     "obj/Release/net10.0/SageTUI.Library.pdb",
-    "obj/Release/net10.0/SageTUI.Library.dll",
     "expertPanel/ship-nuget-deliberation.md",
     "README.md",
     "expertPanel/incredible-roadmap-deliberation.md",
