@@ -1,8 +1,7 @@
-# SageTUI Architecture: Quick Reference Guide
+# SageTUI Quick Reference
 
-## CRITICAL: DESIGN ONLY (NO IMPLEMENTATION)
-SageTUI is a DESIGN that hasn't been implemented yet.
-Only documentation exists in expertPanel/. This is a blank canvas.
+SageTUI is implemented and actively tested.
+Use this file as a fast map to the runtime, layout model, and rendering pipeline.
 
 ## THE 9 ELEMENT CASES
 Empty | Text | Row | Column | Overlay | Styled | Constrained | Bordered | Padded
