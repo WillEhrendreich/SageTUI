@@ -29,13 +29,22 @@ jobs:
           dotnet build samples/08-Sparklines/Sparklines.fsproj     -c Release --no-restore
           dotnet build samples/09-SystemMonitor/SystemMonitor.fsproj -c Release --no-restore
 
-      - name: Install dependencies
+      - name: Install VHS and dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg xvfb
 
-      - name: Install VHS
-        uses: charmbracelet/vhs-action@v2
+          # Install ttyd
+          TTYD_VERSION=$(curl -s https://api.github.com/repos/tsl0922/ttyd/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64" -o /usr/local/bin/ttyd
+          chmod +x /usr/local/bin/ttyd
+
+          # Install VHS
+          VHS_VERSION=$(curl -s https://api.github.com/repos/charmbracelet/vhs/releases/latest | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+          curl -fsSL "https://github.com/charmbracelet/vhs/releases/latest/download/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz" \
+            | tar -xz -C /usr/local/bin vhs
+          chmod +x /usr/local/bin/vhs
+          vhs --version
 
       - name: Record screenshots
         run: |
