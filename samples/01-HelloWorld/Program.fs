@@ -1,73 +1,51 @@
 module HelloWorld
 
 // The simplest possible SageTUI app.
-// Demonstrates: TEA architecture, styled text, keyboard input, borders, padding.
+// Demonstrates: TEA + TextInput widget, borders, padding, colors.
 
 open SageTUI
 
-type Model = { Name: string }
+type Model = { Input: TextInputModel }
 
 type Msg =
-  | TypeChar of char
-  | DeleteChar
+  | KeyPressed of Key * Modifiers
   | Quit
 
-let init () =
-  { Name = "" }, Cmd.none
+let init () = { Input = TextInput.empty }, Cmd.none
 
 let update msg model =
   match msg with
-  | TypeChar c ->
-    { model with Name = model.Name + string c }, Cmd.none
-  | DeleteChar ->
-    match model.Name.Length > 0 with
-    | true -> { model with Name = model.Name.[..model.Name.Length - 2] }, Cmd.none
-    | false -> model, Cmd.none
   | Quit -> model, Cmd.quit
+  | KeyPressed (key, _) ->
+    { model with Input = TextInput.handleKey key model.Input }, Cmd.none
 
 let view model =
   let greeting =
-    match model.Name with
+    match model.Input.Text with
     | "" -> "World"
-    | n -> n
+    | name -> name
   El.column [
-    El.row [
-      El.text "╔═══════════════════════════════╗"
-    ]
-    |> El.fg (Color.Named(Cyan, Bright))
-    El.row [
-      El.text "║  " |> El.fg (Color.Named(Cyan, Bright))
-      El.text (sprintf "Hello, %s!" greeting)
-        |> El.bold
-        |> El.fg (Color.Rgb(255uy, 200uy, 50uy))
-      El.fill (El.text "")
-      El.text "  ║" |> El.fg (Color.Named(Cyan, Bright))
-    ]
-    El.row [
-      El.text "╚═══════════════════════════════╝"
-    ]
-    |> El.fg (Color.Named(Cyan, Bright))
+    El.text $"Hello, {greeting}!"
+      |> El.bold
+      |> El.fg (Color.Rgb(255uy, 200uy, 50uy))
+      |> El.padHV 2 0
+      |> El.bordered Rounded
     El.text ""
     El.text "Type your name:" |> El.dim
     El.row [
-      El.text "▸ "
-        |> El.fg (Color.Named(Green, Bright))
-      El.text (model.Name + "▌")
-        |> El.underline
+      El.text "▸ " |> El.fg (Color.Named(Green, Bright))
+      TextInput.view true model.Input
     ]
     El.text ""
-    El.text "[Backspace] Delete  [Esc/q] Quit" |> El.dim
+    El.text "[Esc] Quit" |> El.dim
   ]
   |> El.padAll 1
 
 let subscribe _model =
   [ KeySub (fun (key, _mods) ->
       match key with
-      | Char c when c <> 'q' -> Some (TypeChar c)
-      | Char 'q' -> Some Quit
-      | Backspace -> Some DeleteChar
       | Escape -> Some Quit
-      | _ -> None) ]
+      | _ -> Some (KeyPressed(key, _mods))) ]
 
 let program : Program<Model, Msg> =
   { Init = init

@@ -90,6 +90,23 @@ let clampRow model =
   let cards = cardsIn model.FocusCol model
   { model with FocusRow = min model.FocusRow (max 0 (cards.Length - 1)) }
 
+let moveCardToColumn (deltaIdx: int) model =
+  let srcCol = model.FocusCol
+  let srcCards = cardsIn srcCol model
+  match model.FocusRow < srcCards.Length with
+  | true ->
+    let card = srcCards.[model.FocusRow]
+    let dstIdx = (colIdx srcCol + deltaIdx) |> max 0 |> min 3
+    let dstCol = colAt dstIdx
+    let newSrc = srcCards |> List.filter (fun c -> c.Id <> card.Id)
+    let newDst = (cardsIn dstCol model) @ [card]
+    { model with
+        Cards = model.Cards |> Map.add srcCol newSrc |> Map.add dstCol newDst
+        FocusCol = dstCol
+        FocusRow = newDst.Length - 1
+        Moving = false }, Cmd.none
+  | false -> model, Cmd.none
+
 let update msg model =
   match msg with
   | Quit -> model, Cmd.quit
@@ -98,43 +115,13 @@ let update msg model =
     | false ->
       let nextIdx = min 3 (colIdx model.FocusCol + 1)
       { model with FocusCol = colAt nextIdx } |> clampRow, Cmd.none
-    | true ->
-      let srcCol = model.FocusCol
-      let srcCards = cardsIn srcCol model
-      match model.FocusRow < srcCards.Length with
-      | true ->
-        let card = srcCards.[model.FocusRow]
-        let nextIdx = min 3 (colIdx srcCol + 1)
-        let dstCol = colAt nextIdx
-        let newSrc = srcCards |> List.filter (fun c -> c.Id <> card.Id)
-        let newDst = (cardsIn dstCol model) @ [card]
-        { model with
-            Cards = model.Cards |> Map.add srcCol newSrc |> Map.add dstCol newDst
-            FocusCol = dstCol
-            FocusRow = newDst.Length - 1
-            Moving = false }, Cmd.none
-      | false -> model, Cmd.none
+    | true -> moveCardToColumn 1 model
   | MoveLeft ->
     match model.Moving with
     | false ->
       let prevIdx = max 0 (colIdx model.FocusCol - 1)
       { model with FocusCol = colAt prevIdx } |> clampRow, Cmd.none
-    | true ->
-      let srcCol = model.FocusCol
-      let srcCards = cardsIn srcCol model
-      match model.FocusRow < srcCards.Length with
-      | true ->
-        let card = srcCards.[model.FocusRow]
-        let prevIdx = max 0 (colIdx srcCol - 1)
-        let dstCol = colAt prevIdx
-        let newSrc = srcCards |> List.filter (fun c -> c.Id <> card.Id)
-        let newDst = (cardsIn dstCol model) @ [card]
-        { model with
-            Cards = model.Cards |> Map.add srcCol newSrc |> Map.add dstCol newDst
-            FocusCol = dstCol
-            FocusRow = newDst.Length - 1
-            Moving = false }, Cmd.none
-      | false -> model, Cmd.none
+    | true -> moveCardToColumn -1 model
   | MoveUp ->
     { model with FocusRow = max 0 (model.FocusRow - 1) }, Cmd.none
   | MoveDown ->
@@ -231,10 +218,28 @@ let view model =
         |> El.dim
     ]
 
-  El.column [
-    header
-    El.fill board
-    footer
+  let grabbedOverlay =
+    match model.Moving with
+    | true ->
+      let cards = cardsIn model.FocusCol model
+      match model.FocusRow < cards.Length with
+      | true ->
+        let card = cards.[model.FocusRow]
+        El.text $" ✋ Moving: {card.Title} "
+          |> El.bold
+          |> El.fg (Color.Named(Black, Normal))
+          |> El.bg (Color.Named(Yellow, Bright))
+          |> El.bordered Double
+      | false -> El.empty
+    | false -> El.empty
+
+  El.overlay [
+    El.column [
+      header
+      El.fill board
+      footer
+    ]
+    grabbedOverlay
   ]
 
 let subscribe _model =

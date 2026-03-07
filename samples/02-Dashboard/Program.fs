@@ -1,39 +1,58 @@
 module Dashboard
 
 // Real-time dashboard with clock, progress bars, event log, and multi-panel layout.
-// Demonstrates: TimerSub, borders, fill/ratio layouts, colors, dynamic content.
+// Demonstrates: TimerSub, ResizeSub, borders, fill/ratio, colors, Gradient, Spinner.
 
 open System
 open SageTUI
 
-type LogEntry = { Time: DateTime; Text: string; Level: string }
+type LogLevel = Info | Warn | Error | Debug
+
+type LogEntry = { Time: DateTime; Text: string; Level: LogLevel }
 
 type Model =
   { Now: DateTime
     Cpu: float list
     Memory: int
     Events: LogEntry list
-    Uptime: int }
+    Uptime: int
+    Seed: int
+    BarWidth: int
+    Elapsed: int64 }
 
 type Msg =
   | Tick
+  | Resized of int * int
   | Quit
-
-let rng = Random(42)
 
 let init () =
   { Now = DateTime.Now
     Cpu = [ 0.3; 0.5; 0.2; 0.8 ]
     Memory = 42
     Events =
-      [ { Time = DateTime.Now; Text = "System started"; Level = "INFO" }
-        { Time = DateTime.Now; Text = "Config loaded"; Level = "INFO" } ]
-    Uptime = 0 },
+      [ { Time = DateTime.Now; Text = "System started"; Level = Info }
+        { Time = DateTime.Now; Text = "Config loaded"; Level = Info } ]
+    Uptime = 0
+    Seed = 42
+    BarWidth = 20
+    Elapsed = 0L },
   Cmd.none
+
+let levelColor level =
+  match level with
+  | Info -> Color.Named(Green, Normal)
+  | Warn -> Color.Named(Yellow, Bright)
+  | Error -> Color.Named(Red, Bright)
+  | Debug -> Color.Named(Blue, Bright)
+
+let levelTag level =
+  match level with
+  | Info -> "INFO" | Warn -> "WARN" | Error -> "ERROR" | Debug -> "DEBUG"
 
 let update msg model =
   match msg with
   | Tick ->
+    let rng = Random(model.Seed)
     let newCpu =
       model.Cpu
       |> List.map (fun c ->
@@ -42,10 +61,11 @@ let update msg model =
     let newMem = max 10 (min 90 (model.Memory + rng.Next(-3, 4)))
     let newEvent =
       match rng.Next(10) with
-      | 0 -> Some { Time = DateTime.Now; Text = "Request handled /api/data"; Level = "INFO" }
-      | 1 -> Some { Time = DateTime.Now; Text = "Cache miss: user-42"; Level = "WARN" }
-      | 2 -> Some { Time = DateTime.Now; Text = "Health check OK"; Level = "INFO" }
-      | 3 -> Some { Time = DateTime.Now; Text = "Connection pool: 8/20 active"; Level = "DEBUG" }
+      | 0 -> Some { Time = DateTime.Now; Text = "Request handled /api/data"; Level = Info }
+      | 1 -> Some { Time = DateTime.Now; Text = "Cache miss: user-42"; Level = Warn }
+      | 2 -> Some { Time = DateTime.Now; Text = "Health check OK"; Level = Info }
+      | 3 -> Some { Time = DateTime.Now; Text = "Connection pool: 8/20 active"; Level = Debug }
+      | 4 -> Some { Time = DateTime.Now; Text = "Timeout on upstream service"; Level = Error }
       | _ -> None
     let events =
       match newEvent with
@@ -56,26 +76,32 @@ let update msg model =
         Cpu = newCpu
         Memory = newMem
         Events = events
-        Uptime = model.Uptime + 1 },
+        Uptime = model.Uptime + 1
+        Seed = model.Seed + 1
+        Elapsed = model.Elapsed + 1000L },
     Cmd.none
+  | Resized (w, _) ->
+    { model with BarWidth = max 10 (w / 4 - 10) }, Cmd.none
   | Quit -> model, Cmd.quit
 
-let progressBar (width: int) (pct: float) (color: Color) =
+let progressBar (width: int) (pct: float) =
   let filled = int (float width * pct)
   let empty = width - filled
+  let startColor =
+    match pct with
+    | p when p > 0.8 -> (255uy, 60uy, 60uy)
+    | p when p > 0.5 -> (255uy, 200uy, 50uy)
+    | _ -> (80uy, 220uy, 100uy)
+  let endColor =
+    match pct with
+    | p when p > 0.8 -> (180uy, 30uy, 30uy)
+    | p when p > 0.5 -> (200uy, 150uy, 30uy)
+    | _ -> (40uy, 180uy, 60uy)
   El.row [
-    El.text (String('█', filled)) |> El.fg color
+    Gradient.horizontal startColor endColor filled (String('█', filled))
     El.text (String('░', empty)) |> El.dim
-    El.text (sprintf " %3.0f%%" (pct * 100.0))
+    El.text $" {pct * 100.0:F0}%%"
   ]
-
-let levelColor level =
-  match level with
-  | "INFO" -> Color.Named(Green, Normal)
-  | "WARN" -> Color.Named(Yellow, Bright)
-  | "ERROR" -> Color.Named(Red, Bright)
-  | "DEBUG" -> Color.Named(Blue, Bright)
-  | _ -> Color.Default
 
 let view model =
   let header =
@@ -83,6 +109,9 @@ let view model =
       El.text " ◆ SageTUI Dashboard"
         |> El.bold
         |> El.fg (Color.Named(Cyan, Bright))
+      El.text "  "
+      Spinner.dots model.Elapsed
+        |> El.fg (Color.Named(Green, Bright))
       El.fill (El.text "")
       El.text (model.Now.ToString("HH:mm:ss"))
         |> El.fg (Color.Named(Yellow, Bright))
@@ -97,34 +126,24 @@ let view model =
       yield!
         model.Cpu
         |> List.mapi (fun i c ->
-          let color =
-            match c with
-            | c when c > 0.8 -> Color.Named(Red, Bright)
-            | c when c > 0.5 -> Color.Named(Yellow, Normal)
-            | _ -> Color.Named(Green, Normal)
           El.row [
-            El.text (sprintf " Core %d " i) |> El.dim
-            progressBar 20 c color
+            El.text $" Core {i} " |> El.dim
+            progressBar model.BarWidth c
           ])
     ]
     |> El.bordered Light
 
   let memPanel =
     let pct = float model.Memory / 100.0
-    let color =
-      match model.Memory with
-      | m when m > 80 -> Color.Named(Red, Bright)
-      | m when m > 60 -> Color.Named(Yellow, Normal)
-      | _ -> Color.Named(Green, Normal)
     El.column [
       El.text " Memory" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
       El.text ""
       El.row [
         El.text "   "
-        progressBar 20 pct color
+        progressBar model.BarWidth pct
       ]
       El.text ""
-      El.text (sprintf "   %d MB / 100 MB" model.Memory) |> El.dim
+      El.text $"   {model.Memory} MB / 100 MB" |> El.dim
     ]
     |> El.bordered Light
 
@@ -135,8 +154,13 @@ let view model =
     El.column [
       El.text " Uptime" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
       El.text ""
-      El.text (sprintf "   %02d:%02d:%02d" h m s)
-        |> El.fg (Color.Named(Green, Bright))
+      El.row [
+        El.text "   "
+        El.text $"{h:D2}:{m:D2}:{s:D2}"
+          |> El.fg (Color.Named(Green, Bright))
+        El.text "  "
+        Spinner.line model.Elapsed |> El.dim
+      ]
     ]
     |> El.bordered Light
 
@@ -147,9 +171,10 @@ let view model =
       yield!
         model.Events
         |> List.map (fun e ->
+          let timeStr = e.Time.ToString("HH:mm:ss")
           El.row [
-            El.text (sprintf " %s " (e.Time.ToString("HH:mm:ss"))) |> El.dim
-            El.text (sprintf "[%s]" e.Level)
+            El.text (sprintf " %s " timeStr) |> El.dim
+            El.text (sprintf "[%s]" (levelTag e.Level))
               |> El.fg (levelColor e.Level)
               |> El.bold
             El.text (sprintf " %s" e.Text)
@@ -177,6 +202,7 @@ let view model =
 
 let subscribe _model =
   [ TimerSub("tick", TimeSpan.FromSeconds(1.0), fun () -> Tick)
+    ResizeSub (fun (w, h) -> Resized(w, h))
     KeySub (fun (key, _mods) ->
       match key with
       | Char 'q' | Char 'Q' | Escape -> Some Quit

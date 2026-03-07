@@ -45,41 +45,35 @@ let update msg model =
   match msg with
   | Quit -> model, Cmd.quit
   | KeyInput (key, _mods) ->
-    match key with
-    | Escape -> model, Cmd.quit
-    | Tab ->
+    let focus = FocusRing.current model.Focus
+    match focus, key with
+    // Dropdown-open takes priority — Escape closes dropdown, not the app
+    | Some Role, Escape when model.Role.IsOpen ->
+      { model with Role = Select.confirm model.Role }, Cmd.none
+    | Some Role, Key.Up when model.Role.IsOpen ->
+      { model with Role = Select.moveUp model.Role }, Cmd.none
+    | Some Role, Key.Down when model.Role.IsOpen ->
+      { model with Role = Select.moveDown model.Role }, Cmd.none
+    | Some Role, Key.Enter ->
+      { model with Role = Select.toggle model.Role }, Cmd.none
+    // Global keys
+    | _, Escape -> model, Cmd.quit
+    | _, Tab ->
       { model with Focus = FocusRing.next model.Focus; Submitted = false }, Cmd.none
-    | Key.Enter ->
-      match FocusRing.current model.Focus with
-      | Some Submit ->
-        let errors = validate model
-        match Map.isEmpty errors with
-        | true -> { model with Submitted = true; Errors = Map.empty }, Cmd.none
-        | false -> { model with Errors = errors; Submitted = false }, Cmd.none
-      | Some Role ->
-        { model with Role = Select.toggle model.Role }, Cmd.none
-      | _ -> model, Cmd.none
-    | Key.Up ->
-      match FocusRing.current model.Focus with
-      | Some Role when model.Role.IsOpen ->
-        { model with Role = Select.moveUp model.Role }, Cmd.none
-      | _ -> model, Cmd.none
-    | Key.Down ->
-      match FocusRing.current model.Focus with
-      | Some Role when model.Role.IsOpen ->
-        { model with Role = Select.moveDown model.Role }, Cmd.none
-      | _ -> model, Cmd.none
-    | _ ->
-      match FocusRing.current model.Focus with
-      | Some Name ->
-        { model with Name = TextInput.handleKey key model.Name }, Cmd.none
-      | Some Email ->
-        { model with Email = TextInput.handleKey key model.Email }, Cmd.none
-      | Some Role when model.Role.IsOpen ->
-        match key with
-        | Escape -> { model with Role = Select.confirm model.Role }, Cmd.none
-        | _ -> model, Cmd.none
-      | _ -> model, Cmd.none
+    | _, BackTab ->
+      { model with Focus = FocusRing.prev model.Focus; Submitted = false }, Cmd.none
+    // Submit
+    | Some Submit, Key.Enter ->
+      let errors = validate model
+      match Map.isEmpty errors with
+      | true -> { model with Submitted = true; Errors = Map.empty }, Cmd.none
+      | false -> { model with Errors = errors; Submitted = false }, Cmd.none
+    // Text fields
+    | Some Name, _ ->
+      { model with Name = TextInput.handleKey key model.Name }, Cmd.none
+    | Some Email, _ ->
+      { model with Email = TextInput.handleKey key model.Email }, Cmd.none
+    | _ -> model, Cmd.none
 
 let fieldLabel (label: string) (focused: bool) (error: string option) =
   El.column [
@@ -111,7 +105,7 @@ let view model =
         |> El.bold
         |> El.fg (Color.Named(Cyan, Bright))
       El.fill (El.text "")
-      El.text "[Tab] Next Field  [Enter] Submit  [Esc] Quit "
+      El.text "[Tab/Shift+Tab] Navigate  [Enter] Submit  [Esc] Quit "
         |> El.dim
     ]
     |> El.bg (Color.Named(Black, Normal))

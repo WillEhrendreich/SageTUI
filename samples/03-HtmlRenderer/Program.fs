@@ -116,31 +116,31 @@ let pages = [|
   </p>
 </div>"""
 
-  // Page 5: Complex nested layout
-  "Dashboard HTML",
+  // Page 5: Real-world content — a README-style page
+  "README Preview",
   """<div>
-  <h1 style="color: cyan">Server Dashboard</h1>
-  <div style="display: flex">
-    <div style="flex: 1; border: solid; padding: 1">
-      <h3 style="color: yellow">CPU</h3>
-      <p style="color: lightgreen">████████░░ 80%</p>
-    </div>
-    <div style="flex: 1; border: solid; padding: 1">
-      <h3 style="color: yellow">Memory</h3>
-      <p style="color: cyan">██████░░░░ 60%</p>
-    </div>
-    <div style="flex: 1; border: solid; padding: 1">
-      <h3 style="color: yellow">Disk</h3>
-      <p style="color: red">█████████░ 90%</p>
-    </div>
-  </div>
+  <h1 style="color: cyan">SageTUI</h1>
+  <p><b>A functional terminal UI library for F#</b></p>
   <hr/>
-  <h3 style="color: yellow">Recent Events</h3>
+  <h2 style="color: yellow">Quick Start</h2>
+  <pre style="color: lightgreen">
+dotnet add package SageTUI
+  </pre>
+  <p>Create your first app in <b>40 lines</b>:</p>
   <ol>
-    <li><span style="color: gray">10:42:01</span> Request handled <b style="color: lightgreen">200 OK</b></li>
-    <li><span style="color: gray">10:42:03</span> Cache invalidated <b style="color: yellow">WARN</b></li>
-    <li><span style="color: gray">10:42:05</span> Health check passed <b style="color: lightgreen">OK</b></li>
+    <li>Define your <b>Model</b> — immutable state</li>
+    <li>Define <b>Msg</b> — what can happen</li>
+    <li>Write <b>Update</b> — pure state transitions</li>
+    <li>Write <b>View</b> — model → elements</li>
   </ol>
+  <h2 style="color: yellow">Why SageTUI?</h2>
+  <ul>
+    <li><span style="color: lightgreen">✓</span> The Elm Architecture — predictable state management</li>
+    <li><span style="color: lightgreen">✓</span> HTML rendering — <code>curl</code> a page and display it</li>
+    <li><span style="color: lightgreen">✓</span> Zero-GC — arena allocator + SIMD diff</li>
+    <li><span style="color: lightgreen">✓</span> 24-bit color, transitions, widgets</li>
+  </ul>
+  <p style="color: gray"><i>MIT License — Built with ♥ in F#</i></p>
 </div>"""
 |]
 

@@ -1,23 +1,26 @@
 module ColorPalette
 
 // Showcase the full color system: 16 named, 256 palette, RGB gradients, text attributes.
-// Demonstrates: Color DU, TextAttrs, Style composition, layout constraints.
+// Demonstrates: Color DU, TextAttrs, Gradient.rainbow, Gradient.horizontal, Spinner, TimerSub.
 
+open System
 open SageTUI
 
 type Tab = Base16 | Palette256 | TrueColor | TextStyles
 
-type Model = { Tab: Tab }
+type Model = { Tab: Tab; Elapsed: int64 }
 
 type Msg =
   | SwitchTab of Tab
+  | Tick
   | Quit
 
-let init () = { Tab = Base16 }, Cmd.none
+let init () = { Tab = Base16; Elapsed = 0L }, Cmd.none
 
 let update msg model =
   match msg with
   | SwitchTab t -> { model with Tab = t }, Cmd.none
+  | Tick -> { model with Elapsed = model.Elapsed + 200L }, Cmd.none
   | Quit -> model, Cmd.quit
 
 let tabBar (active: Tab) =
@@ -134,35 +137,23 @@ let trueColorView =
     El.text " Rainbow:" |> El.dim
     El.row [
       El.text "  "
-      yield! [ for i in 0..47 ->
-                 let hue = float i / 48.0 * 6.0
-                 let sector = int hue
-                 let f = hue - float sector
-                 let (r, g, b) =
-                   match sector % 6 with
-                   | 0 -> (1.0, f, 0.0)
-                   | 1 -> (1.0 - f, 1.0, 0.0)
-                   | 2 -> (0.0, 1.0, f)
-                   | 3 -> (0.0, 1.0 - f, 1.0)
-                   | 4 -> (f, 0.0, 1.0)
-                   | _ -> (1.0, 0.0, 1.0 - f)
-                 El.text "█"
-                   |> El.fg (Color.Rgb(byte (r * 255.0), byte (g * 255.0), byte (b * 255.0))) ]
+      Gradient.rainbow 48 (String('█', 48))
     ]
     El.text ""
     El.text " Fire gradient:" |> El.dim
     El.row [
       El.text "  "
-      yield! [ for i in 0..39 ->
-                 let t = float i / 39.0
-                 let r = byte (min 255.0 (t * 3.0 * 255.0))
-                 let g = byte (min 255.0 (max 0.0 ((t - 0.33) * 3.0 * 255.0)))
-                 let b = byte (min 255.0 (max 0.0 ((t - 0.67) * 3.0 * 255.0)))
-                 El.text "█" |> El.fg (Color.Rgb(r, g, b)) ]
+      Gradient.horizontal (40uy, 0uy, 0uy) (255uy, 255uy, 80uy) 40 (String('█', 40))
+    ]
+    El.text ""
+    El.text " Ocean gradient:" |> El.dim
+    El.row [
+      El.text "  "
+      Gradient.horizontal (0uy, 20uy, 80uy) (80uy, 220uy, 255uy) 40 (String('█', 40))
     ]
   ]
 
-let textStylesView =
+let textStylesView (elapsed: int64) =
   El.column [
     El.text " Text Attributes" |> El.bold |> El.fg (Color.Named(Yellow, Bright))
     El.text ""
@@ -222,6 +213,17 @@ let textStylesView =
       El.text " "
       El.text " INFO " |> El.bold |> El.fg (Color.Named(White, Bright)) |> El.bg (Color.Named(Blue, Normal))
     ]
+    El.text ""
+    El.text " Animated spinners:" |> El.dim
+    El.row [
+      El.text "  Dots: "
+      Spinner.dots elapsed |> El.fg (Color.Named(Cyan, Bright))
+      El.text "   Line: "
+      Spinner.line elapsed |> El.fg (Color.Named(Green, Bright))
+      El.text "   "
+      Gradient.rainbow 20 "Loading..."
+        |> El.bold
+    ]
   ]
 
 let view model =
@@ -239,7 +241,7 @@ let view model =
     | Base16 -> base16View
     | Palette256 -> palette256View
     | TrueColor -> trueColorView
-    | TextStyles -> textStylesView
+    | TextStyles -> textStylesView model.Elapsed
 
   El.column [
     header
@@ -252,7 +254,8 @@ let view model =
   ]
 
 let subscribe _model =
-  [ KeySub (fun (key, _mods) ->
+  [ TimerSub("anim", TimeSpan.FromMilliseconds(200.0), fun () -> Tick)
+    KeySub (fun (key, _mods) ->
       match key with
       | Char '1' -> Some (SwitchTab Base16)
       | Char '2' -> Some (SwitchTab Palette256)
