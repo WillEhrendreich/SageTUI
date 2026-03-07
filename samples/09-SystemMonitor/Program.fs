@@ -36,27 +36,22 @@ type Model = {
 
 let isDemoMode = Environment.GetEnvironmentVariable("SAGETUI_DEMO_MODE") = "1"
 
-// Sequence: scroll process table, watch rankings update, cycle to Network tab, back.
+// Sequence: scroll process table, cycle tabs, back to overview.
+// Total: ~11.1s. Set SAGETUI_EXIT_AFTER_MS=12000.
 let demoSteps : (int * Msg option) list = [
-  1500, None              // pause on Overview — data builds up, rankings shift
-  700,  None              // another tick or two of watching CPU percentages move
+  1000, None              // pause on Overview — metrics ticking live
   350,  Some ScrollDown   // scroll processes down
   350,  Some ScrollDown
   350,  Some ScrollDown
-  350,  Some ScrollDown
-  700,  None              // pause — see lower-ranked processes
+  500,  None              // pause — see lower-ranked processes
   350,  Some ScrollUp     // scroll back to top
   350,  Some ScrollUp
   350,  Some ScrollUp
-  350,  Some ScrollUp
-  700,  None              // pause at top — watch #1 CPU process
-  700,  None              // another tick — rankings shuffle
-  800,  Some NextTab      // → Network tab
-  2500, None              // show Network tab — sparklines, interfaces
-  800,  Some NextTab      // → About tab
-  1800, None              // show About
-  800,  Some PrevTab      // ← Network
-  800,  Some PrevTab      // ← Overview
+  1200, Some NextTab      // → Network tab
+  2000, None              // linger on Network — sparklines updating live
+  900,  Some NextTab      // → About tab
+  1000, None              // About
+  600,  Some NextTab      // → Overview (tab 2 → 0)
   1000, None              // back at Overview — loop
 ]
 

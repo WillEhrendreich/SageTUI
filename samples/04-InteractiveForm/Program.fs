@@ -36,32 +36,23 @@ let private bs () = key Key.Backspace
 let private typeStr (delayMs: int) (s: string) = s |> Seq.toList |> List.map (fun c -> delayMs, ch c)
 let private bsMany n = List.replicate n (90, bs())
 
-// Sequence: type name → type bad email → submit → see error → fix email → select role → submit → success
+// Sequence: type name → type email → select role → submit → success (happy path)
+// Total sequence: ~9.2s. Set SAGETUI_EXIT_AFTER_MS=11000.
 let demoSteps : (int * Msg option) list = [
-  yield  900, None                            // form loads, Name focused
-  yield! typeStr 80 "Ada Lovelace"            // type name
-  yield  450, tab()                           // Tab → Email
-  yield  300, None
-  yield! typeStr 75 "notvalid"                // type bad email (no @)
-  yield  450, tab()                           // Tab → Role
-  yield  350, tab()                           // Tab → Submit
-  yield  600, None                            // hover on Submit button
-  yield  350, enter()                         // SUBMIT → validation error!
-  yield  1100, None                           // pause — let viewer read the error
-  yield  300, shiftTab()                      // Shift+Tab → back to Email
-  yield  250, None
-  yield! bsMany 8                             // clear "notvalid"
-  yield  200, None
-  yield! typeStr 70 "ada@example.com"         // correct email
-  yield  450, tab()                           // Tab → Role
-  yield  400, enter()                         // open dropdown
-  yield  500, None                            // dropdown opens
-  yield  280, key Key.Down                    // → "Designer"
-  yield  350, enter()                         // confirm selection
-  yield  450, tab()                           // Tab → Submit
-  yield  700, None                            // pause on Submit — anticipation
-  yield  350, enter()                         // SUBMIT → READY ✅
-  yield 1800, None                            // hold on success state
+  yield  900, None                              // form loads, Name focused
+  yield! typeStr 80 "Ada Lovelace"              // type name (12 chars × 80ms)
+  yield  450, tab()                             // Tab → Email
+  yield  350, None
+  yield! typeStr 75 "ada@example.com"           // type email (15 chars × 75ms)
+  yield  450, tab()                             // Tab → Role
+  yield  400, enter()                           // open dropdown
+  yield  450, None                              // dropdown opens — pause
+  yield  280, key Key.Down                      // navigate to "Designer"
+  yield  350, enter()                           // confirm (Enter toggles closed)
+  yield  450, tab()                             // Tab → Submit
+  yield  700, None                              // pause on Submit — anticipation
+  yield  350, enter()                           // SUBMIT → SUCCESS ✅
+  yield 2000, None                              // hold on success state
 ]
 
 // ─── TEA ─────────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-name: Record Screenshots
+name: Record Screenshots and Demos
 
 on:
   workflow_dispatch:
@@ -23,10 +23,11 @@ jobs:
       - name: Restore & build samples
         run: |
           dotnet restore SageTUI.slnx
-          dotnet build samples/06-Kanban/Kanban.fsproj        -c Release --no-restore
-          dotnet build samples/09-SystemMonitor/SystemMonitor.fsproj -c Release --no-restore
+          dotnet build samples/01-HelloWorld/HelloWorld.fsproj     -c Release --no-restore
           dotnet build samples/04-InteractiveForm/InteractiveForm.fsproj -c Release --no-restore
-          dotnet build samples/08-Sparklines/Sparklines.fsproj -c Release --no-restore
+          dotnet build samples/06-Kanban/Kanban.fsproj             -c Release --no-restore
+          dotnet build samples/08-Sparklines/Sparklines.fsproj     -c Release --no-restore
+          dotnet build samples/09-SystemMonitor/SystemMonitor.fsproj -c Release --no-restore
 
       - name: Install VHS
         uses: charmbracelet/vhs-action@v2
@@ -39,8 +40,16 @@ jobs:
             vhs "$tape"
           done
 
-      - name: Commit screenshots
+      - name: Record demo GIFs
+        run: |
+          mkdir -p docs
+          for tape in docs/tapes/demo-*.tape; do
+            echo "Recording $tape..."
+            vhs "$tape"
+          done
+
+      - name: Commit assets
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "chore: update screenshots [skip ci]"
-          file_pattern: "docs/screenshot-*.png docs/screenshot-*.svg"
+          commit_message: "chore: update screenshots and demo GIFs [skip ci]"
+          file_pattern: "docs/screenshot-*.png docs/screenshot-*.svg docs/demo-*.gif"

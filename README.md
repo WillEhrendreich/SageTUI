@@ -4,6 +4,45 @@
 
 Elm Architecture • SIMD rendering • 1,112 tests • Core package has zero external dependencies
 
+## See It In Action
+
+<table>
+<tr>
+<td align="center" width="50%">
+
+**System Monitor** — tabs, live metrics, scrolling process list
+
+![SystemMonitor demo](docs/demo-sysmon.gif)
+
+</td>
+<td align="center" width="50%">
+
+**Kanban Board** — keyboard card navigation and multi-column moves
+
+![Kanban demo](docs/demo-kanban.gif)
+
+</td>
+</tr>
+<tr>
+<td align="center" width="50%">
+
+**Interactive Form** — text input, dropdown selection, validation
+
+![InteractiveForm demo](docs/demo-form.gif)
+
+</td>
+<td align="center" width="50%">
+
+**Hello World** — the simplest possible TEA app
+
+![HelloWorld demo](docs/demo-hello.gif)
+
+</td>
+</tr>
+</table>
+
+> **Run any sample yourself:** `dotnet run --project samples/09-SystemMonitor`
+
 
 ## Install
 
