@@ -25,3 +25,6 @@ nupkgs/
 # Stray analysis files
 SNAPSHOT_TESTING_GUIDE.md
 SNAPSHOT_TEST_REFERENCE.md
+
+# Scratch scripts
+test_*.fsx
