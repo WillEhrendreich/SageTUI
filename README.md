@@ -4,13 +4,6 @@
 
 Elm Architecture • SIMD rendering • 1,112 tests • Core package has zero external dependencies
 
-<p align="center">
-  <img src="docs/screenshot-kanban.gif" alt="SageTUI Kanban — keyboard-driven board navigation" width="700" />
-</p>
-
-<p align="center">
-  <img src="docs/screenshot-sysmon.gif" alt="SageTUI System Monitor — tabbed operator console with live sparklines" width="700" />
-</p>
 
 ## Install
 
@@ -309,11 +302,6 @@ The sample suite is tiered so the strongest experiences lead the front door:
 | **Supporting** | **02 Dashboard** | Secondary overview sample; useful for layout ideas, not the hero |
 | **Experimental** | **03 HtmlRenderer** | HTML→Element bridge and document rendering lab |
 
-<p align="center">
-  <img src="docs/screenshot-form.gif" alt="SageTUI Interactive Form" width="48%" />
-  &nbsp;
-  <img src="docs/screenshot-sparklines.gif" alt="SageTUI Sparklines" width="48%" />
-</p>
 
 If you only run one sample, start here:
 
