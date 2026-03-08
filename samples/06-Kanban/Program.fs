@@ -14,11 +14,11 @@ type Card =
     Priority: Priority
     Assignee: string }
 
-type Column = Todo | InProgress | Review | Done
+type Stage = Todo | InProgress | Review | Done
 
 type Model =
-  { Cards: Map<Column, Card list>
-    FocusCol: Column
+  { Cards: Map<Stage, Card list>
+    FocusCol: Stage
     FocusRow: int
     Moving: bool
     DemoStep: int }
@@ -208,7 +208,7 @@ let renderCard (card: Card) (focused: bool) (grabbed: bool) =
   |> El.padHV 1 0
   |> El.bordered border
 
-let renderColumn (col: Column) (cards: Card list) (isFocusCol: bool) (focusRow: int) (moving: bool) =
+let renderColumn (col: Stage) (cards: Card list) (isFocusCol: bool) (focusRow: int) (moving: bool) =
   let headerColor =
     match isFocusCol with
     | true -> Color.Named(Cyan, Bright)

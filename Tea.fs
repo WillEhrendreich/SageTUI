@@ -135,14 +135,22 @@ module Keys =
       | true, msg -> Some msg
       | false, _ -> None)
 
-  /// Create a KeySub from key+modifier bindings.
+  /// Create a KeySub from key+modifier bindings. Uses O(1) Dictionary lookup.
+  ///
+  /// IMPORTANT — call at module/let level, NOT inside the Subscribe lambda:
+  ///   let keyBindings = Keys.bindWithMods [ (Key.Char 's', Modifiers.Ctrl), Save ]  // ✅ allocated once
+  ///   Subscribe = fun _ -> [ keyBindings ]
+  ///
+  /// Calling Keys.bindWithMods inside Subscribe allocates a new Dictionary on every model update:
+  ///   Subscribe = fun _ -> [ Keys.bindWithMods [...] ]   // ⚠️ allocs every update
   let bindWithMods (bindings: ((Key * Modifiers) * 'msg) list) : Sub<'msg> =
+    let lookup = System.Collections.Generic.Dictionary(bindings.Length)
+    for ((k, m), msg) in bindings do
+      lookup[(k, m)] <- msg
     KeySub(fun (k, mods) ->
-      bindings
-      |> List.tryPick (fun ((bk, bm), msg) ->
-        match bk = k && bm = mods with
-        | true -> Some msg
-        | false -> None))
+      match lookup.TryGetValue((k, mods)) with
+      | true, msg -> Some msg
+      | false, _ -> None)
 
 /// Subscription combinators.
 module Sub =
@@ -209,15 +217,20 @@ module Program =
   /// intermediate (model, cmd) states. The initial model comes from Init.
   /// Useful for unit-testing update logic without spinning up a terminal.
   ///
+  /// The first element of the returned list is `(initModel, initCmd)` from `program.Init()`.
+  /// Subsequent elements are the results of applying each message in order.
+  ///
   /// Example:
   /// ```fsharp
   /// let states = Program.simulate [Increment; Increment; Decrement] myProgram
   /// let finalModel = states |> List.last |> fst
+  /// // Check the initial command (e.g., to verify Init fires a load command):
+  /// let initState = states |> List.head
   /// ```
   let simulate (msgs: 'msg list) (program: Program<'model, 'msg>) : ('model * Cmd<'msg>) list =
-    let initModel, _ = program.Init()
+    let initModel, initCmd = program.Init()
     msgs
-    |> List.scan (fun (m, _) msg -> program.Update msg m) (initModel, Cmd.none)
+    |> List.scan (fun (m, _) msg -> program.Update msg m) (initModel, initCmd)
     |> List.tail
 
 /// A vocabulary type for asynchronous data loading states.

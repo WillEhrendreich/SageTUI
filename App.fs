@@ -71,6 +71,9 @@ module App =
         running <- false
 
     let reconcileSubs (currentSubs: Sub<'msg> list) =
+      // Only TimerSub and CustomSub need lifecycle management (CancellationTokenSource).
+      // Event-driven subs (KeySub, MouseSub, ClickSub, FocusSub, ResizeSub) need no
+      // lifecycle tracking here — they are matched against events in processEvent below.
       // Warn on duplicate IDs — the second sub silently won't start (the ContainsKey guard below).
       let ids =
         currentSubs

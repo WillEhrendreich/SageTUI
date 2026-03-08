@@ -74,8 +74,10 @@ module Theme =
       Background = Color.Rgb(30uy, 30uy, 46uy)
       Border = Rounded }
 
-  /// Apply theme colors to an element tree
+  /// Apply theme colors and border style to an element tree
   let apply (theme: Theme) (elem: Element) : Element =
+    // Note: theme.Border is intentionally not applied here — use Theme.panel or
+    // El.bordered theme.Border explicitly. Theme.apply is a color-only wrapper.
     elem |> El.fg theme.TextFg |> El.bg theme.Background
 
   /// Styled heading using theme primary color

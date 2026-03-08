@@ -20,10 +20,10 @@ type ProcessInfo = {
 }
 
 type Model = {
-  CpuHistory: float list
-  MemHistory: float list
-  NetInHistory: float list
-  NetOutHistory: float list
+  CpuHistory: float array
+  MemHistory: float array
+  NetInHistory: float array
+  NetOutHistory: float array
   Processes: ProcessInfo list
   ProcessScroll: ScrollState
   Uptime: int
@@ -70,11 +70,12 @@ let private formatUptime ticks =
   let seconds = totalSeconds % 60
   sprintf "%02d:%02d" minutes seconds
 
-let private trimHistory value xs =
-  let next = xs @ [value]
-  match List.length next > maxHistory with
-  | true -> next |> List.skip 1
-  | false -> next
+let private pushHistory (value: float) (history: float array) : float array =
+  let n = history.Length
+  let result = Array.zeroCreate n
+  Array.blit history 1 result 0 (n - 1)
+  result.[n - 1] <- value
+  result
 
 let private metricCard accent label value detail =
   El.column [
@@ -109,10 +110,10 @@ let fakeProcesses (rng: Random) =
 
 let init () =
   let rng = Random(42)
-  { CpuHistory = [ for _ in 1..maxHistory -> rng.NextDouble() * 30.0 ]
-    MemHistory = [ for _ in 1..maxHistory -> 40.0 + rng.NextDouble() * 20.0 ]
-    NetInHistory = [ for _ in 1..maxHistory -> rng.NextDouble() * 100.0 ]
-    NetOutHistory = [ for _ in 1..maxHistory -> rng.NextDouble() * 50.0 ]
+  { CpuHistory = [| for _ in 1..maxHistory -> rng.NextDouble() * 30.0 |]
+    MemHistory = [| for _ in 1..maxHistory -> 40.0 + rng.NextDouble() * 20.0 |]
+    NetInHistory = [| for _ in 1..maxHistory -> rng.NextDouble() * 100.0 |]
+    NetOutHistory = [| for _ in 1..maxHistory -> rng.NextDouble() * 50.0 |]
     Processes = fakeProcesses rng
     ProcessScroll = ScrollState.create 20 8
     Uptime = 0
@@ -129,10 +130,10 @@ let rec update msg model =
     let netIn = model.Rng.NextDouble() * 100.0
     let netOut = model.Rng.NextDouble() * 50.0
     { model with
-        CpuHistory = trimHistory cpu model.CpuHistory
-        MemHistory = trimHistory mem model.MemHistory
-        NetInHistory = trimHistory netIn model.NetInHistory
-        NetOutHistory = trimHistory netOut model.NetOutHistory
+        CpuHistory = pushHistory cpu model.CpuHistory
+        MemHistory = pushHistory mem model.MemHistory
+        NetInHistory = pushHistory netIn model.NetInHistory
+        NetOutHistory = pushHistory netOut model.NetOutHistory
         Processes = fakeProcesses model.Rng
         Uptime = model.Uptime + 1 }, Cmd.none
   | ScrollUp ->
@@ -155,16 +156,16 @@ let rec update msg model =
     model'', Cmd.batch [actionCmd; Cmd.delay delayMs NextDemoStep]
   | NextDemoStep -> model, Cmd.none
 
-let sparkline color label (data: float list) maxVal =
+let sparkline color label (data: float array) maxVal =
   let bars =
     data
-    |> List.map (fun v -> min 1.0 (v / maxVal))
-    |> List.map (fun pct ->
+    |> Array.map (fun v -> min 1.0 (v / maxVal))
+    |> Array.map (fun pct ->
       let chars = [| "▁"; "▂"; "▃"; "▄"; "▅"; "▆"; "▇"; "█" |]
       let idx = int (pct * 7.0) |> max 0 |> min 7
       chars[idx])
     |> String.concat ""
-  let last = data |> List.tryLast |> Option.defaultValue 0.0
+  let last = data |> Array.tryLast |> Option.defaultValue 0.0
   El.column [
     El.row [
       El.text label |> El.bold |> El.fg color
@@ -240,10 +241,10 @@ let processTable (procs: ProcessInfo list) scroll =
   |> El.bordered Rounded
 
 let overviewTab model =
-  let lastCpu = model.CpuHistory |> List.tryLast |> Option.defaultValue 0.0
-  let lastMem = model.MemHistory |> List.tryLast |> Option.defaultValue 0.0
-  let lastIn = model.NetInHistory |> List.tryLast |> Option.defaultValue 0.0
-  let lastOut = model.NetOutHistory |> List.tryLast |> Option.defaultValue 0.0
+  let lastCpu = model.CpuHistory |> Array.tryLast |> Option.defaultValue 0.0
+  let lastMem = model.MemHistory |> Array.tryLast |> Option.defaultValue 0.0
+  let lastIn = model.NetInHistory |> Array.tryLast |> Option.defaultValue 0.0
+  let lastOut = model.NetOutHistory |> Array.tryLast |> Option.defaultValue 0.0
   let hottest =
     model.Processes
     |> List.tryHead
@@ -274,8 +275,8 @@ let overviewTab model =
   ]
 
 let networkTab model =
-  let lastIn = model.NetInHistory |> List.tryLast |> Option.defaultValue 0.0
-  let lastOut = model.NetOutHistory |> List.tryLast |> Option.defaultValue 0.0
+  let lastIn = model.NetInHistory |> Array.tryLast |> Option.defaultValue 0.0
+  let lastOut = model.NetOutHistory |> Array.tryLast |> Option.defaultValue 0.0
 
   El.column [
     El.row [

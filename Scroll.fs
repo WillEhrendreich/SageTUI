@@ -70,12 +70,20 @@ module ScrollState =
 /// slices the item list and renders only visible items.
 module Scroll =
   /// Render visible items as a Column. renderItem receives (absoluteIndex, item).
+  /// For large item sets (>500 items), prefer `viewArray` to avoid O(n) list traversal.
   let view (scroll: ScrollState) (renderItem: int -> 'a -> Element) (items: 'a list) : Element =
     let (startIdx, endIdx) = ScrollState.visibleRange scroll
     items
     |> List.skip startIdx
     |> List.take (endIdx - startIdx)
     |> List.mapi (fun i item -> renderItem (startIdx + i) item)
+    |> El.column
+
+  /// Render visible items from an array. O(1) indexed access — no list traversal.
+  /// Prefer this over `view` when `items` has more than ~500 elements.
+  let viewArray (scroll: ScrollState) (renderItem: int -> 'a -> Element) (items: 'a array) : Element =
+    let (startIdx, endIdx) = ScrollState.visibleRange scroll
+    [ for i in startIdx .. endIdx - 1 -> renderItem i items.[i] ]
     |> El.column
 
   /// Render with a vertical scroll indicator bar.
@@ -105,12 +113,13 @@ module Scroll =
   /// `isLoading` predicate; the caller's `Cmd` performs async page fetches.
   ///
   /// Parameters:
-  /// - `totalCount`  — total number of logical items (may not all be in memory)
-  /// - `offset`      — current scroll offset (first visible logical index)
-  /// - `viewportSize` — number of rows visible at once
-  /// - `renderItem`  — renders a loaded item at absolute index `i`
-  /// - `isLoading`   — returns true if item at index `i` is still being fetched;
-  ///                   a placeholder spinner row is shown instead
+  /// - `totalCount`        — total number of logical items (may not all be in memory)
+  /// - `offset`            — current scroll offset (first visible logical index)
+  /// - `viewportSize`      — number of rows visible at once
+  /// - `renderItem`        — renders a loaded item at absolute index `i`
+  /// - `isLoading`         — returns true if item at index `i` is still being fetched
+  /// - `renderPlaceholder` — renders a placeholder row for index `i` while loading;
+  ///                         defaults to a dim "Loading…" spinner row
   ///
   /// Example pattern:
   /// ```fsharp
@@ -119,6 +128,24 @@ module Scroll =
   /// let renderItem i = ... render model.pages.[i / pageSize].[i % pageSize] ...
   /// Scroll.viewVirtual model.totalCount model.offset viewportSize renderItem isLoading
   /// ```
+  let viewVirtualWith
+    (totalCount: int)
+    (offset: int)
+    (viewportSize: int)
+    (renderItem: int -> Element)
+    (isLoading: int -> bool)
+    (renderPlaceholder: int -> Element)
+    : Element =
+    let start = max 0 (min offset (max 0 (totalCount - viewportSize)))
+    let endIdx = min totalCount (start + viewportSize)
+    List.init (endIdx - start) (fun i ->
+      let absIdx = start + i
+      match isLoading absIdx with
+      | true -> renderPlaceholder absIdx
+      | false -> renderItem absIdx
+    )
+    |> El.column
+
   let viewVirtual
     (totalCount: int)
     (offset: int)
@@ -126,20 +153,13 @@ module Scroll =
     (renderItem: int -> Element)
     (isLoading: int -> bool)
     : Element =
-    let start = max 0 (min offset (max 0 (totalCount - viewportSize)))
-    let endIdx = min totalCount (start + viewportSize)
-    List.init (endIdx - start) (fun i ->
-      let absIdx = start + i
-      match isLoading absIdx with
-      | true ->
-        El.row [
-          El.text "  " |> El.width 2
-          El.text "\u280b" |> El.width 2
-          El.text "Loading…" |> El.fg (Color.Named(BaseColor.Black, Intensity.Bright)) |> El.fill
-        ]
-      | false -> renderItem absIdx
-    )
-    |> El.column
+    let defaultPlaceholder _ =
+      El.row [
+        El.text "  " |> El.width 2
+        El.text "\u280b" |> El.width 2
+        El.text "Loading…" |> El.fg (Color.Named(BaseColor.Black, Intensity.Bright)) |> El.fill
+      ]
+    viewVirtualWith totalCount offset viewportSize renderItem isLoading defaultPlaceholder
 
 /// Scrollable list with selection tracking and automatic scroll-into-view.
 type ScrollableListModel<'a> = {
@@ -216,3 +236,94 @@ module ScrollableList =
       let isSelected = idx = model.SelectedIndex
       renderItem isSelected idx item
     ) model.Items
+
+/// Scrollable list backed by an array for O(1) indexed rendering. Use when item count exceeds ~500.
+/// For smaller sets, `ScrollableListModel<'a>` with list storage is more idiomatic.
+type ScrollableArrayModel<'a> = {
+  Items: 'a array
+  SelectedIndex: int
+  Scroll: ScrollState
+}
+
+module ScrollableArray =
+  let create (items: 'a array) (viewportSize: int) =
+    { Items = items
+      SelectedIndex = 0
+      Scroll = ScrollState.create (Array.length items) viewportSize }
+
+  let ofList (items: 'a list) (viewportSize: int) =
+    create (List.toArray items) viewportSize
+
+  let selectedItem (model: ScrollableArrayModel<'a>) =
+    match model.Items.Length with
+    | 0 -> None
+    | n when model.SelectedIndex >= 0 && model.SelectedIndex < n ->
+      Some model.Items.[model.SelectedIndex]
+    | _ -> None
+
+  let private clampIndex (items: 'a array) idx =
+    match items.Length with
+    | 0 -> 0
+    | n -> max 0 (min idx (n - 1))
+
+  let selectIndex idx (model: ScrollableArrayModel<'a>) =
+    let i = clampIndex model.Items idx
+    { model with
+        SelectedIndex = i
+        Scroll = ScrollState.ensureVisible i model.Scroll }
+
+  let selectUp (model: ScrollableArrayModel<'a>) =
+    selectIndex (model.SelectedIndex - 1) model
+
+  let selectDown (model: ScrollableArrayModel<'a>) =
+    selectIndex (model.SelectedIndex + 1) model
+
+  let selectFirst (model: ScrollableArrayModel<'a>) = selectIndex 0 model
+
+  let selectLast (model: ScrollableArrayModel<'a>) =
+    selectIndex (model.Items.Length - 1) model
+
+  let scrollUp (model: ScrollableArrayModel<'a>) =
+    { model with Scroll = ScrollState.scrollUp model.Scroll }
+
+  let scrollDown (model: ScrollableArrayModel<'a>) =
+    { model with Scroll = ScrollState.scrollDown model.Scroll }
+
+  /// Replace items, clamping selection and scroll offset.
+  let withItems (items: 'a array) (model: ScrollableArrayModel<'a>) =
+    let scroll = ScrollState.withTotalItems (Array.length items) model.Scroll
+    let idx = clampIndex items model.SelectedIndex
+    { model with
+        Items = items
+        SelectedIndex = idx
+        Scroll = ScrollState.ensureVisible idx scroll }
+
+  /// Update viewport size (e.g., after terminal resize).
+  let withViewportSize vp (model: ScrollableArrayModel<'a>) =
+    { model with Scroll = ScrollState.withViewportSize vp model.Scroll }
+
+  /// Render visible items using O(1) array access. renderItem receives (isSelected, absoluteIndex, item).
+  let view (renderItem: bool -> int -> 'a -> Element) (model: ScrollableArrayModel<'a>) : Element =
+    Scroll.viewArray model.Scroll (fun idx item ->
+      renderItem (idx = model.SelectedIndex) idx item
+    ) model.Items
+
+  /// Render with a scroll indicator bar alongside the list.
+  let viewWithScrollbar (renderItem: bool -> int -> 'a -> Element) (model: ScrollableArrayModel<'a>) : Element =
+    let content = view renderItem model
+    let total = ScrollState.totalItems model.Scroll
+    let viewport = ScrollState.viewportSize model.Scroll
+    match total <= viewport with
+    | true -> content
+    | false ->
+      let pct = float (ScrollState.offset model.Scroll) / float (ScrollState.maxOffset model.Scroll)
+      let barH = max 1 (viewport * viewport / total)
+      let barPos = int (float (viewport - barH) * pct)
+      let indicator =
+        List.init viewport (fun i ->
+          match i >= barPos && i < barPos + barH with
+          | true -> El.text "\u2588" |> El.fg (Color.Named(BaseColor.White, Intensity.Normal))
+          | false -> El.text "\u2591" |> El.fg (Color.Named(BaseColor.Black, Intensity.Bright))
+        )
+        |> El.column
+      El.row [ El.fill content; El.width 1 indicator ]
