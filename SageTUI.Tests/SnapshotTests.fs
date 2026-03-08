@@ -9,7 +9,7 @@ open VerifyExpecto
 // SNAPSHOT TEST HELPER
 // ============================================================
 
-let private render w h elem = renderElement w h elem
+let private render w h elem = TestHarness.renderElement w h elem
 
 let private snapshotTest name (output: string) =
   testCaseAsync name (async {

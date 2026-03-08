@@ -48,6 +48,7 @@
     <Compile Include="App.fs" />
     <Compile Include="Widgets.fs" />
     <Compile Include="Scroll.fs" />
+    <Compile Include="Testing.fs" />
   </ItemGroup>
 
 </Project>

@@ -101,6 +101,37 @@ module Cmd =
     | Batch cmds -> cmds |> List.collect toMessages
     | Delay(_, msg) -> [ msg ]
 
+  // --- Cmd inspection utilities (useful in tests) ---
+
+  /// Returns true if the Cmd tree contains a Quit command.
+  let rec isQuit (cmd: Cmd<'msg>) : bool =
+    match cmd with
+    | Quit _ -> true
+    | Batch cmds -> List.exists isQuit cmds
+    | _ -> false
+
+  /// Returns the exit code of the first Quit command found, or None.
+  let rec exitCode (cmd: Cmd<'msg>) : int option =
+    match cmd with
+    | Quit code -> Some code
+    | Batch cmds -> cmds |> List.tryPick exitCode
+    | _ -> None
+
+  /// Returns true if the Cmd tree contains any async operations (OfAsync or OfCancellableAsync).
+  /// Useful for asserting that an Update call issued an async side-effect without executing it.
+  let rec hasAsync (cmd: Cmd<'msg>) : bool =
+    match cmd with
+    | OfAsync _ | OfCancellableAsync _ -> true
+    | Batch cmds -> List.exists hasAsync cmds
+    | _ -> false
+
+  /// Extract all (milliseconds, message) pairs from Delay commands in a Cmd tree.
+  let rec extractDelays (cmd: Cmd<'msg>) : (int * 'msg) list =
+    match cmd with
+    | Delay(ms, msg) -> [ (ms, msg) ]
+    | Batch cmds -> cmds |> List.collect extractDelays
+    | _ -> []
+
 /// A subscription that connects external events to messages.
 type Sub<'msg> =
   | KeySub of (Key * Modifiers -> 'msg option)
