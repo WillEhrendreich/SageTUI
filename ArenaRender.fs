@@ -33,6 +33,36 @@ module ArenaRender =
       idx <- arena.Nodes.[idx].NextSibling
     count
 
+  /// Distribute remaining space to Fill children encoded as negative sizes.
+  /// Fill children use ls.[szBase+i] = -(content+1). After this call, all entries are >= 0.
+  let distributeFill (ls: int array) (szBase: int) (n: int) (fillCount: int) (fillContentTotal: int) (remaining: int) =
+    if fillCount > 0 then
+      if fillContentTotal <= remaining then
+        let excess = remaining - fillContentTotal
+        let perExtra = excess / fillCount
+        let mutable extraRem = excess % fillCount
+        for j in 0 .. n - 1 do
+          if ls.[szBase + j] < 0 then
+            let cw = -(ls.[szBase + j] + 1)
+            let bonus = if extraRem > 0 then extraRem <- extraRem - 1; 1 else 0
+            ls.[szBase + j] <- cw + perExtra + bonus
+      else
+        // Shrink path (rare: content exceeds available space)
+        let pool = max 0 remaining
+        let mutable used = 0
+        for j in 0 .. n - 1 do
+          if ls.[szBase + j] < 0 then
+            let cw = -(ls.[szBase + j] + 1)
+            let sz = if fillContentTotal > 0 then cw * pool / fillContentTotal else 0
+            ls.[szBase + j] <- -(sz + 1)  // keep negative for bonus pass
+            used <- used + sz
+        let mutable bonusRem = pool - used
+        for j in 0 .. n - 1 do
+          if ls.[szBase + j] < 0 then
+            let sz = -(ls.[szBase + j] + 1)
+            let bonus = if bonusRem > 0 then bonusRem <- bonusRem - 1; 1 else 0
+            ls.[szBase + j] <- sz + bonus
+
   /// Measure intrinsic width of an arena node.
   let rec measureWidth (arena: FrameArena) (nodeIdx: int) : int =
     let node = arena.Nodes.[nodeIdx]
@@ -167,53 +197,127 @@ module ArenaRender =
           | false -> ()
         Buffer.writeString area.X area.Y fg bg attrs (sb.ToString()) buf
 
-      | 2uy -> // Row
+      | 2uy -> // Row — uses LayoutScratch, zero managed allocation for common case
         let n = countChildren arena node.FirstChild
-        let constraints = Array.zeroCreate<Constraint> n
-        let childNodes = Array.zeroCreate<int> n
-        let contentWidths = Array.zeroCreate<int> n
+        let ls = arena.LayoutScratch
+        let lp = arena.LayoutPos
+        let cnBase = lp        // n slots: child node indices
+        let szBase = lp + n   // n slots: sizes (negative = Fill with encoded content)
+        arena.LayoutPos <- lp + n + n
         let mutable idx = node.FirstChild
         let mutable i = 0
+        let mutable remaining = area.Width
+        let mutable fillCount = 0
+        let mutable fillContentTotal = 0
         while idx >= 0 do
           let cn = arena.Nodes.[idx]
           match cn.Kind with
-          | 6uy ->
-            constraints.[i] <- unpackConstraint cn.ConstraintKind cn.ConstraintVal
-            childNodes.[i] <- cn.FirstChild
-            contentWidths.[i] <- measureWidth arena cn.FirstChild
-          | _ ->
-            constraints.[i] <- Fill
-            childNodes.[i] <- idx
-            contentWidths.[i] <- measureWidth arena idx
+          | 6uy -> // Constrained wrapper
+            ls.[cnBase + i] <- cn.FirstChild
+            match cn.ConstraintKind with
+            | 0uy ->
+              ls.[szBase + i] <- min (int cn.ConstraintVal) remaining
+              remaining <- remaining - ls.[szBase + i]
+            | 1uy ->
+              ls.[szBase + i] <- int cn.ConstraintVal
+              remaining <- remaining - ls.[szBase + i]
+            | 2uy ->
+              ls.[szBase + i] <- min (int cn.ConstraintVal) remaining
+              remaining <- remaining - ls.[szBase + i]
+            | 3uy ->
+              ls.[szBase + i] <- area.Width * int cn.ConstraintVal / 100
+              remaining <- remaining - ls.[szBase + i]
+            | 4uy ->
+              let cw = measureWidth arena cn.FirstChild
+              ls.[szBase + i] <- -(cw + 1)
+              fillCount <- fillCount + 1
+              fillContentTotal <- fillContentTotal + cw
+            | 5uy ->
+              let num = int cn.ConstraintVal >>> 8
+              let den = int cn.ConstraintVal &&& 0xFF
+              ls.[szBase + i] <- if den > 0 then area.Width * num / den else 0
+              remaining <- remaining - ls.[szBase + i]
+            | _ ->
+              let cw = measureWidth arena cn.FirstChild
+              ls.[szBase + i] <- -(cw + 1)
+              fillCount <- fillCount + 1
+              fillContentTotal <- fillContentTotal + cw
+          | _ -> // bare node → implicit Fill
+            ls.[cnBase + i] <- idx
+            let cw = measureWidth arena idx
+            ls.[szBase + i] <- -(cw + 1)
+            fillCount <- fillCount + 1
+            fillContentTotal <- fillContentTotal + cw
           idx <- cn.NextSibling
           i <- i + 1
-        let areas = Layout.splitHWithContent (Array.toList constraints) (Array.toList contentWidths) area
-        List.iteri (fun j childArea ->
-          render arena childNodes.[j] (Layout.intersectArea area childArea) inheritedFg inheritedBg inheritedAttrs buf) areas
+        distributeFill ls szBase n fillCount fillContentTotal remaining
+        let mutable offset = 0
+        for j in 0 .. n - 1 do
+          let sz = ls.[szBase + j]
+          let childArea = Layout.intersectArea area { X = area.X + offset; Y = area.Y; Width = sz; Height = area.Height }
+          render arena ls.[cnBase + j] childArea inheritedFg inheritedBg inheritedAttrs buf
+          offset <- offset + sz
 
-      | 3uy -> // Column
+      | 3uy -> // Column — uses LayoutScratch, zero managed allocation for common case
         let n = countChildren arena node.FirstChild
-        let constraints = Array.zeroCreate<Constraint> n
-        let childNodes = Array.zeroCreate<int> n
-        let contentHeights = Array.zeroCreate<int> n
+        let ls = arena.LayoutScratch
+        let lp = arena.LayoutPos
+        let cnBase = lp
+        let szBase = lp + n
+        arena.LayoutPos <- lp + n + n
         let mutable idx = node.FirstChild
         let mutable i = 0
+        let mutable remaining = area.Height
+        let mutable fillCount = 0
+        let mutable fillContentTotal = 0
         while idx >= 0 do
           let cn = arena.Nodes.[idx]
           match cn.Kind with
           | 6uy ->
-            constraints.[i] <- unpackConstraint cn.ConstraintKind cn.ConstraintVal
-            childNodes.[i] <- cn.FirstChild
-            contentHeights.[i] <- measureHeight arena cn.FirstChild
+            ls.[cnBase + i] <- cn.FirstChild
+            match cn.ConstraintKind with
+            | 0uy ->
+              ls.[szBase + i] <- min (int cn.ConstraintVal) remaining
+              remaining <- remaining - ls.[szBase + i]
+            | 1uy ->
+              ls.[szBase + i] <- int cn.ConstraintVal
+              remaining <- remaining - ls.[szBase + i]
+            | 2uy ->
+              ls.[szBase + i] <- min (int cn.ConstraintVal) remaining
+              remaining <- remaining - ls.[szBase + i]
+            | 3uy ->
+              ls.[szBase + i] <- area.Height * int cn.ConstraintVal / 100
+              remaining <- remaining - ls.[szBase + i]
+            | 4uy ->
+              let ch = measureHeight arena cn.FirstChild
+              ls.[szBase + i] <- -(ch + 1)
+              fillCount <- fillCount + 1
+              fillContentTotal <- fillContentTotal + ch
+            | 5uy ->
+              let num = int cn.ConstraintVal >>> 8
+              let den = int cn.ConstraintVal &&& 0xFF
+              ls.[szBase + i] <- if den > 0 then area.Height * num / den else 0
+              remaining <- remaining - ls.[szBase + i]
+            | _ ->
+              let ch = measureHeight arena cn.FirstChild
+              ls.[szBase + i] <- -(ch + 1)
+              fillCount <- fillCount + 1
+              fillContentTotal <- fillContentTotal + ch
           | _ ->
-            constraints.[i] <- Fill
-            childNodes.[i] <- idx
-            contentHeights.[i] <- measureHeight arena idx
+            ls.[cnBase + i] <- idx
+            let ch = measureHeight arena idx
+            ls.[szBase + i] <- -(ch + 1)
+            fillCount <- fillCount + 1
+            fillContentTotal <- fillContentTotal + ch
           idx <- cn.NextSibling
           i <- i + 1
-        let areas = Layout.splitVWithContent (Array.toList constraints) (Array.toList contentHeights) area
-        List.iteri (fun j childArea ->
-          render arena childNodes.[j] (Layout.intersectArea area childArea) inheritedFg inheritedBg inheritedAttrs buf) areas
+        distributeFill ls szBase n fillCount fillContentTotal remaining
+        let mutable offset = 0
+        for j in 0 .. n - 1 do
+          let sz = ls.[szBase + j]
+          let childArea = Layout.intersectArea area { X = area.X; Y = area.Y + offset; Width = area.Width; Height = sz }
+          render arena ls.[cnBase + j] childArea inheritedFg inheritedBg inheritedAttrs buf
+          offset <- offset + sz
 
       | 4uy -> // Overlay
         let mutable idx = node.FirstChild
@@ -280,52 +384,114 @@ module ArenaRender =
         let gap = int node.ConstraintVal
         let childNode = arena.Nodes.[node.FirstChild]
         match childNode.Kind with
-        | 2uy -> // Row inside Gapped
+        | 2uy -> // Row inside Gapped — uses LayoutScratch
           let n = countChildren arena childNode.FirstChild
-          let constraints = Array.zeroCreate<Constraint> n
-          let childNodes = Array.zeroCreate<int> n
-          let contentWidths = Array.zeroCreate<int> n
+          let ls = arena.LayoutScratch
+          let lp = arena.LayoutPos
+          let cnBase = lp
+          let szBase = lp + n
+          arena.LayoutPos <- lp + n + n
+          let usable = if n > 1 then max 0 (area.Width - gap * (n - 1)) else area.Width
           let mutable idx = childNode.FirstChild
           let mutable i = 0
+          let mutable remaining = usable
+          let mutable fillCount = 0
+          let mutable fillContentTotal = 0
           while idx >= 0 do
             let cn = arena.Nodes.[idx]
             match cn.Kind with
             | 6uy ->
-              constraints.[i] <- unpackConstraint cn.ConstraintKind cn.ConstraintVal
-              childNodes.[i] <- cn.FirstChild
-              contentWidths.[i] <- measureWidth arena cn.FirstChild
+              ls.[cnBase + i] <- cn.FirstChild
+              match cn.ConstraintKind with
+              | 0uy -> ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
+              | 1uy -> ls.[szBase + i] <- int cn.ConstraintVal; remaining <- remaining - ls.[szBase + i]
+              | 2uy -> ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
+              | 3uy -> ls.[szBase + i] <- usable * int cn.ConstraintVal / 100; remaining <- remaining - ls.[szBase + i]
+              | 4uy ->
+                let cw = measureWidth arena cn.FirstChild
+                ls.[szBase + i] <- -(cw + 1)
+                fillCount <- fillCount + 1
+                fillContentTotal <- fillContentTotal + cw
+              | 5uy ->
+                let num = int cn.ConstraintVal >>> 8
+                let den = int cn.ConstraintVal &&& 0xFF
+                ls.[szBase + i] <- if den > 0 then usable * num / den else 0
+                remaining <- remaining - ls.[szBase + i]
+              | _ ->
+                let cw = measureWidth arena cn.FirstChild
+                ls.[szBase + i] <- -(cw + 1)
+                fillCount <- fillCount + 1
+                fillContentTotal <- fillContentTotal + cw
             | _ ->
-              constraints.[i] <- Fill
-              childNodes.[i] <- idx
-              contentWidths.[i] <- measureWidth arena idx
+              ls.[cnBase + i] <- idx
+              let cw = measureWidth arena idx
+              ls.[szBase + i] <- -(cw + 1)
+              fillCount <- fillCount + 1
+              fillContentTotal <- fillContentTotal + cw
             idx <- cn.NextSibling
             i <- i + 1
-          let areas = Layout.splitHWithGap gap (Array.toList constraints) (Array.toList contentWidths) area
-          List.iteri (fun j childArea ->
-            render arena childNodes.[j] (Layout.intersectArea area childArea) inheritedFg inheritedBg inheritedAttrs buf) areas
-        | 3uy -> // Column inside Gapped
+          distributeFill ls szBase n fillCount fillContentTotal remaining
+          let mutable offset = 0
+          for j in 0 .. n - 1 do
+            let sz = ls.[szBase + j]
+            let gappedOffset = offset + j * gap
+            let childArea = Layout.intersectArea area { X = area.X + gappedOffset; Y = area.Y; Width = sz; Height = area.Height }
+            render arena ls.[cnBase + j] childArea inheritedFg inheritedBg inheritedAttrs buf
+            offset <- offset + sz
+        | 3uy -> // Column inside Gapped — uses LayoutScratch
           let n = countChildren arena childNode.FirstChild
-          let constraints = Array.zeroCreate<Constraint> n
-          let childNodes = Array.zeroCreate<int> n
-          let contentHeights = Array.zeroCreate<int> n
+          let ls = arena.LayoutScratch
+          let lp = arena.LayoutPos
+          let cnBase = lp
+          let szBase = lp + n
+          arena.LayoutPos <- lp + n + n
+          let usable = if n > 1 then max 0 (area.Height - gap * (n - 1)) else area.Height
           let mutable idx = childNode.FirstChild
           let mutable i = 0
+          let mutable remaining = usable
+          let mutable fillCount = 0
+          let mutable fillContentTotal = 0
           while idx >= 0 do
             let cn = arena.Nodes.[idx]
             match cn.Kind with
             | 6uy ->
-              constraints.[i] <- unpackConstraint cn.ConstraintKind cn.ConstraintVal
-              childNodes.[i] <- cn.FirstChild
-              contentHeights.[i] <- measureHeight arena cn.FirstChild
+              ls.[cnBase + i] <- cn.FirstChild
+              match cn.ConstraintKind with
+              | 0uy -> ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
+              | 1uy -> ls.[szBase + i] <- int cn.ConstraintVal; remaining <- remaining - ls.[szBase + i]
+              | 2uy -> ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
+              | 3uy -> ls.[szBase + i] <- usable * int cn.ConstraintVal / 100; remaining <- remaining - ls.[szBase + i]
+              | 4uy ->
+                let ch = measureHeight arena cn.FirstChild
+                ls.[szBase + i] <- -(ch + 1)
+                fillCount <- fillCount + 1
+                fillContentTotal <- fillContentTotal + ch
+              | 5uy ->
+                let num = int cn.ConstraintVal >>> 8
+                let den = int cn.ConstraintVal &&& 0xFF
+                ls.[szBase + i] <- if den > 0 then usable * num / den else 0
+                remaining <- remaining - ls.[szBase + i]
+              | _ ->
+                let ch = measureHeight arena cn.FirstChild
+                ls.[szBase + i] <- -(ch + 1)
+                fillCount <- fillCount + 1
+                fillContentTotal <- fillContentTotal + ch
             | _ ->
-              constraints.[i] <- Fill
-              childNodes.[i] <- idx
-              contentHeights.[i] <- measureHeight arena idx
+              ls.[cnBase + i] <- idx
+              let ch = measureHeight arena idx
+              ls.[szBase + i] <- -(ch + 1)
+              fillCount <- fillCount + 1
+              fillContentTotal <- fillContentTotal + ch
             idx <- cn.NextSibling
             i <- i + 1
-          let areas = Layout.splitVWithGap gap (Array.toList constraints) (Array.toList contentHeights) area
-          List.iteri (fun j childArea ->
-            render arena childNodes.[j] (Layout.intersectArea area childArea) inheritedFg inheritedBg inheritedAttrs buf) areas
+          distributeFill ls szBase n fillCount fillContentTotal remaining
+          let mutable offset = 0
+          for j in 0 .. n - 1 do
+            let sz = ls.[szBase + j]
+            let gappedOffset = offset + j * gap
+            let childArea = Layout.intersectArea area { X = area.X; Y = area.Y + gappedOffset; Width = area.Width; Height = sz }
+            render arena ls.[cnBase + j] childArea inheritedFg inheritedBg inheritedAttrs buf
+            offset <- offset + sz
         | _ ->
           render arena node.FirstChild area inheritedFg inheritedBg inheritedAttrs buf
 

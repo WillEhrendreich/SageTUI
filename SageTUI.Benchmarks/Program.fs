@@ -36,6 +36,8 @@ type BufferDiffBenchmarks() =
 type RenderBenchmarks() =
   let area80x24 = { X = 0; Y = 0; Width = 80; Height = 24 }
   let mutable buf = Buffer.create 80 24
+  // Arena is created once and reset per frame — mirrors App.fs usage exactly
+  let arena = FrameArena.create 4096 65536 4096
 
   let dashboardTree =
     El.column [
@@ -60,22 +62,26 @@ type RenderBenchmarks() =
   [<IterationSetup>]
   member _.Reset() =
     buf <- Buffer.create 80 24
+    FrameArena.reset arena
 
-  [<Benchmark(Description = "Render dashboard tree (80x24)")>]
+  [<Benchmark(Baseline = true, Description = "Ref render dashboard (80x24)")>]
   member _.RenderDashboard() =
     Render.render area80x24 Style.empty buf dashboardTree
 
   [<Benchmark(Description = "Arena render dashboard (80x24)")>]
   member _.ArenaRenderDashboard() =
-    let arena = FrameArena.create 4096 65536 4096
     let root = Arena.lower arena dashboardTree
     ArenaRender.renderRoot arena root area80x24 buf
 
 [<MemoryDiagnoser>]
 [<SimpleJob(warmupCount = 3, iterationCount = 10)>]
 type LayoutBenchmarks() =
-  let area80x50 = { X = 0; Y = 0; Width = 80; Height = 50 }
+  let area80x50  = { X = 0; Y = 0; Width = 80; Height = 50  }
   let area80x100 = { X = 0; Y = 0; Width = 80; Height = 100 }
+  let arena50  = FrameArena.create 4096 65536 4096
+  let arena100 = FrameArena.create 4096 65536 4096
+  let mutable buf50  = Buffer.create 80 50
+  let mutable buf100 = Buffer.create 80 100
 
   let list50 =
     El.column [
@@ -95,15 +101,30 @@ type LayoutBenchmarks() =
         inner |> El.bordered Light |> El.padAll 1
     ]
 
-  [<Benchmark(Description = "Measure+layout 50 items column")>]
-  member _.Layout50Items() =
-    let buf = Buffer.create 80 50
-    Render.render area80x50 Style.empty buf list50
+  [<IterationSetup>]
+  member _.Reset() =
+    FrameArena.reset arena50
+    FrameArena.reset arena100
+    buf50  <- Buffer.create 80 50
+    buf100 <- Buffer.create 80 100
 
-  [<Benchmark(Description = "Measure+layout nested 3-level")>]
-  member _.LayoutNested() =
-    let buf = Buffer.create 80 100
-    Render.render area80x100 Style.empty buf nested
+  [<Benchmark(Baseline = true, Description = "Ref: 50-item column (80x50)")>]
+  member _.Layout50ItemsRef() =
+    Render.render area80x50 Style.empty buf50 list50
+
+  [<Benchmark(Description = "Arena: 50-item column (80x50)")>]
+  member _.Layout50ItemsArena() =
+    let root = Arena.lower arena50 list50
+    ArenaRender.renderRoot arena50 root area80x50 buf50
+
+  [<Benchmark(Description = "Ref: nested 3-level (80x100)")>]
+  member _.LayoutNestedRef() =
+    Render.render area80x100 Style.empty buf100 nested
+
+  [<Benchmark(Description = "Arena: nested 3-level (80x100)")>]
+  member _.LayoutNestedArena() =
+    let root = Arena.lower arena100 nested
+    ArenaRender.renderRoot arena100 root area80x100 buf100
 
 [<EntryPoint>]
 let main _argv =

@@ -862,6 +862,26 @@ let arenaInfraTests = testList "FrameArena infra" [
     FrameArena.reset a
     FrameArena.reset a
     a.Generation |> Expect.equal "gen" 3
+
+  testCase "LayoutScratch is bumped during Row render" <| fun () ->
+    let a = FrameArena.create 256 4096 256
+    FrameArena.reset a
+    let tree = El.row [ El.text "A" |> El.fill; El.text "B" |> El.fill ]
+    let root = Arena.lower a tree
+    let area = { X = 0; Y = 0; Width = 80; Height = 24 }
+    let buf = Buffer.create 80 24
+    ArenaRender.renderRoot a root area buf
+    (a.LayoutPos, 0) |> Expect.isGreaterThan "LayoutScratch should be used during Row layout"
+
+  testCase "LayoutScratch is bumped during Column render" <| fun () ->
+    let a = FrameArena.create 256 4096 256
+    FrameArena.reset a
+    let tree = El.column [ El.text "X" |> El.fill; El.text "Y" |> El.fill; El.text "Z" |> El.fill ]
+    let root = Arena.lower a tree
+    let area = { X = 0; Y = 0; Width = 80; Height = 24 }
+    let buf = Buffer.create 80 24
+    ArenaRender.renderRoot a root area buf
+    (a.LayoutPos, 0) |> Expect.isGreaterThan "LayoutScratch should be used during Column layout"
 ]
 
 let arenaLowerTests = testList "Arena.lower" [
