@@ -940,6 +940,112 @@ let pendingDelayTests =
   ]
 
 // ============================================================
+// sendMsgs TESTS
+// ============================================================
+
+let sendMsgsTests =
+  testList "sendMsgs" [
+    test "applies messages in order" {
+      let result =
+        TestHarness.init 80 24 counterProgram
+        |> TestHarness.sendMsgs [Inc; Inc; Inc]
+      result.Model |> Expect.equal "model should be 3 after three increments" 3
+    }
+
+    test "empty list is identity" {
+      let app = TestHarness.init 80 24 counterProgram
+      let result = app |> TestHarness.sendMsgs []
+      result.Model |> Expect.equal "model unchanged" app.Model
+    }
+  ]
+
+// ============================================================
+// TuiExpect TESTS
+// ============================================================
+
+let tuiExpectTests =
+  testList "TuiExpect" [
+    test "viewContains passes when needle present" {
+      let app = TestHarness.init 50 15 counterProgram
+      TuiExpect.viewContains "counter shows Count: 0" "Count: 0" app
+    }
+
+    test "viewContains throws with framed output when needle absent" {
+      let app = TestHarness.init 50 15 counterProgram
+      let result =
+        try TuiExpect.viewContains "counter shows 99" "Count: 99" app; None
+        with ex -> Some ex.Message
+      result |> Expect.isSome "should have thrown an exception"
+      let msg = result |> Option.get
+      msg |> Expect.stringContains "failure message contains needle" "Count: 99"
+      msg |> Expect.stringContains "failure message contains label" "counter shows 99"
+      msg |> Expect.stringContains "failure message has rendered content" "Count: 0"
+    }
+
+    test "modelSatisfies passes when predicate true" {
+      let app = TestHarness.init 80 24 counterProgram
+      TuiExpect.modelSatisfies "initial count is zero" (fun m -> m = 0) app
+    }
+
+    test "modelSatisfies throws with model dump when predicate false" {
+      let app = TestHarness.init 80 24 counterProgram |> TestHarness.sendMsg Inc
+      let result =
+        try TuiExpect.modelSatisfies "count is zero" (fun m -> m = 0) app; None
+        with ex -> Some ex.Message
+      result |> Expect.isSome "should have thrown an exception"
+      let msg = result |> Option.get
+      msg |> Expect.stringContains "failure message contains label" "count is zero"
+      msg |> Expect.stringContains "failure message shows model" "1"
+    }
+
+    test "isRunning passes before quit" {
+      let app = TestHarness.init 80 24 counterProgram
+      TuiExpect.isRunning "app should be running initially" app
+    }
+
+    test "isRunning throws after quit" {
+      let app = TestHarness.init 80 24 counterProgram |> TestHarness.sendMsg QuitCounter
+      let threw =
+        try TuiExpect.isRunning "should be running" app; false
+        with _ -> true
+      threw |> Expect.isTrue "should have thrown"
+    }
+
+    test "hasQuitWith passes after correct quit" {
+      let app = TestHarness.init 80 24 counterProgram |> TestHarness.sendMsg QuitCounter
+      TuiExpect.hasQuitWith 0 "should have quit with code 0" app
+    }
+
+    test "hasQuitWith throws when still running" {
+      let app = TestHarness.init 80 24 counterProgram
+      let threw =
+        try TuiExpect.hasQuitWith 0 "should have quit" app; false
+        with _ -> true
+      threw |> Expect.isTrue "should have thrown"
+    }
+
+    test "stringViewContains works outside TestApp" {
+      let rendered = TestHarness.renderElement 40 5 (El.text "hello world")
+      TuiExpect.stringViewContains "element contains hello" "hello" rendered
+    }
+  ]
+
+// ============================================================
+// PendingDelay named record fields TESTS
+// ============================================================
+
+let pendingDelayRecordTests =
+  testList "PendingDelayRecord" [
+    test "PendingDelay has named fields FireAt Seq Message" {
+      let app = TestHarness.init 40 10 delayedProgram |> TestHarness.sendMsg Kick
+      let delay = app.PendingDelays |> List.head
+      (delay.FireAt, TimeSpan.Zero) |> Expect.isGreaterThan "FireAt > zero"
+      (delay.Seq, -1) |> Expect.isGreaterThan "Seq is non-negative"
+      delay.Message |> Expect.equal "message is Triggered" Triggered
+    }
+  ]
+
+// ============================================================
 // ALL INTEGRATION TESTS
 // ============================================================
 
@@ -952,4 +1058,7 @@ let integrationTests =
     kanbanIntegrationTests
     formIntegrationTests
     pendingDelayTests
+    sendMsgsTests
+    tuiExpectTests
+    pendingDelayRecordTests
   ]

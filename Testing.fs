@@ -2,6 +2,18 @@ namespace SageTUI
 
 open System
 
+/// A Delay(n>0, msg) command waiting to fire at a specific virtual time.
+/// Captured by TestHarness when Update returns Cmd.delay and fired by advanceTime.
+[<Struct>]
+type PendingDelay<'msg> = {
+  /// Absolute virtual time when this delay fires.
+  FireAt  : TimeSpan
+  /// Tie-breaking sequence number assigned on arrival (monotonically increasing).
+  Seq     : int
+  /// The message dispatched when this delay fires.
+  Message : 'msg
+}
+
 /// Represents a SageTUI program under test. Immutable — every TestHarness function
 /// returns a new TestApp. Pipe operations together to simulate user interaction.
 ///
@@ -29,12 +41,9 @@ type TestApp<'model, 'msg> = {
   VirtualTime: TimeSpan
   /// Tracks the next scheduled fire time for each TimerSub, keyed by timer ID.
   TimerNextFire: Map<string, TimeSpan>
-  /// Delay(n>0, msg) commands returned from Update, waiting to fire at their
-  /// absolute virtual time. Drained by advanceTime. Each entry is
-  /// (absoluteFireTime, arrivalOrder, msg) — arrivalOrder is a monotonic counter
-  /// used as a tiebreaker when multiple delays share the same fire time.
-  PendingDelays: (TimeSpan * int * 'msg) list
-  /// Monotonic counter for assigning arrivalOrder to new PendingDelays entries.
+  /// Delay(n>0, msg) commands from Update waiting to fire. Drained by advanceTime.
+  PendingDelays: PendingDelay<'msg> list
+  /// Monotonic counter for assigning Seq to new PendingDelays entries.
   DelaySeq: int
 }
 
@@ -58,7 +67,7 @@ module TestHarness =
     (seqStart: int)
     (model: 'model)
     (cmd: Cmd<'msg>)
-    : 'model * bool * int option * (TimeSpan * int * 'msg) list * int =
+    : 'model * bool * int option * PendingDelay<'msg> list * int =
     let rec loop seqN model cmd =
       match cmd with
       | Quit code -> model, true, Some code, [], seqN
@@ -66,8 +75,8 @@ module TestHarness =
         let newModel, nextCmd = program.Update msg model
         loop seqN newModel nextCmd
       | Delay(n, msg) ->
-        let fireAt = effectiveNow + TimeSpan.FromMilliseconds(float n)
-        model, false, None, [ (fireAt, seqN, msg) ], seqN + 1
+        let delay = { FireAt = effectiveNow + TimeSpan.FromMilliseconds(float n); Seq = seqN; Message = msg }
+        model, false, None, [ delay ], seqN + 1
       | Batch cmds ->
         cmds
         |> List.fold
@@ -284,30 +293,26 @@ module TestHarness =
 
       let earliestDelay =
         current.PendingDelays
-        |> List.filter (fun (t, _, _) -> t <= newTime)
-        |> List.sortWith (fun (t1, s1, _) (t2, s2, _) ->
-          let tc = TimeSpan.Compare(t1, t2)
-          if tc <> 0 then tc else compare s1 s2)
+        |> List.filter (fun d -> d.FireAt <= newTime)
+        |> List.sortWith (fun a b ->
+          let tc = TimeSpan.Compare(a.FireAt, b.FireAt)
+          if tc <> 0 then tc else compare a.Seq b.Seq)
         |> List.tryHead
 
       let earliestTimer = List.tryHead remainingTimers
 
       match earliestDelay, earliestTimer with
       | None, None -> current
-      | Some (delayTime, seqN, msg), None ->
-        let pending' =
-          current.PendingDelays
-          |> List.filter (fun (t, s, _) -> not (t = delayTime && s = seqN))
-        drain (applyMsgs delayTime { current with PendingDelays = pending' } [ msg ]) []
+      | Some d, None ->
+        let pending' = current.PendingDelays |> List.filter (fun x -> not (x.FireAt = d.FireAt && x.Seq = d.Seq))
+        drain (applyMsgs d.FireAt { current with PendingDelays = pending' } [ d.Message ]) []
       | None, Some (timerTime, _, _, msg) ->
         drain (applyMsgs timerTime current [ msg ]) (List.tail remainingTimers)
-      | Some (delayTime, seqN, msg), Some (timerTime, _, _, timerMsg) ->
-        if TimeSpan.Compare(delayTime, timerTime) <= 0 then
+      | Some d, Some (timerTime, _, _, timerMsg) ->
+        if TimeSpan.Compare(d.FireAt, timerTime) <= 0 then
           // Pending delay fires first (or same time — pending delays take priority)
-          let pending' =
-            current.PendingDelays
-            |> List.filter (fun (t, s, _) -> not (t = delayTime && s = seqN))
-          drain (applyMsgs delayTime { current with PendingDelays = pending' } [ msg ]) remainingTimers
+          let pending' = current.PendingDelays |> List.filter (fun x -> not (x.FireAt = d.FireAt && x.Seq = d.Seq))
+          drain (applyMsgs d.FireAt { current with PendingDelays = pending' } [ d.Message ]) remainingTimers
         else
           drain (applyMsgs timerTime current [ timerMsg ]) (List.tail remainingTimers)
 
@@ -349,4 +354,92 @@ module TestHarness =
   /// waiting to be fired by advanceTime.
   let pendingDelayCount (app: TestApp<'model, 'msg>) : int =
     List.length app.PendingDelays
+
+  /// Send multiple messages in order, equivalent to chaining sendMsg calls.
+  let sendMsgs (msgs: 'msg list) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
+    List.fold (fun a m -> sendMsg m a) app msgs
+
+/// Assertion helpers for SageTUI test programs.
+///
+/// Functions return unit and throw System.Exception on failure, so they work
+/// with any .NET test framework (Expecto, xUnit, NUnit, etc.).
+/// Failure messages include the rendered output framed in a box and the label,
+/// so failing tests are immediately understandable without grepping string dumps.
+///
+/// Usage at the end of a pipeline:
+///   TestHarness.init 80 24 myProgram
+///   |> TestHarness.pressKey (Key.Char 'j')
+///   |> TuiExpect.viewContains "shows item 2" "Item 2"
+///   |> TuiExpect.modelSatisfies "selection advanced" (fun m -> m.Selected = 1)
+module TuiExpect =
+
+  let private frameOutput (width: int) (height: int) (output: string) : string =
+    let lines = output.Split('\n')
+    let top = "╔" + String.replicate width "═" + "╗"
+    let bottom = "╚" + String.replicate width "═" + "╝"
+    let body =
+      lines
+      |> Array.map (fun line ->
+        let trimmed = if line.Length > width then line.[..width - 1] else line
+        sprintf "║%s║" (trimmed.PadRight(width)))
+      |> String.concat "\n"
+    sprintf "Rendered output (%dx%d):\n%s\n%s\n%s" width height top body bottom
+
+  /// Assert rendered output contains needle.
+  /// On failure: shows label, needle, and full render framed in a box.
+  let viewContains (label: string) (needle: string) (app: TestApp<'m,'msg>) : unit =
+    let output = TestHarness.render app
+    if not (output.Contains(needle)) then
+      let framed = frameOutput app.Width app.Height output
+      failwith (sprintf "Test '%s': render output did not contain \"%s\"\n\n%s" label needle framed)
+
+  /// Assert rendered output does NOT contain needle.
+  /// On failure: shows label, needle, and full render framed in a box.
+  let viewNotContains (label: string) (needle: string) (app: TestApp<'m,'msg>) : unit =
+    let output = TestHarness.render app
+    if output.Contains(needle) then
+      let framed = frameOutput app.Width app.Height output
+      failwith (sprintf "Test '%s': render output unexpectedly contained \"%s\"\n\n%s" label needle framed)
+
+  /// Assert on a raw rendered string (works outside TestApp).
+  /// On failure: shows label, needle, and the string framed in a box.
+  let stringViewContains (label: string) (needle: string) (output: string) : unit =
+    if not (output.Contains(needle)) then
+      let width = output.Split('\n') |> Array.map (fun l -> l.Length) |> Array.fold max 0
+      let height = output.Split('\n').Length
+      let framed = frameOutput width height output
+      failwith (sprintf "Test '%s': rendered string did not contain \"%s\"\n\n%s" label needle framed)
+
+  /// Assert model satisfies predicate.
+  /// On failure: shows label and model value via sprintf "%A".
+  let modelSatisfies (label: string) (predicate: 'm -> bool) (app: TestApp<'m,'msg>) : unit =
+    if not (predicate app.Model) then
+      failwith (sprintf "Test '%s': model predicate failed.\nModel: %A" label app.Model)
+
+  /// Assert app has not quit.
+  let isRunning (label: string) (app: TestApp<'m,'msg>) : unit =
+    if app.HasQuit then
+      failwith (sprintf "Test '%s': expected app to be running but it has quit (exit code: %A)" label app.ExitCode)
+
+  /// Assert app has quit with the given exit code.
+  let hasQuitWith (exitCode: int) (label: string) (app: TestApp<'m,'msg>) : unit =
+    match app.HasQuit, app.ExitCode with
+    | true, Some code when code = exitCode -> ()
+    | true, Some code ->
+      failwith (sprintf "Test '%s': expected quit with code %d but got code %d" label exitCode code)
+    | true, None ->
+      failwith (sprintf "Test '%s': app has quit but ExitCode is None (expected %d)" label exitCode)
+    | false, _ ->
+      failwith (sprintf "Test '%s': expected app to have quit but it is still running" label)
+
+  /// Assert exactly count pending delays are enqueued.
+  let hasPendingDelays (label: string) (count: int) (app: TestApp<'m,'msg>) : unit =
+    let actual = List.length app.PendingDelays
+    if actual <> count then
+      failwith (sprintf "Test '%s': expected %d pending delay(s) but found %d" label count actual)
+
+  /// Assert virtual time has reached at least the given span.
+  let timeIsAtLeast (label: string) (expected: TimeSpan) (app: TestApp<'m,'msg>) : unit =
+    if app.VirtualTime < expected then
+      failwith (sprintf "Test '%s': expected VirtualTime >= %A but got %A" label expected app.VirtualTime)
 
