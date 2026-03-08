@@ -1705,6 +1705,25 @@ let cmdTests = testList "Cmd" [
     let cmd: Cmd<string> = Batch [Quit 0; OfAsync(fun _ -> async { () }); Delay(0, "x")]
     cmd |> Cmd.toMessages |> Expect.equal "only sync msg" ["x"]
 
+  testCase "toMessages ignores TerminalOutput" <| fun () ->
+    let cmd: Cmd<string> = Batch [TerminalOutput "\x1b[0m"; Delay(0, "x")]
+    cmd |> Cmd.toMessages |> Expect.equal "ignores terminal output" ["x"]
+
+  testCase "Cmd.terminalWrite produces TerminalOutput" <| fun () ->
+    let cmd: Cmd<int> = Cmd.terminalWrite "\x1b[H"
+    match cmd with
+    | TerminalOutput s -> s |> Expect.equal "sequence" "\x1b[H"
+    | _ -> failwith "expected TerminalOutput"
+
+  testCase "copyToClipboard uses TerminalOutput not printf" <| fun () ->
+    let cmd = Cmd.copyToClipboard "hello" "done"
+    let msgs = cmd |> Cmd.toMessages
+    msgs |> Expect.equal "dispatches written msg" ["done"]
+    // Verify it contains a TerminalOutput (no raw printf)
+    match cmd with
+    | Batch [TerminalOutput _; Delay(0, _)] -> ()
+    | _ -> failwith "expected Batch[TerminalOutput; Delay]"
+
   testCase "toMessages handles nested Batch" <| fun () ->
     let cmd = Batch [Batch [Delay(0, 1); Delay(0, 2)]; Delay(0, 3)]
     cmd |> Cmd.toMessages |> Expect.equal "nested" [1; 2; 3]
@@ -1880,6 +1899,25 @@ let programTests = testList "Program" [
     let states = Program.simulate [Increment; Increment; Increment] prog
     let models = states |> List.map fst
     models |> Expect.equal "stepping models" [1; 2; 3]
+
+  testCase "Program.map returns MappedProgram named type" <| fun () ->
+    let child: Program<int, CounterMsg> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun msg m ->
+        match msg with
+        | Increment -> (m + 1, Cmd.none)
+        | _ -> (m, Cmd.none)
+      View = fun m -> El.text (string m)
+      Subscribe = fun _ -> []
+    }
+    // Parent model is (string * int) — wraps child int as second field
+    let mapped: MappedProgram<string * int, CounterMsg, CounterMsg> =
+      Program.map id snd (fun childM (s, _) -> (s, childM)) child
+    let parentInit = ("hello", 99)
+    let (newParent, _) = mapped.Init parentInit
+    newParent |> Expect.equal "child init result merged" ("hello", 0)
+    let (afterIncrement, _) = mapped.Update Increment ("hello", 0)
+    afterIncrement |> Expect.equal "increment applies" ("hello", 1)
 ]
 
 let terminalEventTests = testList "TerminalEvent" [
@@ -3159,6 +3197,59 @@ let arenaRenderTests = testList "ArenaRender parity" [
     arena.Cells |> Expect.sequenceEqual "emoji column cells match" tree.Cells
 ]
 
+let remoteDataTests = testList "RemoteData" [
+  testCase "Idle is not loaded" <| fun () ->
+    RemoteData.isLoaded (Idle: RemoteData<int>) |> Expect.isFalse "idle is not loaded"
+
+  testCase "Loading is not loaded" <| fun () ->
+    RemoteData.isLoaded (Loading: RemoteData<int>) |> Expect.isFalse "loading is not loaded"
+
+  testCase "Loaded is loaded" <| fun () ->
+    RemoteData.isLoaded (Loaded 42) |> Expect.isTrue "loaded is loaded"
+
+  testCase "Failed is not loaded" <| fun () ->
+    RemoteData.isLoaded (Failed(exn "boom")) |> Expect.isFalse "failed is not loaded"
+
+  testCase "isLoading true only for Loading" <| fun () ->
+    RemoteData.isLoading (Loading: RemoteData<int>) |> Expect.isTrue "loading is loading"
+    RemoteData.isLoading (Idle: RemoteData<int>) |> Expect.isFalse "idle is not loading"
+    RemoteData.isLoading (Loaded 1) |> Expect.isFalse "loaded is not loading"
+
+  testCase "map transforms Loaded value" <| fun () ->
+    Loaded 5 |> RemoteData.map ((*) 2) |> Expect.equal "mapped" (Loaded 10)
+
+  testCase "map passes through Idle" <| fun () ->
+    (Idle: RemoteData<int>) |> RemoteData.map ((*) 2) |> Expect.equal "idle passthrough" Idle
+
+  testCase "map passes through Loading" <| fun () ->
+    (Loading: RemoteData<int>) |> RemoteData.map ((*) 2) |> Expect.equal "loading passthrough" Loading
+
+  testCase "map passes through Failed" <| fun () ->
+    let ex = exn "oops"
+    Failed ex |> RemoteData.map ((*) 2)
+    |> function
+       | Failed e -> e |> Expect.equal "same exn" ex
+       | _ -> failwith "expected Failed"
+
+  testCase "defaultValue returns loaded value" <| fun () ->
+    Loaded 99 |> RemoteData.defaultValue 0 |> Expect.equal "loaded default" 99
+
+  testCase "defaultValue returns default for non-Loaded" <| fun () ->
+    (Idle: RemoteData<int>) |> RemoteData.defaultValue 7 |> Expect.equal "idle default" 7
+    (Loading: RemoteData<int>) |> RemoteData.defaultValue 7 |> Expect.equal "loading default" 7
+    Failed(exn "x") |> RemoteData.defaultValue 7 |> Expect.equal "failed default" 7
+
+  testCase "bind chains Loaded value" <| fun () ->
+    Loaded 5 |> RemoteData.bind (fun n -> Loaded(n + 1))
+    |> Expect.equal "bind result" (Loaded 6)
+
+  testCase "bind short-circuits on non-Loaded" <| fun () ->
+    (Idle: RemoteData<int>) |> RemoteData.bind (fun _ -> Loaded 99)
+    |> Expect.equal "idle bind" Idle
+    (Loading: RemoteData<int>) |> RemoteData.bind (fun _ -> Loaded 99)
+    |> Expect.equal "loading bind" Loading
+]
+
 [<Tests>]
 let allTests = testList "All" [
   testList "Phase 0" [
@@ -3273,6 +3364,9 @@ let allTests = testList "All" [
   testList "Panel fixes" [
     layoutConstraintFixTests
     arenaRenderTests
+  ]
+  testList "Sprint 3" [
+    remoteDataTests
   ]
   testList "Debug + API" [
     testList "El.debugLayout" [

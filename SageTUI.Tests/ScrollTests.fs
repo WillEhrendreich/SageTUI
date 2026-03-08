@@ -285,6 +285,70 @@ let scrollableListTests = testList "ScrollableList" [
   }
 ]
 
+let scrollVirtualTests = testList "Scroll.viewVirtual" [
+  test "renders loaded items" {
+    let rendered = Scroll.viewVirtual 10 0 5 (fun i -> El.text (sprintf "item-%d" i)) (fun _ -> false)
+    match rendered with
+    | Column children ->
+      children |> List.length |> Expect.equal "5 items" 5
+      // First item should be a loaded El.text, not a loading placeholder
+      match children.[0] with
+      | Text("item-0", _) -> ()
+      | other -> failwithf "expected Text item-0 but got %A" other
+    | _ -> failtest "expected Column"
+  }
+
+  test "renders loading placeholder for loading indices" {
+    let rendered = Scroll.viewVirtual 10 0 3 (fun i -> El.text (sprintf "item-%d" i)) (fun i -> i = 1)
+    match rendered with
+    | Column [_; loadingRow; _] ->
+      // The loading row should be a Row (not a text "item-1")
+      match loadingRow with
+      | Row _ -> ()
+      | other -> failwithf "expected Row placeholder but got %A" other
+    | Column children -> failwithf "expected 3 children but got %d" (List.length children)
+    | _ -> failtest "expected Column"
+  }
+
+  test "respects offset" {
+    let rendered = Scroll.viewVirtual 10 5 3 (fun i -> El.text (sprintf "item-%d" i)) (fun _ -> false)
+    match rendered with
+    | Column children ->
+      children |> List.length |> Expect.equal "3 items from offset 5" 3
+      match children.[0] with
+      | Text("item-5", _) -> ()
+      | other -> failwithf "expected item-5 but got %A" other
+    | _ -> failtest "expected Column"
+  }
+
+  test "clamps offset to totalCount - viewportSize" {
+    // offset 8 with total 10 and viewport 5 → clamps to 5
+    let rendered = Scroll.viewVirtual 10 8 5 (fun i -> El.text (sprintf "item-%d" i)) (fun _ -> false)
+    match rendered with
+    | Column children ->
+      children |> List.length |> Expect.equal "5 items" 5
+      match children.[0] with
+      | Text("item-5", _) -> ()
+      | other -> failwithf "expected item-5 but got %A" other
+    | _ -> failtest "expected Column"
+  }
+
+  test "handles totalCount smaller than viewportSize" {
+    let rendered = Scroll.viewVirtual 3 0 10 (fun i -> El.text (sprintf "item-%d" i)) (fun _ -> false)
+    match rendered with
+    | Column children -> children |> List.length |> Expect.equal "3 items (all of them)" 3
+    | _ -> failtest "expected Column"
+  }
+
+  test "empty totalCount gives empty column" {
+    let rendered = Scroll.viewVirtual 0 0 5 (fun i -> El.text (sprintf "item-%d" i)) (fun _ -> false)
+    match rendered with
+    | Column [] -> ()
+    | Column children -> failwithf "expected empty but got %d items" (List.length children)
+    | _ -> failtest "expected Column"
+  }
+]
+
 [<Tests>]
 let allScrollTests = testList "Scrolling" [
   scrollStateCreationTests
@@ -298,4 +362,5 @@ let allScrollTests = testList "Scrolling" [
   scrollStateResizeTests
   scrollViewTests
   scrollableListTests
+  scrollVirtualTests
 ]

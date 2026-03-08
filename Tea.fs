@@ -13,6 +13,10 @@ type Cmd<'msg> =
   | Delay of milliseconds: int * 'msg
   /// Quit the application with the given exit code (0 = success).
   | Quit of exitCode: int
+  /// Write a raw ANSI/escape sequence through the terminal backend.
+  /// Written before the next frame flush. Use only for valid ANSI sequences
+  /// (e.g., OSC 52 clipboard write). Arbitrary text will corrupt the display.
+  | TerminalOutput of string
 
 /// Command constructors and combinators.
 module Cmd =
@@ -37,11 +41,12 @@ module Cmd =
   /// Supported by most modern terminals (kitty, WezTerm, iTerm2, Windows Terminal, tmux ≥3.2).
   /// The `written` message is dispatched after the write completes.
   let copyToClipboard (text: string) (written: 'msg) : Cmd<'msg> =
-    OfAsync(fun dispatch ->
-      async {
-        printf "%s" (Ansi.osc52Copy text)
-        dispatch written
-      })
+    Batch [ TerminalOutput(Ansi.osc52Copy text); Delay(0, written) ]
+
+  /// Write a raw ANSI/escape sequence through the terminal backend.
+  /// Written before the next frame flush. Only use for valid ANSI sequences —
+  /// arbitrary text will corrupt the display.
+  let terminalWrite (sequence: string) : Cmd<'msg> = TerminalOutput sequence
 
   /// Transform the message type of a command.
   let rec map (f: 'a -> 'b) (cmd: Cmd<'a>) : Cmd<'b> =
@@ -54,6 +59,7 @@ module Cmd =
     | CancelSub id -> CancelSub id
     | Delay(ms, msg) -> Delay(ms, f msg)
     | Quit code -> Quit code
+    | TerminalOutput s -> TerminalOutput s
 
   /// Dispatch a message immediately (synchronous, no delay).
   let ofMsg (msg: 'msg) : Cmd<'msg> = Delay(0, msg)
@@ -91,7 +97,7 @@ module Cmd =
   /// Useful for asserting what messages a command will eventually produce in unit tests.
   let rec toMessages (cmd: Cmd<'msg>) : 'msg list =
     match cmd with
-    | NoCmd | OfAsync _ | OfCancellableAsync _ | CancelSub _ | Quit _ -> []
+    | NoCmd | OfAsync _ | OfCancellableAsync _ | CancelSub _ | Quit _ | TerminalOutput _ -> []
     | Batch cmds -> cmds |> List.collect toMessages
     | Delay(_, msg) -> [ msg ]
 
@@ -153,6 +159,20 @@ type Program<'model, 'msg> = {
   Subscribe: 'model -> Sub<'msg> list
 }
 
+/// Represents a child component's program lifted into a parent program's type space.
+/// Produced by `Program.map`. Having a named type (rather than an anonymous record) enables
+/// nominal type checking and allows callers to write helper functions against this type.
+type MappedProgram<'parentModel, 'parentMsg, 'childMsg> = {
+  /// Initialize the child component within a parent model.
+  Init: 'parentModel -> 'parentModel * Cmd<'parentMsg>
+  /// Update the parent model using a child message.
+  Update: 'childMsg -> 'parentModel -> 'parentModel * Cmd<'parentMsg>
+  /// Render the child component from the parent model.
+  View: 'parentModel -> Element
+  /// Subscribe the child component using the parent model.
+  Subscribe: 'parentModel -> Sub<'parentMsg> list
+}
+
 /// Program combinators for component composition.
 module Program =
   /// Transform a component's program to work within a parent program.
@@ -164,22 +184,19 @@ module Program =
     (toModel: 'parentModel -> 'childModel)
     (withModel: 'childModel -> 'parentModel -> 'parentModel)
     (child: Program<'childModel, 'childMsg>)
-    : {| Init: 'parentModel -> 'parentModel * Cmd<'parentMsg>
-         Update: 'childMsg -> 'parentModel -> 'parentModel * Cmd<'parentMsg>
-         View: 'parentModel -> Element
-         Subscribe: 'parentModel -> Sub<'parentMsg> list |} =
-    {| Init = fun parentModel ->
-         let childModel, childCmd = child.Init()
-         withModel childModel parentModel, Cmd.map toMsg childCmd
-       Update = fun childMsg parentModel ->
-         let childModel = toModel parentModel
-         let newChildModel, childCmd = child.Update childMsg childModel
-         withModel newChildModel parentModel, Cmd.map toMsg childCmd
-       View = fun parentModel ->
-         child.View (toModel parentModel)
-       Subscribe = fun parentModel ->
-         child.Subscribe (toModel parentModel)
-         |> List.map (Sub.map toMsg) |}
+    : MappedProgram<'parentModel, 'parentMsg, 'childMsg> =
+    { Init = fun parentModel ->
+        let childModel, childCmd = child.Init()
+        withModel childModel parentModel, Cmd.map toMsg childCmd
+      Update = fun childMsg parentModel ->
+        let childModel = toModel parentModel
+        let newChildModel, childCmd = child.Update childMsg childModel
+        withModel newChildModel parentModel, Cmd.map toMsg childCmd
+      View = fun parentModel ->
+        child.View (toModel parentModel)
+      Subscribe = fun parentModel ->
+        child.Subscribe (toModel parentModel)
+        |> List.map (Sub.map toMsg) }
 
   /// Run a list of messages through a program's Update function and return all
   /// intermediate (model, cmd) states. The initial model comes from Init.
@@ -195,6 +212,55 @@ module Program =
     msgs
     |> List.scan (fun (m, _) msg -> program.Update msg m) (initModel, Cmd.none)
     |> List.tail
+
+/// A vocabulary type for asynchronous data loading states.
+/// The most commonly reinvented type in F# async applications — provided here so
+/// every user doesn't have to define their own `type LoadState`.
+type RemoteData<'a> =
+  /// No request has been made yet.
+  | Idle
+  /// A request is in flight.
+  | Loading
+  /// Data loaded successfully.
+  | Loaded of 'a
+  /// The request failed with an exception.
+  | Failed of exn
+
+/// Helpers for working with RemoteData values.
+module RemoteData =
+  /// Map a function over a Loaded value. Idle, Loading, and Failed pass through unchanged.
+  let map (f: 'a -> 'b) (rd: RemoteData<'a>) : RemoteData<'b> =
+    match rd with
+    | Idle -> Idle
+    | Loading -> Loading
+    | Loaded a -> Loaded(f a)
+    | Failed ex -> Failed ex
+
+  /// Return the loaded value if present, otherwise a default.
+  let defaultValue (def: 'a) (rd: RemoteData<'a>) : 'a =
+    match rd with
+    | Loaded a -> a
+    | _ -> def
+
+  /// Return true only when the data is fully loaded.
+  let isLoaded (rd: RemoteData<'a>) : bool =
+    match rd with
+    | Loaded _ -> true
+    | _ -> false
+
+  /// Return true when a request is in flight.
+  let isLoading (rd: RemoteData<'a>) : bool =
+    match rd with
+    | Loading -> true
+    | _ -> false
+
+  /// Monadic bind — chain operations on loaded data.
+  let bind (f: 'a -> RemoteData<'b>) (rd: RemoteData<'a>) : RemoteData<'b> =
+    match rd with
+    | Idle -> Idle
+    | Loading -> Loading
+    | Loaded a -> f a
+    | Failed ex -> Failed ex
 
 type TerminalBackend = {
   Size: unit -> int * int

@@ -98,6 +98,49 @@ module Scroll =
         |> El.column
       El.row [ El.fill content; El.width 1 indicator ]
 
+  /// Render a virtually-scrolled view for large or paged data sets.
+  ///
+  /// This is a **pure rendering helper** — it does not own async state, caching, or
+  /// prefetching. The caller's model tracks which pages are loaded and passes an
+  /// `isLoading` predicate; the caller's `Cmd` performs async page fetches.
+  ///
+  /// Parameters:
+  /// - `totalCount`  — total number of logical items (may not all be in memory)
+  /// - `offset`      — current scroll offset (first visible logical index)
+  /// - `viewportSize` — number of rows visible at once
+  /// - `renderItem`  — renders a loaded item at absolute index `i`
+  /// - `isLoading`   — returns true if item at index `i` is still being fetched;
+  ///                   a placeholder spinner row is shown instead
+  ///
+  /// Example pattern:
+  /// ```fsharp
+  /// // Model holds a Map of loaded pages
+  /// let isLoading i = not (Map.containsKey (i / pageSize) model.pages)
+  /// let renderItem i = ... render model.pages.[i / pageSize].[i % pageSize] ...
+  /// Scroll.viewVirtual model.totalCount model.offset viewportSize renderItem isLoading
+  /// ```
+  let viewVirtual
+    (totalCount: int)
+    (offset: int)
+    (viewportSize: int)
+    (renderItem: int -> Element)
+    (isLoading: int -> bool)
+    : Element =
+    let start = max 0 (min offset (max 0 (totalCount - viewportSize)))
+    let endIdx = min totalCount (start + viewportSize)
+    List.init (endIdx - start) (fun i ->
+      let absIdx = start + i
+      match isLoading absIdx with
+      | true ->
+        El.row [
+          El.text "  " |> El.width 2
+          El.text "\u280b" |> El.width 2
+          El.text "Loading…" |> El.fg (Color.Named(BaseColor.Black, Intensity.Bright)) |> El.fill
+        ]
+      | false -> renderItem absIdx
+    )
+    |> El.column
+
 /// Scrollable list with selection tracking and automatic scroll-into-view.
 type ScrollableListModel<'a> = {
   Items: 'a list

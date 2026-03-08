@@ -63,6 +63,7 @@ module App =
           do! Async.Sleep ms
           dispatch msg
         } |> Async.Start
+      | TerminalOutput s -> backend.Write s
       | Quit code ->
         for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
         activeSubs.Clear()
@@ -70,13 +71,17 @@ module App =
         running <- false
 
     let reconcileSubs (currentSubs: Sub<'msg> list) =
-      let currentIds =
+      // Warn on duplicate IDs — the second sub silently won't start (the ContainsKey guard below).
+      let ids =
         currentSubs
         |> List.choose (function
           | TimerSub(id, _, _) -> Some id
           | CustomSub(id, _) -> Some id
           | _ -> None)
-        |> Set.ofList
+      let duplicates = ids |> List.groupBy id |> List.choose (fun (k, vs) -> if vs.Length > 1 then Some k else None)
+      for dupId in duplicates do
+        eprintfn "[SageTUI] Warning: duplicate subscription ID '%s' — only the first will run." dupId
+      let currentIds = ids |> Set.ofList
       for KeyValue(id, cts) in activeSubs |> Seq.toList do
         match Set.contains id currentIds with
         | true -> ()
