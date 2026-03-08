@@ -27,6 +27,7 @@ module App =
     let mutable needsFullRedraw = true
     let mutable prevKeyedElements = Map.empty<string, Element>
     let mutable activeTransitions: ActiveTransition list = []
+    let mutable exitCode = 0
 
     let msgChannel = ConcurrentQueue<'msg>()
     let dispatch msg = msgChannel.Enqueue(msg)
@@ -62,9 +63,10 @@ module App =
           do! Async.Sleep ms
           dispatch msg
         } |> Async.Start
-      | Quit ->
+      | Quit code ->
         for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
         activeSubs.Clear()
+        exitCode <- code
         running <- false
 
     let reconcileSubs (currentSubs: Sub<'msg> list) =
@@ -117,6 +119,15 @@ module App =
         running <- false
       } |> Async.Start
     )
+
+    // Register belt-and-suspenders cleanup: if an async exception escapes to the
+    // thread pool's unhandled handler, restore terminal state before the process dies.
+    System.AppDomain.CurrentDomain.UnhandledException.AddHandler(fun _ _ ->
+      try
+        backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
+        backend.Flush()
+        backend.LeaveRawMode()
+      with _ -> ())
 
     try
       interpretCmd initCmd
@@ -264,6 +275,8 @@ module App =
 
       backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
       backend.LeaveRawMode()
+      if exitCode <> 0 then
+        System.Environment.Exit exitCode
     with ex ->
       backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
       backend.Flush()
@@ -292,7 +305,7 @@ module App =
     let program : Program<unit, Key> =
       { Init = fun () -> (), NoCmd
         Update = fun msg () ->
-          match msg with Key.Escape -> (), Quit | _ -> (), NoCmd
+          match msg with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
         View = fun () -> view ()
         Subscribe = fun _ -> [KeySub (fun (k, _) -> Some k)] }
     run program

@@ -1,21 +1,33 @@
 module Dashboard
 
-// Real-time dashboard with clock, progress bars, event log, and multi-panel layout.
-// Demonstrates: TimerSub, ResizeSub, borders, fill/ratio, colors, Gradient, Spinner.
+// Real-time dashboard with gradient header, services panel, animated metrics, and event log.
+// Demonstrates: TimerSub, ResizeSub, borders, fill/ratio, colors, Gradient, Spinner, ServiceStatus DU.
 
 open System
 open SageTUI
+
+// ── Domain Types ──────────────────────────────────────────────────────
+
+type ServiceStatus = Running | Degraded | Starting | Down
+
+type Service = { Name: string; Status: ServiceStatus }
 
 type LogLevel = Info | Warn | Error | Debug
 
 type LogEntry = { Time: DateTime; Text: string; Level: LogLevel }
 
+// ── Model ─────────────────────────────────────────────────────────────
+
 type Model =
   { Now: DateTime
     Cpu: float list
-    Memory: int
+    MemPct: float
+    MemGb: float
+    TotalMem: float
     Events: LogEntry list
     Uptime: int
+    Services: Service list
+    ReqPerSec: float
     Seed: int
     BarWidth: int
     Elapsed: int64 }
@@ -25,183 +37,221 @@ type Msg =
   | Resized of int * int
   | Quit
 
+// ── Init ──────────────────────────────────────────────────────────────
+
 let init () =
   { Now = DateTime.Now
-    Cpu = [ 0.3; 0.5; 0.2; 0.8 ]
-    Memory = 42
+    Cpu = [ 0.30; 0.55; 0.22; 0.78 ]
+    MemPct = 0.55
+    MemGb = 5.5
+    TotalMem = 10.0
     Events =
-      [ { Time = DateTime.Now; Text = "System started"; Level = Info }
-        { Time = DateTime.Now; Text = "Config loaded"; Level = Info } ]
+      [ { Time = DateTime.Now.AddSeconds(-14.0); Text = "System started"; Level = Info }
+        { Time = DateTime.Now.AddSeconds(-9.0); Text = "Config loaded"; Level = Info } ]
     Uptime = 0
+    Services =
+      [ { Name = "api-gateway"; Status = Running }
+        { Name = "auth-service"; Status = Running }
+        { Name = "db-primary"; Status = Running }
+        { Name = "cache-proxy"; Status = Running } ]
+    ReqPerSec = 720.0
     Seed = 42
-    BarWidth = 20
+    BarWidth = 18
     Elapsed = 0L },
   Cmd.none
 
-let levelColor level =
-  match level with
-  | Info -> Color.Named(Green, Normal)
-  | Warn -> Color.Named(Yellow, Bright)
-  | Error -> Color.Named(Red, Bright)
-  | Debug -> Color.Named(Blue, Bright)
+// ── Update ────────────────────────────────────────────────────────────
 
-let levelTag level =
-  match level with
-  | Info -> "INFO" | Warn -> "WARN" | Error -> "ERROR" | Debug -> "DEBUG"
+let private logMessages = [|
+  Info,  "Request handled /api/users/42"
+  Warn,  "Cache miss: session-8821"
+  Info,  "Health check OK"
+  Debug, "Connection pool: 9/20 active"
+  Error, "Upstream timeout: payment-svc"
+  Info,  "Config reload triggered"
+  Warn,  "High memory pressure detected"
+  Debug, "GC triggered, heap 312 MB"
+|]
 
 let update msg model =
   match msg with
   | Tick ->
     let rng = Random(model.Seed)
     let newCpu =
-      model.Cpu
-      |> List.map (fun c ->
-        let delta = (rng.NextDouble() - 0.5) * 0.2
-        min 1.0 (max 0.0 (c + delta)))
-    let newMem = max 10 (min 90 (model.Memory + rng.Next(-3, 4)))
+      model.Cpu |> List.map (fun c ->
+        let delta = (rng.NextDouble() - 0.5) * 0.15
+        min 0.98 (max 0.02 (c + delta)))
+    let newMemPct = min 0.95 (max 0.15 (model.MemPct + (rng.NextDouble() - 0.5) * 0.04))
+    let newReqPerSec = model.ReqPerSec * 0.80 + float (rng.Next(500, 1250)) * 0.20
+    let newServices =
+      model.Services |> List.map (fun svc ->
+        let roll = rng.Next(100)
+        let newStatus =
+          match svc.Status with
+          | Running when roll < 3 -> Degraded
+          | Degraded when roll < 40 -> Running
+          | Degraded when roll >= 95 -> Starting
+          | Starting when roll < 60 -> Running
+          | Down when roll < 20 -> Starting
+          | other -> other
+        { svc with Status = newStatus })
     let newEvent =
-      match rng.Next(10) with
-      | 0 -> Some { Time = DateTime.Now; Text = "Request handled /api/data"; Level = Info }
-      | 1 -> Some { Time = DateTime.Now; Text = "Cache miss: user-42"; Level = Warn }
-      | 2 -> Some { Time = DateTime.Now; Text = "Health check OK"; Level = Info }
-      | 3 -> Some { Time = DateTime.Now; Text = "Connection pool: 8/20 active"; Level = Debug }
-      | 4 -> Some { Time = DateTime.Now; Text = "Timeout on upstream service"; Level = Error }
+      match rng.Next(8) with
+      | n when n < Array.length logMessages ->
+        let (level, text) = logMessages.[n]
+        Some { Time = DateTime.Now; Text = text; Level = level }
       | _ -> None
     let events =
       match newEvent with
-      | Some e -> (e :: model.Events) |> List.truncate 8
+      | Some e -> (e :: model.Events) |> List.truncate 6
       | None -> model.Events
     { model with
         Now = DateTime.Now
         Cpu = newCpu
-        Memory = newMem
+        MemPct = newMemPct
+        MemGb = newMemPct * model.TotalMem
         Events = events
+        Services = newServices
+        ReqPerSec = newReqPerSec
         Uptime = model.Uptime + 1
         Seed = model.Seed + 1
-        Elapsed = model.Elapsed + 1000L },
+        Elapsed = model.Elapsed + 250L },
     Cmd.none
   | Resized (w, _) ->
-    { model with BarWidth = max 10 (w / 4 - 10) }, Cmd.none
+    { model with BarWidth = max 8 (w / 4 - 8) }, Cmd.none
   | Quit -> model, Cmd.quit
 
-let progressBar (width: int) (pct: float) =
+// ── View Helpers ──────────────────────────────────────────────────────
+
+let private progressBar (width: int) (pct: float) =
   let filled = int (float width * pct)
   let empty = width - filled
-  let startColor =
+  let gradStart, gradEnd =
     match pct with
-    | p when p > 0.8 -> (255uy, 60uy, 60uy)
-    | p when p > 0.5 -> (255uy, 200uy, 50uy)
-    | _ -> (80uy, 220uy, 100uy)
-  let endColor =
-    match pct with
-    | p when p > 0.8 -> (180uy, 30uy, 30uy)
-    | p when p > 0.5 -> (200uy, 150uy, 30uy)
-    | _ -> (40uy, 180uy, 60uy)
+    | p when p > 0.80 -> (255uy, 60uy, 60uy),  (180uy, 30uy, 30uy)
+    | p when p > 0.55 -> (255uy, 200uy, 50uy), (200uy, 150uy, 30uy)
+    | _               -> (80uy, 220uy, 100uy),  (40uy, 180uy, 60uy)
   El.row [
-    Gradient.horizontal startColor endColor filled (String('█', filled))
-    El.text (String('░', empty)) |> El.dim
-    El.text $" {pct * 100.0:F0}%%"
+    Gradient.horizontal gradStart gradEnd filled (String('█', max 1 filled))
+    El.text (String('░', max 0 empty)) |> El.dim
+    El.text (sprintf " %3.0f%%%%" (pct * 100.0))
   ]
+
+let private serviceRow (svc: Service) =
+  let dot, color =
+    match svc.Status with
+    | Running  -> "●", Color.Named(Green, Bright)
+    | Degraded -> "●", Color.Named(Yellow, Bright)
+    | Starting -> "●", Color.Named(Cyan, Normal)
+    | Down     -> "○", Color.Named(White, Normal)
+  let statusLabel =
+    match svc.Status with
+    | Running  -> "running  " | Degraded -> "degraded "
+    | Starting -> "starting " | Down     -> "down     "
+  El.row [
+    El.text (sprintf " %s " dot) |> El.fg color
+    El.text (sprintf "%-14s" svc.Name)
+    El.text statusLabel |> El.dim
+  ]
+
+let private levelStyle =
+  function
+  | Info  -> Color.Named(Green, Bright),  "INFO "
+  | Warn  -> Color.Named(Yellow, Bright), "WARN "
+  | Error -> Color.Named(Red, Bright),    "ERROR"
+  | Debug -> Color.Named(Blue, Normal),   "DEBUG"
+
+// ── Panel Builders ────────────────────────────────────────────────────
+
+let private headerRow (model: Model) =
+  let h = model.Uptime / 3600
+  let m = (model.Uptime % 3600) / 60
+  let s = model.Uptime % 60
+  let uptimeStr = sprintf "up %02d:%02d:%02d" h m s
+  let reqColor =
+    match model.ReqPerSec with
+    | r when r >= 1100.0 -> Color.Named(Red, Bright)
+    | r when r >= 800.0  -> Color.Named(Yellow, Bright)
+    | _                  -> Color.Named(Green, Bright)
+  El.row [
+    Gradient.horizontal (0uy, 180uy, 220uy) (80uy, 255uy, 160uy) 20 " ◆ SageTUI Dashboard"
+    El.text "  "
+    Spinner.dots model.Elapsed |> El.fg (Color.Named(Green, Bright))
+    El.fill (El.text "")
+    El.text (sprintf "%.0f req/s" model.ReqPerSec) |> El.fg reqColor |> El.bold
+    El.text "  "
+    El.text (sprintf "MEM %2.0f%%%%" (model.MemPct * 100.0)) |> El.dim
+    El.text "  "
+    El.text uptimeStr |> El.dim
+    El.text "  "
+    El.text (model.Now.ToString("HH:mm:ss")) |> El.fg (Color.Named(Yellow, Bright))
+    El.text " "
+  ]
+
+let private cpuPanel (model: Model) =
+  El.column [
+    El.text " CPU" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
+    El.text ""
+    yield!
+      model.Cpu |> List.mapi (fun i c ->
+        El.row [
+          El.text (sprintf " Core %d " i) |> El.dim
+          progressBar model.BarWidth c
+        ])
+  ]
+  |> El.bordered Rounded
+
+let private servicesPanel (model: Model) =
+  El.column [
+    El.text " Services" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
+    El.text ""
+    yield! model.Services |> List.map serviceRow
+    El.text ""
+    El.text " Memory" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
+    El.text ""
+    El.row [
+      El.text "  "
+      progressBar model.BarWidth model.MemPct
+    ]
+    El.text (sprintf "  %.1f GB / %.1f GB" model.MemGb model.TotalMem)
+      |> El.dim
+  ]
+  |> El.bordered Rounded
+
+let private logPanel (now: DateTime) (events: LogEntry list) =
+  El.column [
+    El.text " Event Log" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
+    El.text ""
+    yield!
+      events |> List.map (fun e ->
+        let age = int (now - e.Time).TotalSeconds
+        let (color, tag) = levelStyle e.Level
+        El.row [
+          El.text (sprintf " %3ds " age) |> El.dim
+          El.text tag |> El.fg color |> El.bold
+          El.text (sprintf "  %s" e.Text)
+        ])
+  ]
+  |> El.bordered Light
+
+// ── View ──────────────────────────────────────────────────────────────
 
 let view model =
-  let header =
-    El.row [
-      El.text " ◆ SageTUI Dashboard"
-        |> El.bold
-        |> El.fg (Color.Named(Cyan, Bright))
-      El.text "  "
-      Spinner.dots model.Elapsed
-        |> El.fg (Color.Named(Green, Bright))
-      El.fill (El.text "")
-      El.text (model.Now.ToString("HH:mm:ss"))
-        |> El.fg (Color.Named(Yellow, Bright))
-      El.text " "
-    ]
-    |> El.bg (Color.Named(Black, Normal))
-
-  let cpuPanel =
-    El.column [
-      El.text " CPU Usage" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
-      El.text ""
-      yield!
-        model.Cpu
-        |> List.mapi (fun i c ->
-          El.row [
-            El.text $" Core {i} " |> El.dim
-            progressBar model.BarWidth c
-          ])
-    ]
-    |> El.bordered Light
-
-  let memPanel =
-    let pct = float model.Memory / 100.0
-    El.column [
-      El.text " Memory" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
-      El.text ""
-      El.row [
-        El.text "   "
-        progressBar model.BarWidth pct
-      ]
-      El.text ""
-      El.text $"   {model.Memory} MB / 100 MB" |> El.dim
-    ]
-    |> El.bordered Light
-
-  let uptimePanel =
-    let h = model.Uptime / 3600
-    let m = (model.Uptime % 3600) / 60
-    let s = model.Uptime % 60
-    El.column [
-      El.text " Uptime" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
-      El.text ""
-      El.row [
-        El.text "   "
-        El.text $"{h:D2}:{m:D2}:{s:D2}"
-          |> El.fg (Color.Named(Green, Bright))
-        El.text "  "
-        Spinner.line model.Elapsed |> El.dim
-      ]
-    ]
-    |> El.bordered Light
-
-  let logPanel =
-    El.column [
-      El.text " Event Log" |> El.bold |> El.fg (Color.Named(Cyan, Normal))
-      El.text ""
-      yield!
-        model.Events
-        |> List.map (fun e ->
-          let timeStr = e.Time.ToString("HH:mm:ss")
-          El.row [
-            El.text (sprintf " %s " timeStr) |> El.dim
-            El.text (sprintf "[%s]" (levelTag e.Level))
-              |> El.fg (levelColor e.Level)
-              |> El.bold
-            El.text (sprintf " %s" e.Text)
-          ])
-    ]
-    |> El.bordered Light
-
-  let footer =
-    El.text " [q] Quit" |> El.dim
-
   El.column [
-    header
+    headerRow model
     El.row [
-      El.ratio 1 2 cpuPanel
-      El.ratio 1 2 (
-        El.column [
-          memPanel
-          uptimePanel
-        ])
+      El.ratio 1 2 (cpuPanel model)
+      El.ratio 1 2 (servicesPanel model)
     ]
     |> El.fill
-    logPanel |> El.fill
-    footer
+    logPanel model.Now model.Events |> El.fill
+    El.text " [q] Quit" |> El.dim
   ]
 
+// ── Subscriptions ─────────────────────────────────────────────────────
+
 let subscribe _model =
-  [ TimerSub("tick", TimeSpan.FromSeconds(1.0), fun () -> Tick)
+  [ TimerSub("tick", TimeSpan.FromMilliseconds(250.0), fun () -> Tick)
     ResizeSub (fun (w, h) -> Resized(w, h))
     Keys.bind [
       Key.Char 'q', Quit

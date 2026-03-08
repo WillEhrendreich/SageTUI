@@ -57,6 +57,13 @@ module Ansi =
   let bgColorPacked (packed: int32) = bgColor (PackedColor.unpack packed)
   let textAttrsPacked (packed: uint16) = textAttrs { Value = packed }
 
+  /// Produce an OSC 52 escape sequence that writes `text` to the system clipboard.
+  /// Supported by most modern terminals (kitty, WezTerm, iTerm2, Windows Terminal, tmux ≥3.2).
+  /// Silently ignored by terminals that do not implement OSC 52.
+  let osc52Copy (text: string) =
+    let encoded = System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text))
+    sprintf "\x1b]52;c;%s\x07" encoded
+
 module Presenter =
   let present (changes: ResizeArray<int>) (buf: Buffer) =
     let sb = StringBuilder()

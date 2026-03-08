@@ -11,7 +11,8 @@ type Cmd<'msg> =
   | OfCancellableAsync of id: string * (CancellationToken -> ('msg -> unit) -> Async<unit>)
   | CancelSub of string
   | Delay of milliseconds: int * 'msg
-  | Quit
+  /// Quit the application with the given exit code (0 = success).
+  | Quit of exitCode: int
 
 /// Command constructors and combinators.
 module Cmd =
@@ -27,8 +28,20 @@ module Cmd =
   let cancel id = CancelSub id
   /// Dispatch a message after a delay in milliseconds.
   let delay ms msg = Delay(ms, msg)
-  /// Quit the application.
-  let quit = Quit
+  /// Quit with exit code 0 (success).
+  let quit = Quit 0
+  /// Quit with an explicit exit code. Use non-zero for error conditions.
+  let quitWith (code: int) = Quit code
+
+  /// Write `text` to the system clipboard via OSC 52.
+  /// Supported by most modern terminals (kitty, WezTerm, iTerm2, Windows Terminal, tmux ≥3.2).
+  /// The `written` message is dispatched after the write completes.
+  let copyToClipboard (text: string) (written: 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        printf "%s" (Ansi.osc52Copy text)
+        dispatch written
+      })
 
   /// Transform the message type of a command.
   let rec map (f: 'a -> 'b) (cmd: Cmd<'a>) : Cmd<'b> =
@@ -40,15 +53,14 @@ module Cmd =
       OfCancellableAsync(id, fun ct dispatch -> run ct (f >> dispatch))
     | CancelSub id -> CancelSub id
     | Delay(ms, msg) -> Delay(ms, f msg)
-    | Quit -> Quit
+    | Quit code -> Quit code
 
   /// Dispatch a message immediately (synchronous, no delay).
   let ofMsg (msg: 'msg) : Cmd<'msg> = Delay(0, msg)
 
   /// Run a Task and dispatch the result as a message.
-  /// If the task throws, the exception is logged to stderr and re-raised, crashing the app
-  /// with a visible error rather than silently swallowing the failure.
-  /// For controlled error handling, use <see cref="ofTaskResult"/> instead.
+  /// If the task throws, the exception is logged to stderr and ignored — the app
+  /// continues running. For controlled error handling use <see cref="ofTaskResult"/>.
   let ofTask (task: unit -> Threading.Tasks.Task<'a>) (toMsg: 'a -> 'msg) : Cmd<'msg> =
     OfAsync(fun dispatch ->
       async {
@@ -56,8 +68,7 @@ module Cmd =
           let! result = task() |> Async.AwaitTask
           dispatch (toMsg result)
         with ex ->
-          eprintfn "SageTUI: unhandled exception in Cmd.ofTask: %s" ex.Message
-          Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw()
+          eprintfn "SageTUI Cmd.ofTask: unhandled exception — %s" ex.Message
       })
 
   /// Run a Task with success/error message mapping.
@@ -73,6 +84,16 @@ module Cmd =
         with ex ->
           dispatch (onError ex)
       })
+
+  /// Extract all synchronously-dispatchable messages from a Cmd tree.
+  /// Returns messages from every Delay case (regardless of delay duration).
+  /// Async operations and subscriptions are not executed.
+  /// Useful for asserting what messages a command will eventually produce in unit tests.
+  let rec toMessages (cmd: Cmd<'msg>) : 'msg list =
+    match cmd with
+    | NoCmd | OfAsync _ | OfCancellableAsync _ | CancelSub _ | Quit _ -> []
+    | Batch cmds -> cmds |> List.collect toMessages
+    | Delay(_, msg) -> [ msg ]
 
 /// A subscription that connects external events to messages.
 type Sub<'msg> =
@@ -159,6 +180,21 @@ module Program =
        Subscribe = fun parentModel ->
          child.Subscribe (toModel parentModel)
          |> List.map (Sub.map toMsg) |}
+
+  /// Run a list of messages through a program's Update function and return all
+  /// intermediate (model, cmd) states. The initial model comes from Init.
+  /// Useful for unit-testing update logic without spinning up a terminal.
+  ///
+  /// Example:
+  /// ```fsharp
+  /// let states = Program.simulate [Increment; Increment; Decrement] myProgram
+  /// let finalModel = states |> List.last |> fst
+  /// ```
+  let simulate (msgs: 'msg list) (program: Program<'model, 'msg>) : ('model * Cmd<'msg>) list =
+    let initModel, _ = program.Init()
+    msgs
+    |> List.scan (fun (m, _) msg -> program.Update msg m) (initModel, Cmd.none)
+    |> List.tail
 
 type TerminalBackend = {
   Size: unit -> int * int

@@ -20,7 +20,7 @@ module TestHarness =
   let private processCmd (program: Program<'model, 'msg>) (model: 'model) (cmd: Cmd<'msg>) : 'model * bool =
     let rec loop model cmd =
       match cmd with
-      | Quit -> model, true
+      | Quit _ -> model, true
       | Delay(0, msg) ->
         let newModel, nextCmd = program.Update msg model
         loop newModel nextCmd

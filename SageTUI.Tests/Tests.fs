@@ -1654,8 +1654,8 @@ let cmdTests = testList "Cmd" [
 
   testCase "quit is Quit" <| fun () ->
     match Cmd.quit with
-    | Quit -> ()
-    | _ -> failwith "expected Quit"
+    | Quit 0 -> ()
+    | _ -> failwith "expected Quit 0"
 
   testCase "map NoCmd = NoCmd" <| fun () ->
     match Cmd.map string (NoCmd: Cmd<int>) with
@@ -1663,9 +1663,9 @@ let cmdTests = testList "Cmd" [
     | _ -> failwith "expected NoCmd"
 
   testCase "map Quit = Quit" <| fun () ->
-    match Cmd.map string (Quit: Cmd<int>) with
-    | Quit -> ()
-    | _ -> failwith "expected Quit"
+    match Cmd.map string (Quit 0: Cmd<int>) with
+    | Quit 0 -> ()
+    | _ -> failwith "expected Quit 0"
 
   testCase "map Delay transforms msg" <| fun () ->
     match Cmd.map (fun x -> x * 2) (Delay(50, 3)) with
@@ -1686,6 +1686,28 @@ let cmdTests = testList "Cmd" [
       a |> Expect.equal "a" 10
       b |> Expect.equal "b" 20
     | _ -> failwith "expected mapped Batch"
+
+  testCase "quitWith carries code" <| fun () ->
+    match Cmd.quitWith 42 with
+    | Quit 42 -> ()
+    | _ -> failwith "expected Quit 42"
+
+  testCase "quit is exit code 0" <| fun () ->
+    match Cmd.quit with
+    | Quit 0 -> ()
+    | _ -> failwith "expected Quit 0"
+
+  testCase "toMessages extracts Delay messages" <| fun () ->
+    let cmd = Batch [Delay(0, "a"); Delay(100, "b"); Delay(0, "c")]
+    cmd |> Cmd.toMessages |> Expect.equal "messages" ["a"; "b"; "c"]
+
+  testCase "toMessages ignores async and quit" <| fun () ->
+    let cmd: Cmd<string> = Batch [Quit 0; OfAsync(fun _ -> async { () }); Delay(0, "x")]
+    cmd |> Cmd.toMessages |> Expect.equal "only sync msg" ["x"]
+
+  testCase "toMessages handles nested Batch" <| fun () ->
+    let cmd = Batch [Batch [Delay(0, 1); Delay(0, 2)]; Delay(0, 3)]
+    cmd |> Cmd.toMessages |> Expect.equal "nested" [1; 2; 3]
 ]
 
 let inputTypeTests = testList "Input types" [
@@ -1794,7 +1816,7 @@ let programTests = testList "Program" [
     let (m2, _) = counterProgram.Update Decrement 5
     m2 |> Expect.equal "dec" 4
     let (_, quitCmd) = counterProgram.Update QuitApp 0
-    match quitCmd with Quit -> () | _ -> failwith "expected Quit"
+    match quitCmd with Quit _ -> () | _ -> failwith "expected Quit"
 
   testCase "view produces Element" <| fun () ->
     let prog: Program<string, unit> = {
@@ -1819,6 +1841,45 @@ let programTests = testList "Program" [
     }
     prog.Subscribe false |> List.length |> Expect.equal "no subs" 0
     prog.Subscribe true |> List.length |> Expect.equal "one sub" 1
+
+  testCase "simulate runs messages through update" <| fun () ->
+    let prog: Program<int, CounterMsg> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun msg model ->
+        match msg with
+        | Increment -> (model + 1, Cmd.none)
+        | Decrement -> (model - 1, Cmd.none)
+        | QuitApp -> (model, Cmd.quit)
+      View = fun m -> El.text (string m)
+      Subscribe = fun _ -> []
+    }
+    let states = Program.simulate [Increment; Increment; Decrement] prog
+    states |> List.length |> Expect.equal "3 states" 3
+    let finalModel = states |> List.last |> fst
+    finalModel |> Expect.equal "final model is 1" 1
+
+  testCase "simulate with empty list returns empty" <| fun () ->
+    let prog: Program<int, CounterMsg> = {
+      Init = fun () -> (99, Cmd.none)
+      Update = fun _ m -> (m, Cmd.none)
+      View = fun _ -> Empty
+      Subscribe = fun _ -> []
+    }
+    Program.simulate [] prog |> Expect.isEmpty "empty states"
+
+  testCase "simulate captures intermediate models" <| fun () ->
+    let prog: Program<int, CounterMsg> = {
+      Init = fun () -> (0, Cmd.none)
+      Update = fun msg model ->
+        match msg with
+        | Increment -> (model + 1, Cmd.none)
+        | _ -> (model, Cmd.none)
+      View = fun _ -> Empty
+      Subscribe = fun _ -> []
+    }
+    let states = Program.simulate [Increment; Increment; Increment] prog
+    let models = states |> List.map fst
+    models |> Expect.equal "stepping models" [1; 2; 3]
 ]
 
 let terminalEventTests = testList "TerminalEvent" [
