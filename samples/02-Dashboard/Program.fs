@@ -250,14 +250,17 @@ let view model =
 
 // ── Subscriptions ─────────────────────────────────────────────────────
 
+let keyBindings =
+  Keys.bind [
+    Key.Char 'q', Quit
+    Key.Char 'Q', Quit
+    Key.Escape, Quit
+  ]
+
 let subscribe _model =
   [ TimerSub("tick", TimeSpan.FromMilliseconds(250.0), fun () -> Tick)
     ResizeSub (fun (w, h) -> Resized(w, h))
-    Keys.bind [
-      Key.Char 'q', Quit
-      Key.Char 'Q', Quit
-      Key.Escape, Quit
-    ] ]
+    keyBindings ]
 
 let program : Program<Model, Msg> =
   { Init = init

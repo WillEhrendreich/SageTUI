@@ -3,21 +3,27 @@
 ## Build & Test
 
 ```bash
-# Build
-dotnet build
+# Build everything
+dotnet build SageTUI.slnx
 
-# Run all 457 tests (Expecto)
-dotnet run
+# Run all tests (~1,112 Expecto tests)
+dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj
 
 # Run a single test or filtered subset by name
-dotnet run -- --filter "PackedCell roundtrip"
-dotnet run -- --filter "Phase 3"
+dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj -- --filter "PackedCell roundtrip"
+dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj -- --filter "Phase 3"
 
-# Watch mode (rebuild on .fs changes)
-dotnet watch run
+# Watch mode (rebuilds on .fs changes)
+dotnet watch run --project SageTUI.Tests/SageTUI.Tests.fsproj
+
+# Run benchmarks
+dotnet run -c Release --project SageTUI.Benchmarks
+
+# Run a sample
+dotnet run --project samples/09-SystemMonitor
 ```
 
-Tests and library live in the same project (known issue — separation planned). `Program.fs` just calls `runTestsInAssemblyWithCLIArgs`.
+The test project (`SageTUI.Tests/`) is separate from the library. `SageTUI.Tests/Program.fs` calls `runTestsInAssemblyWithCLIArgs`. Test files are split by domain: `Tests.fs` (core/phases 0–10), `LayoutTests.fs`, `ScrollTests.fs`, `CanvasTests.fs`, `WidgetTests.fs`, `HitTestTests.fs`, `HtmlTests.fs`, `CssTests.fs`, `IntegrationTests.fs`, `SnapshotTests.fs`, `SampleShowcaseTests.fs`.
 
 ## Architecture
 
@@ -34,14 +40,15 @@ The diff compares 16-cell chunks (256 bytes) via `Span.SequenceEqual` (JIT-vecto
 
 ### Compile Order (dependency chain)
 
-The `.fsproj` compile order is load-bearing — F# requires files ordered by dependency:
+The `.fsproj` compile order is load-bearing — F# requires files ordered by dependency. The actual order in `SageTUI.Library.fsproj`:
 
 ```
-Color → Buffer → Layout → Element → Arena → Effects → Terminal → Ansi
-→ Render → Input → Tea → Detect → App → Transition → Widgets → Tests → Program
+Color → Buffer → Layout → BorderRender → Element → Measure → CanvasRender
+→ Arena → Effects → Terminal → Ansi → Render → ArenaRender → Input → Tea
+→ Detect → Transition → App → Widgets → Scroll
 ```
 
-New files must be inserted at the correct position. The core pipeline is `Color → Buffer → Element → Render → Ansi → App`.
+New files must be inserted at the correct position. The core render pipeline is `Color → Buffer → Element → Render → Ansi → App`.
 
 ### Key Types
 
@@ -114,7 +121,7 @@ Rgb:    bits 8-15 = R, bits 16-23 = G, bits 24-31 = B
 
 ### Testing
 
-Tests use **Expecto** with **Expecto.Flip** argument order and **FsCheck** for property-based tests:
+Tests use **Expecto** with **Expecto.Flip** argument order, **FsCheck** for property-based tests, and **Verify.Expecto** for snapshot tests:
 
 ```fsharp
 // Expecto.Flip: message is ALWAYS the first argument, actual piped in last
@@ -128,20 +135,46 @@ list   |> Expect.hasLength "should have 3" 3
 // FsCheck property tests
 testProperty "roundtrip" <| fun (x: Color) ->
   x |> PackedColor.pack |> PackedColor.unpack |> Expect.equal "roundtrip" x
+
+// Snapshot tests (Verify.Expecto) — rendered output stored in SageTUI.Tests/snapshots/
+testTask "snapshot" {
+  let element = El.text "Hello" |> El.bordered Rounded
+  do! Verify(renderToString element).UseDirectory("snapshots")
+}
 ```
 
-Tests are organized by implementation phase (Phase 0–10) in `Tests.fs`.
+Core tests are organized by implementation phase (Phase 0–10) in `SageTUI.Tests/Tests.fs`. Snapshot files live in `SageTUI.Tests/snapshots/`.
 
-### Known Architectural Issues
+### Dual Render Path (by design)
 
-These were identified by design review and are tracked for future work:
+`Render.fs` and `ArenaRender.fs` are both active and intentionally maintained in parallel:
+- `Render.fs` — the **reference implementation**: simple recursive Element DU walk, used heavily in unit tests (`Tests.fs`, `LayoutTests.fs`)
+- `ArenaRender.fs` — the **production path**: walks the arena-lowered struct representation used by `App.run`
+- `LayoutTests.fs` contains **parity tests** (`arenaParityTests`) that assert both produce identical `Buffer` output
 
-- **Arena is dead code** — `Arena.lower` runs every frame in `App.run` but the result (`_rootHandle`) is discarded; `Render.render` walks the Element tree independently
-- **Transitions not wired** — `TransitionFx`/`Reconcile` exist but `App.run` never calls them; `El.viewTransition` is effectively a no-op
-- **Canvas is a no-op** — The `Canvas` Element case renders as `()`
-- **No resize handling** — Buffers are fixed at startup dimensions
-- **No ANSI input parser** — `Key` type exists but nothing parses escape sequences into keys
-- **Layout constraints ignored in Row/Column** — `Render.render` assigns `Fill` to all children, ignoring `Constrained` wrappers
+**Any new `Element` case must be added to both render paths.** Adding to only one will break parity tests. This is the maintenance cost of the two-path design.
+
+### Keys.bind Allocation Pattern
+
+`Keys.bind` allocates a `Dictionary`. Declare bindings at **module/let level**, not inside the `Subscribe` lambda:
+
+```fsharp
+// ✅ Dictionary created once
+let keyBindings = Keys.bind [ Key.Char 'q', Quit; Key.Escape, Quit ]
+let program = { ...; Subscribe = fun _ -> [keyBindings] }
+
+// ⚠️ Dictionary created on every model update
+let program = { ...; Subscribe = fun _ -> [ Keys.bind [ Key.Char 'q', Quit ] ] }
+```
+
+### Unix Raw Mode
+
+Raw mode on Linux/macOS uses `tcgetattr`/`tcsetattr` via `DllImport("libc")` in `Detect.fs`. No subprocess spawning. The saved `termios` snapshot is stored in `SavedModes.TermiosSnapshot` and restored on exit.
+
+### Known Limitations
+
+- **No mouse event generation** — `MouseSub` and `ClickSub` exist in the Sub DU, and `ArenaRender` builds a hit map, but the `Backend.create` implementation uses `Console.ReadKey` which cannot produce `MouseInput` events. Mouse is wired end-to-end except for the input source.
+- **Transitions are full-screen only** — `App.run` wires transitions, but `Area` is always the full terminal size. Per-element scoped transitions require the layout pass to record each keyed node's area.
 
 ### Confidential: expertPanel/
 

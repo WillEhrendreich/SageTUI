@@ -397,22 +397,22 @@ let view model =
   ]
   |> Theme.apply theme
 
+let keyBindings =
+  Keys.bind [
+    Key.Char 'q', Quit
+    Key.Escape, Quit
+    Key.Up, ScrollUp
+    Key.Down, ScrollDown
+    Key.Right, NextTab
+    Key.Left, PrevTab
+    Key.Tab, NextTab
+  ]
+
 let program : Program<Model, Msg> =
   { Init = init
     Update = update
     View = view
-    Subscribe = fun _ -> [
-      Keys.bind [
-        Key.Char 'q', Quit
-        Key.Escape, Quit
-        Key.Up, ScrollUp
-        Key.Down, ScrollDown
-        Key.Right, NextTab
-        Key.Left, PrevTab
-        Key.Tab, NextTab
-      ]
-      TimerSub("tick", TimeSpan.FromMilliseconds(500.0), fun () -> Tick)
-    ] }
+    Subscribe = fun _ -> [ keyBindings; TimerSub("tick", TimeSpan.FromMilliseconds(500.0), fun () -> Tick) ] }
 
 [<EntryPoint>]
 let main _ = App.run program; 0

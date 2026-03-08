@@ -293,22 +293,24 @@ let view model =
     grabbedOverlay
   ]
 
-let subscribe _model =
-  [ Keys.bind [
-      Key.Left, MoveLeft
-      Key.Char 'h', MoveLeft
-      Key.Right, MoveRight
-      Key.Char 'l', MoveRight
-      Key.Up, MoveUp
-      Key.Char 'k', MoveUp
-      Key.Down, MoveDown
-      Key.Char 'j', MoveDown
-      Key.Char ' ', GrabOrDrop
-      Key.Enter, GrabOrDrop
-      Key.Char 'q', Quit
-      Key.Char 'Q', Quit
-      Key.Escape, Quit
-    ] ]
+let keyBindings =
+  Keys.bind [
+    Key.Left, MoveLeft
+    Key.Char 'h', MoveLeft
+    Key.Right, MoveRight
+    Key.Char 'l', MoveRight
+    Key.Up, MoveUp
+    Key.Char 'k', MoveUp
+    Key.Down, MoveDown
+    Key.Char 'j', MoveDown
+    Key.Char ' ', GrabOrDrop
+    Key.Enter, GrabOrDrop
+    Key.Char 'q', Quit
+    Key.Char 'Q', Quit
+    Key.Escape, Quit
+  ]
+
+let subscribe _model = [ keyBindings ]
 
 let program : Program<Model, Msg> =
   { Init = init

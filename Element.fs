@@ -196,7 +196,7 @@ module El =
           let wordLen =
             let mutable w = 0
             for rune in word.EnumerateRunes() do
-              w <- w + (match rune.Value with v when v >= 0x1100 && (v <= 0x115F || (v >= 0x2E80 && v <= 0x9FFF) || (v >= 0xAC00 && v <= 0xD7A3) || (v >= 0xF900 && v <= 0xFAFF) || (v >= 0xFE10 && v <= 0xFE6F) || (v >= 0xFF01 && v <= 0xFF60) || (v >= 0xFFE0 && v <= 0xFFE6) || (v >= 0x20000 && v <= 0x2FFFD) || (v >= 0x30000 && v <= 0x3FFFD)) -> 2 | _ -> 1)
+              w <- w + RuneWidth.getColumnWidth rune
             w
           match col with
           | 0 ->
@@ -204,7 +204,7 @@ module El =
             | true ->
               let mutable charCol = 0
               for rune in word.EnumerateRunes() do
-                let rw = match rune.Value with v when v >= 0x1100 && (v <= 0x115F || (v >= 0x2E80 && v <= 0x9FFF) || (v >= 0xAC00 && v <= 0xD7A3)) -> 2 | _ -> 1
+                let rw = RuneWidth.getColumnWidth rune
                 match charCol + rw > maxWidth with
                 | true ->
                   lines.Add(current.ToString())

@@ -106,17 +106,19 @@ let view count =
   |> El.padAll 1
   |> El.bordered Rounded
 
+let keyBindings =
+  Keys.bind [
+    Key.Char 'j', Increment
+    Key.Char 'k', Decrement
+    Key.Char 'q', Quit
+    Key.Escape, Quit
+  ]
+
 let program : Program<int, Msg> =
   { Init = init
     Update = update
     View = view
-    Subscribe = fun _ -> [
-      Keys.bind [
-        Key.Char 'j', Increment
-        Key.Char 'k', Decrement
-        Key.Char 'q', Quit
-        Key.Escape, Quit
-      ] ] }
+    Subscribe = fun _ -> [ keyBindings ] }
 
 [<EntryPoint>]
 let main _ = App.run program; 0
@@ -161,16 +163,18 @@ let view count =
     El.text "[j] increment  [q] quit" |> El.dim
   ] |> El.padAll 1 |> El.bordered Rounded
 
+let keyBindings =
+  Keys.bind [
+    Key.Char 'j', Increment
+    Key.Char 'q', Quit
+    Key.Escape, Quit
+  ]
+
 let program : Program<int, Msg> =
   { Init = init
     Update = update
     View = view
-    Subscribe = fun _ -> [
-      Keys.bind [
-        Key.Char 'j', Increment
-        Key.Char 'q', Quit
-        Key.Escape, Quit
-      ] ] }
+    Subscribe = fun _ -> [ keyBindings ] }
 
 [<EntryPoint>]
 let main _ = App.run program; 0

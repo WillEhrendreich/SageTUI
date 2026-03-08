@@ -27,17 +27,19 @@ let view count =
   ] |> El.padAll 1 |> El.bordered Rounded
 
 // Wire it all together
+let keyBindings =
+  Keys.bind [
+    Key.Char 'j', Increment
+    Key.Char 'k', Decrement
+    Key.Char 'q', Quit
+    Key.Escape, Quit
+  ]
+
 let program : Program<int, Msg> =
   { Init = init
     Update = update
     View = view
-    Subscribe = fun _ -> [
-      Keys.bind [
-        Key.Char 'j', Increment
-        Key.Char 'k', Decrement
-        Key.Char 'q', Quit
-        Key.Escape, Quit
-      ] ] }
+    Subscribe = fun _ -> [ keyBindings ] }
 
 [<EntryPoint>]
 let main _ = App.run program; 0

@@ -412,18 +412,21 @@ let view model =
     footer
   ]
 
+let keyBindings =
+  Keys.bind [
+    Key.Right, NextContent
+    Key.Char 'l', NextContent
+    Key.Left, PrevContent
+    Key.Char 'h', PrevContent
+    Key.Char 'a', CycleAnim
+    Key.Char ' ', ToggleAuto
+    Key.Char 'q', Quit
+    Key.Char 'Q', Quit
+    Key.Escape, Quit
+  ]
+
 let subscribe model =
-  [ Keys.bind [
-      Key.Right, NextContent
-      Key.Char 'l', NextContent
-      Key.Left, PrevContent
-      Key.Char 'h', PrevContent
-      Key.Char 'a', CycleAnim
-      Key.Char ' ', ToggleAuto
-      Key.Char 'q', Quit
-      Key.Char 'Q', Quit
-      Key.Escape, Quit
-    ]
+  [ keyBindings
     ResizeSub (fun (w, h) -> Resized(w, h))
     TimerSub("anim-tick", TimeSpan.FromMilliseconds(200.0), fun () -> AnimTick)
     match model.AutoCycle with

@@ -253,17 +253,20 @@ let view model =
     El.text " [1-4] Switch Tab  [q] Quit" |> El.dim
   ]
 
+let keyBindings =
+  Keys.bind [
+    Key.Char '1', SwitchTab Base16
+    Key.Char '2', SwitchTab Palette256
+    Key.Char '3', SwitchTab TrueColor
+    Key.Char '4', SwitchTab TextStyles
+    Key.Char 'q', Quit
+    Key.Char 'Q', Quit
+    Key.Escape, Quit
+  ]
+
 let subscribe _model =
   [ TimerSub("anim", TimeSpan.FromMilliseconds(200.0), fun () -> Tick)
-    Keys.bind [
-      Key.Char '1', SwitchTab Base16
-      Key.Char '2', SwitchTab Palette256
-      Key.Char '3', SwitchTab TrueColor
-      Key.Char '4', SwitchTab TextStyles
-      Key.Char 'q', Quit
-      Key.Char 'Q', Quit
-      Key.Escape, Quit
-    ] ]
+    keyBindings ]
 
 let program : Program<Model, Msg> =
   { Init = init

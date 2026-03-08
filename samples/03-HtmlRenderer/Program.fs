@@ -195,16 +195,18 @@ let view model =
     footer
   ]
 
-let subscribe _model =
-  [ Keys.bind [
-      Key.Right, NextPage
-      Key.Char 'l', NextPage
-      Key.Left, PrevPage
-      Key.Char 'h', PrevPage
-      Key.Char 'q', Quit
-      Key.Char 'Q', Quit
-      Key.Escape, Quit
-    ] ]
+let keyBindings =
+  Keys.bind [
+    Key.Right, NextPage
+    Key.Char 'l', NextPage
+    Key.Left, PrevPage
+    Key.Char 'h', PrevPage
+    Key.Char 'q', Quit
+    Key.Char 'Q', Quit
+    Key.Escape, Quit
+  ]
+
+let subscribe _model = [ keyBindings ]
 
 let program : Program<Model, Msg> =
   { Init = init

@@ -125,6 +125,19 @@ module RawMode =
   [<DllImport("kernel32.dll")>]
   extern nativeint GetStdHandle(int nStdHandle)
 
+  // termios constants (POSIX)
+  [<DllImport("libc", EntryPoint = "tcgetattr")>]
+  extern int tcgetattr(int fd, nativeint termios)
+  [<DllImport("libc", EntryPoint = "tcsetattr")>]
+  extern int tcsetattr(int fd, int action, nativeint termios)
+
+  let private TCSANOW = 0
+  let private ICANON = 0x100u   // line-buffered input
+  let private ECHO   = 0x8u     // echo input characters
+  let private ISIG   = 0x80u    // enable signals (Ctrl-C etc) — keep enabled
+  // Termios struct is 60 bytes on Linux/macOS (enough for both ABI layouts)
+  let private termiosSize = 60
+
   let private ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004u
   let private ENABLE_PROCESSED_INPUT = 0x0001u
   let private ENABLE_LINE_INPUT = 0x0002u
@@ -133,7 +146,9 @@ module RawMode =
   type SavedModes =
     { Platform: Platform
       InputMode: uint32
-      OutputMode: uint32 }
+      OutputMode: uint32
+      /// Saved termios bytes for Unix platforms (60 bytes, zero on Windows).
+      TermiosSnapshot: byte array }
 
   let enter (platform: Platform) : SavedModes =
     match platform with
@@ -146,13 +161,27 @@ module RawMode =
       GetConsoleMode(stdout, &outMode) |> ignore
       SetConsoleMode(stdin, inMode &&& ~~~(ENABLE_LINE_INPUT ||| ENABLE_ECHO_INPUT ||| ENABLE_PROCESSED_INPUT)) |> ignore
       SetConsoleMode(stdout, outMode ||| ENABLE_VIRTUAL_TERMINAL_PROCESSING) |> ignore
-      { Platform = Windows; InputMode = inMode; OutputMode = outMode }
+      { Platform = Windows; InputMode = inMode; OutputMode = outMode; TermiosSnapshot = Array.empty }
     | MacOS | Linux ->
-      let psi = System.Diagnostics.ProcessStartInfo("stty", "raw -echo")
-      psi.RedirectStandardOutput <- true
-      psi.UseShellExecute <- false
-      System.Diagnostics.Process.Start(psi).WaitForExit()
-      { Platform = platform; InputMode = 0u; OutputMode = 0u }
+      let snapshot = Array.zeroCreate<byte> termiosSize
+      let handle = Runtime.InteropServices.Marshal.AllocHGlobal(termiosSize)
+      try
+        tcgetattr(0, handle) |> ignore
+        Runtime.InteropServices.Marshal.Copy(handle, snapshot, 0, termiosSize)
+        // Clear ICANON and ECHO; leave ISIG so Ctrl-C still works
+        let iflagsOffset = 0  // c_iflag is first field on both Linux and macOS
+        let lflagsOffset =
+          match platform with
+          | Linux -> 12   // offsetof(termios, c_lflag) on Linux = 12
+          | _     -> 8    // offsetof(termios, c_lflag) on macOS = 8
+        let lflags = BitConverter.ToUInt32(snapshot, lflagsOffset)
+        let newLflags = lflags &&& ~~~(ICANON ||| ECHO)
+        let newBytes = BitConverter.GetBytes(newLflags)
+        Runtime.InteropServices.Marshal.Copy(newBytes, 0, handle + nativeint lflagsOffset, 4)
+        tcsetattr(0, TCSANOW, handle) |> ignore
+      finally
+        Runtime.InteropServices.Marshal.FreeHGlobal(handle)
+      { Platform = platform; InputMode = 0u; OutputMode = 0u; TermiosSnapshot = snapshot }
 
   let leave (saved: SavedModes) =
     match saved.Platform with
@@ -162,10 +191,15 @@ module RawMode =
       SetConsoleMode(stdin, saved.InputMode) |> ignore
       SetConsoleMode(stdout, saved.OutputMode) |> ignore
     | MacOS | Linux ->
-      let psi = System.Diagnostics.ProcessStartInfo("stty", "sane")
-      psi.RedirectStandardOutput <- true
-      psi.UseShellExecute <- false
-      System.Diagnostics.Process.Start(psi).WaitForExit()
+      match saved.TermiosSnapshot.Length with
+      | 0 -> ()
+      | _ ->
+        let handle = Runtime.InteropServices.Marshal.AllocHGlobal(termiosSize)
+        try
+          Runtime.InteropServices.Marshal.Copy(saved.TermiosSnapshot, 0, handle, termiosSize)
+          tcsetattr(0, TCSANOW, handle) |> ignore
+        finally
+          Runtime.InteropServices.Marshal.FreeHGlobal(handle)
 
 module Backend =
   let private mapKey (ki: ConsoleKeyInfo) : Key option =

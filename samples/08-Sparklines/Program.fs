@@ -307,6 +307,21 @@ let view model =
 
   El.column [ header; content |> El.fill; footer ]
 
+let keyBindings =
+  Keys.bind [
+    Key.Char 'q', Quit
+    Key.Char 'Q', Quit
+    Key.Escape, Quit
+    Key.Char 'p', TogglePause
+    Key.Char 'P', TogglePause
+    Key.Char 'r', Reset
+    Key.Char 'R', Reset
+    Key.Char '1', Focus 0
+    Key.Char '2', Focus 1
+    Key.Char '3', Focus 2
+    Key.Char '4', Focus 3
+  ]
+
 let subscribe _model =
   let tickInterval =
     match isDemoMode with
@@ -314,19 +329,7 @@ let subscribe _model =
     | false -> TimeSpan.FromMilliseconds(100.0)
   [ TimerSub("tick", tickInterval, fun () -> Tick)
     ResizeSub (fun (w, h) -> Resized (w, h))
-    Keys.bind [
-      Key.Char 'q', Quit
-      Key.Char 'Q', Quit
-      Key.Escape, Quit
-      Key.Char 'p', TogglePause
-      Key.Char 'P', TogglePause
-      Key.Char 'r', Reset
-      Key.Char 'R', Reset
-      Key.Char '1', Focus 0
-      Key.Char '2', Focus 1
-      Key.Char '3', Focus 2
-      Key.Char '4', Focus 3
-    ] ]
+    keyBindings ]
 
 let program : Program<Model, Msg> =
   { Init = init
