@@ -1,5 +1,6 @@
 module SageTUI.IntegrationTests
 
+open System
 open Expecto
 open Expecto.Flip
 open SageTUI
@@ -825,6 +826,120 @@ let formIntegrationTests =
   ]
 
 // ============================================================
+// PENDING DELAY TESTS (TestHarness.advanceTime + Cmd.delay)
+// ============================================================
+
+type DelayedMsg = Kick | Triggered
+type DelayedModel = NotYet | Done
+
+let delayedProgram : Program<DelayedModel, DelayedMsg> =
+  { Init = fun () -> NotYet, Cmd.none
+    Update = fun msg model ->
+      match msg with
+      | Kick -> model, Cmd.delay 500 Triggered
+      | Triggered -> Done, Cmd.none
+    View = fun _ -> El.empty
+    Subscribe = fun _ -> [] }
+
+type ChainMsg = StartChain | GotA | GotB
+type ChainModel = Idle | HaveA | HaveAB
+
+let chainProgram : Program<ChainModel, ChainMsg> =
+  { Init = fun () -> Idle, Cmd.delay 100 GotA
+    Update = fun msg model ->
+      match msg with
+      | StartChain -> model, Cmd.none
+      | GotA -> HaveA, Cmd.delay 50 GotB
+      | GotB -> HaveAB, Cmd.none
+    View = fun _ -> El.empty
+    Subscribe = fun _ -> [] }
+
+type TwinMsg = First | Second
+type TwinModel = { Fired: TwinMsg list }
+
+let twinDelayProgram : Program<TwinModel, TwinMsg> =
+  { Init = fun () ->
+      { Fired = [] },
+      Cmd.batch [ Cmd.delay 100 First; Cmd.delay 100 Second ]
+    Update = fun msg model ->
+      { model with Fired = model.Fired @ [msg] }, Cmd.none
+    View = fun _ -> El.empty
+    Subscribe = fun _ -> [] }
+
+let pendingDelayTests =
+  testList "PendingDelays" [
+
+    test "Delay(500) from Update is NOT fired before advanceTime" {
+      let app = TestHarness.init 40 10 delayedProgram |> TestHarness.sendMsg Kick
+      app.Model |> Expect.equal "not yet triggered" NotYet
+    }
+
+    test "Delay(500) fires after advanceTime reaches 500ms" {
+      let app =
+        TestHarness.init 40 10 delayedProgram
+        |> TestHarness.sendMsg Kick
+        |> TestHarness.advanceTime (TimeSpan.FromMilliseconds 500.0)
+      app.Model |> Expect.equal "triggered at 500ms" Done
+    }
+
+    test "Delay(500) does NOT fire at 499ms" {
+      let app =
+        TestHarness.init 40 10 delayedProgram
+        |> TestHarness.sendMsg Kick
+        |> TestHarness.advanceTime (TimeSpan.FromMilliseconds 499.0)
+      app.Model |> Expect.equal "not yet at 499ms" NotYet
+    }
+
+    test "Delay(0, msg) still fires immediately — not enqueued in PendingDelays" {
+      // Cmd.ofMsg is Delay(0, msg) — must remain synchronous
+      let immediateProgram : Program<int, string> =
+        { Init = fun () -> 0, Cmd.none
+          Update = fun msg model ->
+            match msg with
+            | "kick" -> model, Cmd.ofMsg "done"
+            | "done" -> model + 1, Cmd.none
+            | _ -> model, Cmd.none
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> [] }
+      let app = TestHarness.init 40 10 immediateProgram |> TestHarness.sendMsg "kick"
+      app.Model |> Expect.equal "fired synchronously" 1
+      TestHarness.pendingDelayCount app |> Expect.equal "no pending delays" 0
+    }
+
+    test "pendingDelayCount reflects enqueued delay before advanceTime" {
+      let app = TestHarness.init 40 10 delayedProgram |> TestHarness.sendMsg Kick
+      TestHarness.pendingDelayCount app |> Expect.equal "one delay pending" 1
+    }
+
+    test "pendingDelayCount is zero after delay fires" {
+      let app =
+        TestHarness.init 40 10 delayedProgram
+        |> TestHarness.sendMsg Kick
+        |> TestHarness.advanceTime (TimeSpan.FromMilliseconds 500.0)
+      TestHarness.pendingDelayCount app |> Expect.equal "delay consumed" 0
+    }
+
+    test "causal chain: Delay(100,A) → Delay(50,B) fires B at T=150 not T=50" {
+      // Advance just past T=100: A fires, B is enqueued at T=150
+      let app1 =
+        TestHarness.init 40 10 chainProgram
+        |> TestHarness.advanceTime (TimeSpan.FromMilliseconds 110.0)
+      app1.Model |> Expect.equal "A fired at T=100" HaveA
+      TestHarness.pendingDelayCount app1 |> Expect.equal "B still pending" 1
+      // Advance to T=150: B fires
+      let app2 = app1 |> TestHarness.advanceTime (TimeSpan.FromMilliseconds 40.0)
+      app2.Model |> Expect.equal "B fired at T=150" HaveAB
+    }
+
+    test "two concurrent delays fire in arrival order at same virtual time" {
+      let app =
+        TestHarness.init 40 10 twinDelayProgram
+        |> TestHarness.advanceTime (TimeSpan.FromMilliseconds 100.0)
+      app.Model.Fired |> Expect.equal "First before Second" [First; Second]
+    }
+  ]
+
+// ============================================================
 // ALL INTEGRATION TESTS
 // ============================================================
 
@@ -836,4 +951,5 @@ let integrationTests =
     widgetIntegrationTests
     kanbanIntegrationTests
     formIntegrationTests
+    pendingDelayTests
   ]

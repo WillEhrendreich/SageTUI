@@ -29,67 +29,107 @@ type TestApp<'model, 'msg> = {
   VirtualTime: TimeSpan
   /// Tracks the next scheduled fire time for each TimerSub, keyed by timer ID.
   TimerNextFire: Map<string, TimeSpan>
+  /// Delay(n>0, msg) commands returned from Update, waiting to fire at their
+  /// absolute virtual time. Drained by advanceTime. Each entry is
+  /// (absoluteFireTime, arrivalOrder, msg) — arrivalOrder is a monotonic counter
+  /// used as a tiebreaker when multiple delays share the same fire time.
+  PendingDelays: (TimeSpan * int * 'msg) list
+  /// Monotonic counter for assigning arrivalOrder to new PendingDelays entries.
+  DelaySeq: int
 }
 
 /// Testing utilities for SageTUI programs. No real terminal required.
 ///
 /// Design: TestHarness functions route simulated events through your program's
 /// Subscribe function, then process resulting messages through Update, handling
-/// synchronous commands (Quit, Delay 0ms, Batch) inline. Async commands are NOT
-/// executed — assert their presence with Cmd.hasAsync in unit tests of Update.
+/// synchronous commands (Quit, Delay 0ms, Batch) inline. Non-zero Delay commands
+/// are captured in PendingDelays and fired by advanceTime with causal semantics:
+/// a child delay's fire time is computed relative to its parent's fire time.
+/// Async commands (OfAsync, OfCancellableAsync) are NOT executed — assert their
+/// presence with Cmd.hasAsync in unit tests of Update.
 module TestHarness =
 
-  // Process commands synchronously. Handles Quit, Delay(0,msg), and Batch.
-  // All other Cmd cases (OfAsync, TimerSub, etc.) are intentionally skipped.
+  // Process commands synchronously. Handles Quit, Delay(0,msg), Batch, and
+  // Delay(n>0,msg) — which is enqueued rather than dropped.
+  // Returns (model, hasQuit, exitCode, newPendingDelays, nextSeq).
   let private processCmd
     (program: Program<'model, 'msg>)
+    (effectiveNow: TimeSpan)
+    (seqStart: int)
     (model: 'model)
     (cmd: Cmd<'msg>)
-    : 'model * bool * int option =
-    let rec loop model cmd =
+    : 'model * bool * int option * (TimeSpan * int * 'msg) list * int =
+    let rec loop seqN model cmd =
       match cmd with
-      | Quit code -> model, true, Some code
+      | Quit code -> model, true, Some code, [], seqN
       | Delay(0, msg) ->
         let newModel, nextCmd = program.Update msg model
-        loop newModel nextCmd
+        loop seqN newModel nextCmd
+      | Delay(n, msg) ->
+        let fireAt = effectiveNow + TimeSpan.FromMilliseconds(float n)
+        model, false, None, [ (fireAt, seqN, msg) ], seqN + 1
       | Batch cmds ->
         cmds
         |> List.fold
-          (fun (m, q, ec) c ->
+          (fun (m, q, ec, delays, sn) c ->
             match q with
-            | true -> m, true, ec
-            | false -> loop m c)
-          (model, false, None)
-      | _ -> model, false, None
-    loop model cmd
+            | true -> m, true, ec, delays, sn
+            | false ->
+              let m', q', ec', newDelays, sn' = loop sn m c
+              m', q', ec', delays @ newDelays, sn')
+          (model, false, None, [], seqN)
+      | _ -> model, false, None, [], seqN
+    loop seqStart model cmd
 
   // Apply a list of messages in order, stopping on quit.
-  let private applyMsgs (app: TestApp<'model, 'msg>) (msgs: 'msg list) : TestApp<'model, 'msg> =
-    let model, hasQuit, exitCode =
+  // effectiveNow is used as the base time for computing child delay fire times.
+  let private applyMsgs
+    (effectiveNow: TimeSpan)
+    (app: TestApp<'model, 'msg>)
+    (msgs: 'msg list)
+    : TestApp<'model, 'msg> =
+    let model, hasQuit, exitCode, newDelays, seqN =
       msgs
       |> List.fold
-        (fun (m, q, ec) msg ->
+        (fun (m, q, ec, delays, sn) msg ->
           match q with
-          | true -> m, true, ec
+          | true -> m, true, ec, delays, sn
           | false ->
             let newModel, cmd = app.Program.Update msg m
-            let newModel', quit, ec' = processCmd app.Program newModel cmd
-            newModel', quit, ec')
-        (app.Model, app.HasQuit, app.ExitCode)
-    { app with Model = model; HasQuit = hasQuit; ExitCode = exitCode }
+            let newModel', quit, ec', cmdDelays, sn' =
+              processCmd app.Program effectiveNow sn newModel cmd
+            newModel', quit, ec', delays @ cmdDelays, sn')
+        (app.Model, app.HasQuit, app.ExitCode, [], app.DelaySeq)
+    { app with
+        Model = model
+        HasQuit = hasQuit
+        ExitCode = exitCode
+        PendingDelays = app.PendingDelays @ newDelays
+        DelaySeq = seqN }
 
   /// Initialize a test app from a program. Runs Init and processes any synchronous commands.
   let init (width: int) (height: int) (program: Program<'model, 'msg>) : TestApp<'model, 'msg> =
     let model, cmd = program.Init()
-    let model', hasQuit, exitCode = processCmd program model cmd
-    { Model = model'
+    let app0 = {
+      Model = model
       Program = program
       Width = width
       Height = height
-      HasQuit = hasQuit
-      ExitCode = exitCode
+      HasQuit = false
+      ExitCode = None
       VirtualTime = TimeSpan.Zero
-      TimerNextFire = Map.empty }
+      TimerNextFire = Map.empty
+      PendingDelays = []
+      DelaySeq = 0
+    }
+    let model', hasQuit, exitCode, pendingDelays, seqN =
+      processCmd program TimeSpan.Zero 0 model cmd
+    { app0 with
+        Model = model'
+        HasQuit = hasQuit
+        ExitCode = exitCode
+        PendingDelays = pendingDelays
+        DelaySeq = seqN }
 
   /// Simulate pressing a key (no modifier).
   let pressKey (key: Key) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
@@ -101,7 +141,7 @@ module TestHarness =
             | Some msg -> yield msg
             | None -> ()
           | _ -> () ]
-    applyMsgs app msgs
+    applyMsgs app.VirtualTime app msgs
 
   /// Simulate pressing a key with modifier keys held (e.g., Ctrl, Shift, Alt).
   let pressKeyWith (key: Key) (mods: Modifiers) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
@@ -113,7 +153,7 @@ module TestHarness =
             | Some msg -> yield msg
             | None -> ()
           | _ -> () ]
-    applyMsgs app msgs
+    applyMsgs app.VirtualTime app msgs
 
   /// Simulate typing a string character by character (no modifiers).
   let typeText (text: string) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
@@ -122,7 +162,7 @@ module TestHarness =
   /// Directly send a message to Update, bypassing subscriptions.
   /// Useful for testing Update logic in isolation.
   let sendMsg (msg: 'msg) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
-    applyMsgs app [ msg ]
+    applyMsgs app.VirtualTime app [ msg ]
 
   /// Simulate a focus-next event (e.g., Tab key) via FocusSub handlers.
   let focusNext (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
@@ -134,7 +174,7 @@ module TestHarness =
             | Some msg -> yield msg
             | None -> ()
           | _ -> () ]
-    applyMsgs app msgs
+    applyMsgs app.VirtualTime app msgs
 
   /// Simulate a focus-previous event (e.g., Shift+Tab) via FocusSub handlers.
   let focusPrev (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
@@ -146,7 +186,7 @@ module TestHarness =
             | Some msg -> yield msg
             | None -> ()
           | _ -> () ]
-    applyMsgs app msgs
+    applyMsgs app.VirtualTime app msgs
 
   // Render to arena + buffer (internal, keeps arena alive for hit testing).
   let private renderArena (app: TestApp<'model, 'msg>) =
@@ -179,7 +219,7 @@ module TestHarness =
             | Some msg -> yield msg
             | None -> ()
           | _ -> () ]
-    applyMsgs app msgs
+    applyMsgs app.VirtualTime app msgs
 
   /// Simulate a terminal resize. Routes through ResizeSub handlers and updates
   /// Width/Height so subsequent renders use the new dimensions.
@@ -189,23 +229,28 @@ module TestHarness =
           match sub with
           | ResizeSub handler -> yield handler (width, height)
           | _ -> () ]
-    let app' = applyMsgs app msgs
+    let app' = applyMsgs app.VirtualTime app msgs
     { app' with Width = width; Height = height }
 
-  /// Advance virtual time by dt, firing any TimerSub whose interval has elapsed.
+  /// Advance virtual time by dt, firing any TimerSub whose interval has elapsed
+  /// AND any Delay(n>0, msg) commands whose absolute fire time has been reached.
   ///
   /// Firing rules:
-  /// - If dt > interval, the timer fires multiple times (once per elapsed interval).
-  /// - Multiple timers firing at the same virtual time are processed in timer-ID order
-  ///   (alphabetical) for determinism.
-  /// - Each fired message is processed (and its commands handled) before the next fires.
-  ///
-  /// Use with Init-time virtual time = TimeSpan.Zero. First fire is at t = interval.
+  /// - Pending delays (from Update) and timer fires are processed in temporal order.
+  /// - At the same virtual time, pending delays fire before timer subs.
+  /// - Causal semantics: a child delay's fire time is relative to its parent's
+  ///   fire time, not the advanceTime call's end time. A Delay(100,A) that fires
+  ///   at T=100 and whose Update returns Delay(50,B) will have B fire at T=150.
+  /// - advanceTime fully drains all fires within [currentTime, newTime], including
+  ///   cascading chains generated by fired delays.
+  /// - TimerSub: if dt > interval, the timer fires multiple times.
+  ///   Multiple timers at the same virtual time are sorted by ID for determinism.
   let advanceTime (dt: TimeSpan) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
     let newTime = app.VirtualTime + dt
     let subs = app.Program.Subscribe app.Model
-    // Collect all (fireTime, id, interval, tick) tuples for timers that fire within [now, newTime]
-    let fires =
+
+    // Collect all timer fires sorted by (time, id)
+    let sortedTimerFires =
       [ for sub in subs do
           match sub with
           | TimerSub(id, interval, tick) ->
@@ -215,22 +260,59 @@ module TestHarness =
               |> Option.defaultWith (fun () -> interval)
             let mutable t = nextFire
             while t <= newTime do
-              yield (t, id, interval, tick)
+              yield (t, id, interval, tick ())
               t <- t + interval
           | _ -> () ]
-    // Sort by fire time, then by ID for determinism
-    let sorted =
-      fires
       |> List.sortWith (fun (t1, id1, _, _) (t2, id2, _, _) ->
         let tc = TimeSpan.Compare(t1, t2)
-        if tc <> 0 then tc else String.Compare(id1, id2, StringComparison.Ordinal))
-    // Update next-fire map to reflect the last fire time for each timer
+        if tc <> 0 then tc
+        else String.Compare(id1, id2, StringComparison.Ordinal))
+
     let updatedNextFire =
-      sorted
+      sortedTimerFires
       |> List.fold (fun acc (t, id, interval, _) -> Map.add id (t + interval) acc) app.TimerNextFire
-    // Process messages sequentially
-    let app' = sorted |> List.fold (fun app (_, _, _, tick) -> applyMsgs app [ tick () ]) app
-    { app' with VirtualTime = newTime; TimerNextFire = updatedNextFire }
+
+    // Unified drain: process pending delays and timer fires in temporal order.
+    // At each step, process whichever fires earliest. Pending delays at the same
+    // time as a timer fire take priority (arrivalOrder < Int32.MaxValue).
+    // Each fired message may produce new pending delays; the loop continues
+    // until no pending delays and no timer fires remain within newTime.
+    let rec drain
+      (current: TestApp<'model, 'msg>)
+      (remainingTimers: (TimeSpan * string * TimeSpan * 'msg) list)
+      : TestApp<'model, 'msg> =
+
+      let earliestDelay =
+        current.PendingDelays
+        |> List.filter (fun (t, _, _) -> t <= newTime)
+        |> List.sortWith (fun (t1, s1, _) (t2, s2, _) ->
+          let tc = TimeSpan.Compare(t1, t2)
+          if tc <> 0 then tc else compare s1 s2)
+        |> List.tryHead
+
+      let earliestTimer = List.tryHead remainingTimers
+
+      match earliestDelay, earliestTimer with
+      | None, None -> current
+      | Some (delayTime, seqN, msg), None ->
+        let pending' =
+          current.PendingDelays
+          |> List.filter (fun (t, s, _) -> not (t = delayTime && s = seqN))
+        drain (applyMsgs delayTime { current with PendingDelays = pending' } [ msg ]) []
+      | None, Some (timerTime, _, _, msg) ->
+        drain (applyMsgs timerTime current [ msg ]) (List.tail remainingTimers)
+      | Some (delayTime, seqN, msg), Some (timerTime, _, _, timerMsg) ->
+        if TimeSpan.Compare(delayTime, timerTime) <= 0 then
+          // Pending delay fires first (or same time — pending delays take priority)
+          let pending' =
+            current.PendingDelays
+            |> List.filter (fun (t, s, _) -> not (t = delayTime && s = seqN))
+          drain (applyMsgs delayTime { current with PendingDelays = pending' } [ msg ]) remainingTimers
+        else
+          drain (applyMsgs timerTime current [ timerMsg ]) (List.tail remainingTimers)
+
+    let finalApp = drain app sortedTimerFires
+    { finalApp with VirtualTime = newTime; TimerNextFire = updatedNextFire }
 
   /// Render the current view to a Buffer. Use Buffer.get to inspect individual cells.
   let renderBuffer (app: TestApp<'model, 'msg>) =
@@ -262,3 +344,9 @@ module TestHarness =
   /// Render any Element to a plain string and split into lines.
   let renderElementLines (width: int) (height: int) (elem: Element) : string array =
     renderElement width height elem |> fun s -> s.Split('\n')
+
+  /// Returns the number of Delay(n>0, msg) commands currently enqueued,
+  /// waiting to be fired by advanceTime.
+  let pendingDelayCount (app: TestApp<'model, 'msg>) : int =
+    List.length app.PendingDelays
+
