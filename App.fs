@@ -251,10 +251,13 @@ module App =
         frameSw.Restart()
         ArenaRender.renderRoot arena rootHandle area backBuf
         let renderMs = frameSw.Elapsed.TotalMilliseconds
-        // Rebuild keyed-area map when any keyed elements are present.
-        // Guarding on HitMap.Count > 0 skips the Map allocation entirely for apps
-        // without El.keyed elements. prevKeyAreas for apps that have keyed elements
-        // but no HitMap entries would be stale — so we don't gate on transition state.
+        // Rebuild keyed-area map every frame that has keyed elements.
+        // We CANNOT gate this on 'transitions active' — a 'staying' element (present
+        // in both prev and current frames) may reposition silently with no entering/exiting
+        // fires. When it later exits, App.run uses prevKeyAreas for the exit-transition Area.
+        // If prevKeyAreas was never updated during the staying frames, the exit transition
+        // fires at the stale entry position. Gating on HitMap.Count=0 correctly skips the
+        // Map allocation only for apps with zero El.keyed elements.
         let currentKeyAreas =
           match arena.HitMap.Count > 0 with
           | true -> ArenaRender.keyAreas arena
@@ -292,10 +295,12 @@ module App =
             TransitionFx.applyWipe t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
           | Dissolve _ ->
             // DissolveOrder is always Some for Dissolve — computed once at transition start.
+            // None here means a construction site failed to initialise it — fail loudly
+            // instead of silently re-enabling the eliminated per-frame O(N) allocation.
             let order =
               match at.DissolveOrder with
               | Some o -> o
-              | None -> TransitionFx.fisherYatesShuffle (at.Key.GetHashCode()) (at.Area.Width * at.Area.Height)
+              | None -> failwith "DissolveOrder must be Some for Dissolve transitions — invariant violated at construction site"
             TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
           | _ -> ())
 

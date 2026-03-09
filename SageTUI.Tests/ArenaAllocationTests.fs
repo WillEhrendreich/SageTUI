@@ -209,31 +209,71 @@ let arenaAllocationTests =
             |> Expect.isTrue
                 "LayoutScratch overflow must throw with a diagnostic message containing 'LayoutScratch overflow', not IndexOutOfRangeException"
 
-        testCase "DissolveOrder is computed once per transition start, not per frame" <| fun () ->
-            // Verify that ActiveTransition carries a pre-computed DissolveOrder for Dissolve
-            // transitions. If DissolveOrder = None for a Dissolve transition in App.run,
-            // the fallback path calls fisherYatesShuffle per frame — an O(N) allocation.
-            // This test verifies the constructor at the call site correctly sets DissolveOrder = Some.
+        testCase "keyAreas always reflects current-frame position (regression: stale prevKeyAreas for staying elements)" <| fun () ->
+            // Regression test for Sprint 24 fix. Scenario: a keyed element is present in
+            // both frame 1 and frame 2 ('staying'), but repositions between frames.
+            // Verifies that ArenaRender.keyAreas always returns the CURRENT frame's area —
+            // i.e., the map is unconditionally rebuilt when HitMap.Count > 0, not cached.
+            //
+            // In App.run, prevKeyAreas <- currentKeyAreas each frame. If the staying element
+            // later exits, the exit transition must use the new (frame 2) position, not the
+            // original (frame 1) entry position. Without Sprint 24's fix, prevKeyAreas would
+            // be stale because the map was only rebuilt when entering/exiting were non-empty.
+            let arena = FrameArena.create 4096 65536 4096
+            let buf   = Buffer.create 80 24
+            let fullArea = { X = 0; Y = 0; Width = 80; Height = 24 }
+
+            // Frame 1: "panel" occupies left half (X=0, Width=40)
+            // El.width must be OUTSIDE El.keyed to be visible to the Row layout pass
+            FrameArena.reset arena
+            let frame1 = El.row [ El.keyed "panel" (El.text "P") |> El.width 40; El.fill (El.text "") ]
+            let root1 = Arena.lower arena frame1
+            ArenaRender.renderRoot arena root1 fullArea buf
+            let areas1 = ArenaRender.keyAreas arena
+
+            // Frame 2: same key "panel", now occupies right half (X=40, Width=40)
+            FrameArena.reset arena
+            let frame2 = El.row [ El.fill (El.text ""); El.keyed "panel" (El.text "P") |> El.width 40 ]
+            let root2 = Arena.lower arena frame2
+            ArenaRender.renderRoot arena root2 fullArea buf
+            let areas2 = ArenaRender.keyAreas arena
+
+            areas1.["panel"].X |> Expect.equal "frame1: panel starts at left edge (X=0)" 0
+            areas2.["panel"].X |> Expect.equal "frame2: panel repositioned to right half (X=40)" 40
+            (areas2.["panel"].X, areas1.["panel"].X)
+            |> Expect.isGreaterThan
+                "keyAreas must reflect the current frame — if panel repositions, the map must show the new position"
+
+        testCase "Dissolve per-frame apply allocates < 64 bytes after warmup (DissolveOrder cached)" <| fun () ->
+            // Allocates the DissolveOrder array ONCE at construction, not per frame.
+            // Verifies the per-frame apply path allocates near zero when using a cached order.
+            // Before Sprint 24: fisherYatesShuffle allocated a fresh int array per frame
+            // (~7.68KB for 40x12 area). After: the order is pre-computed; apply is allocation-free.
             let area = { X = 0; Y = 0; Width = 40; Height = 12 }
-            let key = "panel"
-            let transition = Dissolve 300<ms>
-            let order = TransitionFx.fisherYatesShuffle (key.GetHashCode()) (area.Width * area.Height)
+            let buf  = Buffer.create 40 12
+            let order = TransitionFx.fisherYatesShuffle 42 (area.Width * area.Height)
+            let snapshot = Array.zeroCreate (area.Width * area.Height)
             let at =
-                { Key = key
-                  Transition = transition
+                { Key = "panel"
+                  Transition = Dissolve 300<ms>
                   StartMs = 0L
                   DurationMs = 300
                   Easing = Ease.cubicInOut
-                  SnapshotBefore = Array.zeroCreate (area.Width * area.Height)
+                  SnapshotBefore = snapshot
                   Area = area
                   DissolveOrder = Some order }
 
-            at.DissolveOrder
-            |> Expect.isSome
-                "DissolveOrder must be Some for a Dissolve transition — App.run must compute it at transition start, not per frame"
+            let frame () =
+                let t = ActiveTransition.progress 150L at
+                match at.DissolveOrder with
+                | Some o ->
+                    TransitionFx.applyDissolve t o at.SnapshotBefore buf.Cells at.Area.Y at.Area.Width at.Area.Height buf
+                | None -> ()
 
-            at.DissolveOrder.Value.Length
-            |> Expect.equal
-                "DissolveOrder array length must equal Width * Height of the transition area"
-                (area.Width * area.Height)
+            let totalAllocated = measureAllocBytes 100 1000 frame
+            let perFrame = totalAllocated / 1000L
+
+            (perFrame, 64L)
+            |> Expect.isLessThanOrEqual
+                (sprintf "Dissolve per-frame apply allocated %d bytes (expected < 64). DissolveOrder must be pre-computed and passed as a cached array, not re-allocated per frame." perFrame)
     ]
