@@ -366,17 +366,24 @@ let asyncTests = testList "FuzzyFinder.searchAsync" [
     let cmd = FuzzyFinder.searchAsync "he" [| "hello"; "world" |] id id
     Cmd.hasAsync cmd |> Expect.isTrue "is async"
   }
-  test "searchAsyncFromModel uses cached Candidates, not items" {
-    // Verify searchAsyncFromModel uses m.Candidates rather than re-running toString.
-    let calls = System.Collections.Generic.List<string>()
-    let toString (s: string) = calls.Add(s); s
+  testCaseAsync "searchAsyncFromModel uses cached Candidates — verified by running the async" <| async {
+    // We prove caching by: (1) using a model whose Items differ from Candidates,
+    // and (2) verifying the async result is based on Candidates (the cache), not Items.
     let items = [| "hello"; "world"; "foo" |]
-    let m = FuzzyFinder.init toString items
-    let callCountAfterInit = calls.Count
-    // searchAsyncFromModel must NOT call toString again
-    let cmd = FuzzyFinder.searchAsyncFromModel "he" m id
-    Cmd.hasAsync cmd |> Expect.isTrue "is async"
-    calls.Count |> Expect.equal "toString not called again" callCountAfterInit
+    let m = FuzzyFinder.init id items
+    // Mutate Items in the model while keeping Candidates (the cache) intact.
+    let mMutated = { m with Items = [| "completely"; "different"; "items" |] }
+    // Run the async Cmd — it should use Candidates, not Items.
+    let cmd = FuzzyFinder.searchAsyncFromModel "hello" mMutated id
+    let dispatched = System.Collections.Generic.List<FuzzyMatch array>()
+    match cmd with
+    | OfAsync run ->
+      do! run (fun msg -> dispatched.Add(msg))
+    | _ -> failtest "expected OfAsync"
+    dispatched |> Expect.hasLength "dispatched once" 1
+    let results = dispatched.[0]
+    results |> Array.exists (fun r -> r.Candidate = "hello") |> Expect.isTrue "hello found via cache"
+    results |> Array.exists (fun r -> r.Candidate = "completely") |> Expect.isFalse "mutated items not used"
   }
 ]
 

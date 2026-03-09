@@ -1198,12 +1198,12 @@ module Form =
     handleEvent fields focusedId (KeyPressed(key, Modifiers.None)) model
 
   /// Extract all field identifiers in order. Pass to `Focus.tabOrder` for Tab navigation.
-  let keys (fields: FormField<'model, 'msg> list) : string list =
+  let ids (fields: FormField<'model, 'msg> list) : string list =
     fields |> List.map (fun f -> f.Id)
 
-  /// Move focus in the given direction through the form's field list. Convenience over `Focus.tabOrder (Form.keys fields)`.
+  /// Move focus in the given direction through the form's field list. Convenience over `Focus.tabOrder (Form.ids fields)`.
   let handleFocus (fields: FormField<'model, 'msg> list) (focusedId: string) (dir: FocusDirection) : string =
-    Focus.tabOrder (keys fields) focusedId dir
+    Focus.tabOrder (ids fields) focusedId dir
 
 // ---- TextForm: batteries-included form with text inputs, labels, and validation ----
 

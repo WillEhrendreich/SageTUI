@@ -80,8 +80,8 @@ module El =
   let fg color elem =
     Styled({ Style.empty with Fg = Some color }, elem)
 
-  /// Conditionally apply a foreground color. Identity function when `colorOpt = None`.
-  /// Equivalent to `colorOpt |> Option.fold (fun e c -> El.fg c e) elem`.
+  /// Conditionally apply a foreground color.
+  /// Returns `elem` unchanged when `colorOpt = None`; wraps in a foreground `Styled` node when `Some`.
   let fgOpt (colorOpt: Color option) (elem: Element) : Element =
     colorOpt |> Option.fold (fun e c -> fg c e) elem
 
@@ -89,7 +89,8 @@ module El =
   let bg color elem =
     Styled({ Style.empty with Bg = Some color }, elem)
 
-  /// Conditionally apply a background color. Identity function when `colorOpt = None`.
+  /// Conditionally apply a background color.
+  /// Returns `elem` unchanged when `colorOpt = None`; wraps in a background `Styled` node when `Some`.
   let bgOpt (colorOpt: Color option) (elem: Element) : Element =
     colorOpt |> Option.fold (fun e c -> bg c e) elem
 

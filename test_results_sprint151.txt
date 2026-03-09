@@ -1,0 +1,72 @@
+[37m[[37m03:02:26 [37mINF[37m] [37mEXPECTO? Running tests...[37m [37m<[37mExpecto[37m>[37m
+[0m[37m[[37m03:02:27 [31mERR[37m] [36mSnapshot.Snapshot.Widgets.widget-splitpane-horizontal-grown[37m errored in [32m00:00:00.1030000[37m [37m<[37mExpecto[37m>[37m
+VerifyException: Directory: C:\Code\Repos\SageTUI\SageTUI.Tests\snapshots
+New:
+  - Received: SnapshotTests.widget-splitpane-horizontal-grown.received.txt
+    Verified: SnapshotTests.widget-splitpane-horizontal-grown.verified.txt
+
+FileContent:
+
+New:
+
+Received: SnapshotTests.widget-splitpane-horizontal-grown.received.txt
+Γò¡ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò«Γò¡ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò«
+ΓöéLeft                      ΓöéΓöéRight     Γöé
+Γöé                          ΓöéΓöé          Γöé
+Γöé                          ΓöéΓöé          Γöé
+Γöé                          ΓöéΓöé          Γöé
+Γöé                          ΓöéΓöé          Γöé
+Γöé                          ΓöéΓöé          Γöé
+Γöé                          ΓöéΓöé          Γöé
+Γöé                          ΓöéΓöé          Γöé
+Γò░ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò»Γò░ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò»
+
+
+[0m[37m[[37m03:02:27 [31mERR[37m] [36mSnapshot.Snapshot.Widgets.widget-splitpane-vertical[37m errored in [32m00:00:00.1030000[37m [37m<[37mExpecto[37m>[37m
+VerifyException: Directory: C:\Code\Repos\SageTUI\SageTUI.Tests\snapshots
+New:
+  - Received: SnapshotTests.widget-splitpane-vertical.received.txt
+    Verified: SnapshotTests.widget-splitpane-vertical.verified.txt
+
+FileContent:
+
+New:
+
+Received: SnapshotTests.widget-splitpane-vertical.received.txt
+Γò¡ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò«
+ΓöéTop Pane                              Γöé
+Γöé                                      Γöé
+Γöé                                      Γöé
+Γò░ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò»
+Γò¡ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò«
+ΓöéBottom Pane                           Γöé
+Γöé                                      Γöé
+Γöé                                      Γöé
+Γò░ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò»
+
+
+[0m[37m[[37m03:02:27 [31mERR[37m] [36mSnapshot.Snapshot.Widgets.widget-splitpane-horizontal[37m errored in [32m00:00:00.1050000[37m [37m<[37mExpecto[37m>[37m
+VerifyException: Directory: C:\Code\Repos\SageTUI\SageTUI.Tests\snapshots
+New:
+  - Received: SnapshotTests.widget-splitpane-horizontal.received.txt
+    Verified: SnapshotTests.widget-splitpane-horizontal.verified.txt
+
+FileContent:
+
+New:
+
+Received: SnapshotTests.widget-splitpane-horizontal.received.txt
+Γò¡ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò«Γò¡ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò«
+ΓöéLeft Pane         ΓöéΓöéRight Pane        Γöé
+Γöé                  ΓöéΓöé                  Γöé
+Γöé                  ΓöéΓöé                  Γöé
+Γöé                  ΓöéΓöé                  Γöé
+Γöé                  ΓöéΓöé                  Γöé
+Γöé                  ΓöéΓöé                  Γöé
+Γöé                  ΓöéΓöé                  Γöé
+Γöé                  ΓöéΓöé                  Γöé
+Γò░ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò»Γò░ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò»
+
+
+[0m[37m[[37m03:02:46 [37mINF[37m] [37mEXPECTO! [36m1,524[37m tests run in [32m00:00:19.5751698[37m for [36mmiscellaneous[37m ΓÇô [36m1,521[37m passed, [36m2[37m ignored, [36m0[37m failed, [36m3[37m errored. [36m[37m [37m<[37mExpecto[37m>[37m
+[0m

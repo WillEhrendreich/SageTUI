@@ -789,8 +789,8 @@ let formTests = testList "Form" [
   let fields = [nameField; ageField; activeField]
   let model = { Name = "Alice"; Age = 30; Active = true }
 
-  test "keys extracts field keys" {
-    Form.keys fields |> Expect.equal "keys" ["name"; "age"; "active"]
+  test "ids extracts field identifiers" {
+    Form.ids fields |> Expect.equal "ids" ["name"; "age"; "active"]
   }
 
   test "view renders all fields as column" {
@@ -1749,6 +1749,24 @@ let splitPaneTests = testList "SplitPane" [
     let m = SplitPane.init SplitHorizontal 5 (El.text "A") (El.text "B")
     let shrunk = SplitPane.shrink 10 m
     shrunk.SplitPercent |> Expect.equal "clamped to 1" 1
+  }
+  test "SplitPane.grow with negative step acts as shrink" {
+    // grow(-n) is documented as equivalent to shrink(n)
+    let m = SplitPane.init SplitHorizontal 50 (El.text "A") (El.text "B")
+    let grownNeg  = SplitPane.grow (-10) m
+    let shrunkPos = SplitPane.shrink 10 m
+    grownNeg.SplitPercent  |> Expect.equal "grow(-10) -> 40" 40
+    shrunkPos.SplitPercent |> Expect.equal "shrink(10) -> 40" 40
+    grownNeg.SplitPercent  |> Expect.equal "grow(-n) equals shrink(n)" shrunkPos.SplitPercent
+  }
+  test "SplitPane.shrink with negative step acts as grow" {
+    // shrink(-n) is documented as equivalent to grow(n)
+    let m = SplitPane.init SplitHorizontal 50 (El.text "A") (El.text "B")
+    let shrunkNeg = SplitPane.shrink (-10) m
+    let grownPos  = SplitPane.grow 10 m
+    shrunkNeg.SplitPercent |> Expect.equal "shrink(-10) -> 60" 60
+    grownPos.SplitPercent  |> Expect.equal "grow(10) -> 60" 60
+    shrunkNeg.SplitPercent |> Expect.equal "shrink(-n) equals grow(n)" grownPos.SplitPercent
   }
   test "SplitPane.setFirst/setSecond update children" {
     let m = SplitPane.init SplitHorizontal 50 (El.text "A") (El.text "B")
