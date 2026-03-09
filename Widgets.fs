@@ -493,12 +493,10 @@ module ProgressBar =
     let pct = config.Percent |> max 0.0 |> min 1.0
     let filled = int (float config.Width * pct)
     let empty = config.Width - filled
-    // Apply an optional fg color — identity when None.
-    let inline withFg colorOpt el = colorOpt |> Option.fold (fun e c -> El.fg c e) el
     let barEl =
       match filled, empty with
-      | 0, _ -> El.text (System.String(config.EmptyChar,  empty))  |> withFg config.EmptyColor
-      | _, 0 -> El.text (System.String(config.FilledChar, filled)) |> withFg config.FilledColor
+      | 0, _ -> El.text (System.String(config.EmptyChar,  empty))  |> El.fgOpt config.EmptyColor
+      | _, 0 -> El.text (System.String(config.FilledChar, filled)) |> El.fgOpt config.FilledColor
       | _ ->
         match config.FilledColor, config.EmptyColor with
         | None, None ->
@@ -508,8 +506,8 @@ module ProgressBar =
           // Colored segments: pin width so flex distribution doesn't inject gaps between segments.
           El.width config.Width <|
             El.row [
-              El.text (System.String(config.FilledChar, filled)) |> withFg config.FilledColor
-              El.text (System.String(config.EmptyChar,  empty))  |> withFg config.EmptyColor
+              El.text (System.String(config.FilledChar, filled)) |> El.fgOpt config.FilledColor
+              El.text (System.String(config.EmptyChar,  empty))  |> El.fgOpt config.EmptyColor
             ]
     match config.ShowLabel with
     | true ->
@@ -1158,10 +1156,10 @@ module TreeView =
     |> El.column
 
 /// A single field descriptor for the Form widget.
-/// Binds a string key, a view function, and a terminal-event handler.
+/// Binds a string identifier, a view function, and a terminal-event handler.
 type FormField<'model, 'msg> = {
-  /// Unique key used for focus routing.
-  Key: string
+  /// Unique identifier used for focus routing.
+  Id: string
   /// Render the field — receives `focused: bool` and the current model.
   View: bool -> 'model -> Element
   /// Handle a terminal event while this field is focused. Return Some msg to dispatch, None to ignore.
@@ -1169,42 +1167,43 @@ type FormField<'model, 'msg> = {
 }
 
 module Form =
-  /// Create a `FormField` from a key, view function, and terminal event handler.
+  /// Create a `FormField` from an identifier, view function, and terminal event handler.
   /// Use this to support modifier keys (Ctrl, Shift) inside form fields.
-  let field (key: string) (view: bool -> 'model -> Element) (handleEvent: TerminalEvent -> 'model -> 'msg option) : FormField<'model, 'msg> =
-    { Key = key; View = view; HandleEvent = handleEvent }
+  let field (id: string) (view: bool -> 'model -> Element) (handleEvent: TerminalEvent -> 'model -> 'msg option) : FormField<'model, 'msg> =
+    { Id = id; View = view; HandleEvent = handleEvent }
 
   /// Create a `FormField` that only handles plain keypresses (no modifiers).
   /// Wraps the key-only handler into a TerminalEvent handler.
   [<System.Obsolete("Use Form.field with a TerminalEvent handler to support modifier keys (Ctrl, Shift, etc.).")>]
-  let fieldFromKey (key: string) (view: bool -> 'model -> Element) (handleKey: Key -> 'model -> 'msg option) : FormField<'model, 'msg> =
-    { Key = key; View = view; HandleEvent = fun evt model -> match evt with KeyPressed(k, _) -> handleKey k model | _ -> None }
+  let fieldFromKey (id: string) (view: bool -> 'model -> Element) (handleKey: Key -> 'model -> 'msg option) : FormField<'model, 'msg> =
+    // Match only unmodified keypresses — Ctrl/Shift combos are NOT forwarded to the legacy handler.
+    { Id = id; View = view; HandleEvent = fun evt model -> match evt with KeyPressed(k, Modifiers.None) -> handleKey k model | _ -> None }
 
-  /// Render all fields as a column, passing `focused = true` to the field whose key matches `focusedKey`.
-  let view (fields: FormField<'model, 'msg> list) (focusedKey: string) (model: 'model) : Element =
+  /// Render all fields as a column, passing `focused = true` to the field whose id matches `focusedId`.
+  let view (fields: FormField<'model, 'msg> list) (focusedId: string) (model: 'model) : Element =
     fields
-    |> List.map (fun f -> f.View (f.Key = focusedKey) model)
+    |> List.map (fun f -> f.View (f.Id = focusedId) model)
     |> El.column
 
   /// Dispatch a terminal event to the currently focused field. Returns None if no field handles it.
-  let handleEvent (fields: FormField<'model, 'msg> list) (focusedKey: string) (event: TerminalEvent) (model: 'model) : 'msg option =
+  let handleEvent (fields: FormField<'model, 'msg> list) (focusedId: string) (event: TerminalEvent) (model: 'model) : 'msg option =
     fields
-    |> List.tryFind (fun f -> f.Key = focusedKey)
+    |> List.tryFind (fun f -> f.Id = focusedId)
     |> Option.bind (fun f -> f.HandleEvent event model)
 
   /// Dispatch a plain keypress to the currently focused field. Returns None if no field handles the key.
   /// Prefer `Form.handleEvent` to support modifier keys.
   [<System.Obsolete("Use Form.handleEvent to support modifier keys (Ctrl, Shift, etc.).")>]
-  let handleKey (fields: FormField<'model, 'msg> list) (focusedKey: string) (key: Key) (model: 'model) : 'msg option =
-    handleEvent fields focusedKey (KeyPressed(key, Modifiers.None)) model
+  let handleKey (fields: FormField<'model, 'msg> list) (focusedId: string) (key: Key) (model: 'model) : 'msg option =
+    handleEvent fields focusedId (KeyPressed(key, Modifiers.None)) model
 
-  /// Extract all field keys in order. Pass to `Focus.tabOrder` for Tab navigation.
+  /// Extract all field identifiers in order. Pass to `Focus.tabOrder` for Tab navigation.
   let keys (fields: FormField<'model, 'msg> list) : string list =
-    fields |> List.map (fun f -> f.Key)
+    fields |> List.map (fun f -> f.Id)
 
   /// Move focus in the given direction through the form's field list. Convenience over `Focus.tabOrder (Form.keys fields)`.
-  let handleFocus (fields: FormField<'model, 'msg> list) (focusedKey: string) (dir: FocusDirection) : string =
-    Focus.tabOrder (keys fields) focusedKey dir
+  let handleFocus (fields: FormField<'model, 'msg> list) (focusedId: string) (dir: FocusDirection) : string =
+    Focus.tabOrder (keys fields) focusedId dir
 
 // ---- TextForm: batteries-included form with text inputs, labels, and validation ----
 
@@ -1306,28 +1305,16 @@ module TextForm =
   /// In TFFieldErrors state, editing a field also clears that field's server error (user is fixing it).
   let private applyToFocused (updateInput: TextInputModel -> TextInputModel) (m: TextFormModel) =
     let idx = m.FocusIndex
-    let serverErrors =
-      match m.Status with
-      | TFFieldErrors errs -> errs
-      | _ -> Map.empty
     let rows =
       m.Rows |> List.mapi (fun i r ->
         match i = idx with
         | false -> r
         | true  ->
           let updated = { r with Input = updateInput r.Input }
-          // Clear the server error for this field when the user starts editing it
-          let clearedServerErrors = serverErrors |> Map.remove r.Field.Id
-          let newStatus =
-            match m.Status with
-            | TFFieldErrors _ when clearedServerErrors.IsEmpty -> TFEditing
-            | TFFieldErrors _ -> TFFieldErrors clearedServerErrors
-            | s -> s
-          let _ = newStatus  // computed but Status is on model, not row — handled below
           match r.Touched with
           | true  -> runValidation updated
           | false -> updated)
-    // If in TFFieldErrors, remove the focused field's server error from status
+    // If in TFFieldErrors, remove the focused field's server error from status on edit.
     let newStatus =
       match m.Status with
       | TFFieldErrors errs ->
@@ -2074,7 +2061,8 @@ module FuzzyFinder =
 /// Orientation of a SplitPane divider.
 type SplitOrientation = SplitHorizontal | SplitVertical
 
-/// Mutable state for a SplitPane — holds orientation, ratio, and child elements.
+/// Model for a SplitPane widget — holds orientation, split ratio, and child elements.
+/// This is an immutable F# record; update via `SplitPane.resize`, `grow`, `shrink`, etc.
 type SplitPaneModel = {
   Orientation: SplitOrientation
   /// Percentage (1–99) allocated to the first pane. Second pane gets the remainder.
@@ -2096,10 +2084,12 @@ module SplitPane =
     { m with SplitPercent = pct |> max 1 |> min 99 }
 
   /// Grow the first pane by `step` percentage points (clamped at 99).
+  /// Passing a negative step shrinks the first pane — equivalent to `shrink (abs step)`.
   let grow (step: int) (m: SplitPaneModel) : SplitPaneModel =
     resize (m.SplitPercent + step) m
 
   /// Shrink the first pane by `step` percentage points (clamped at 1).
+  /// Passing a negative step grows the first pane — equivalent to `grow (abs step)`.
   let shrink (step: int) (m: SplitPaneModel) : SplitPaneModel =
     resize (m.SplitPercent - step) m
 

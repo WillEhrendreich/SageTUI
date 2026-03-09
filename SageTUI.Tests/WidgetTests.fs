@@ -984,6 +984,26 @@ let textFormTests = testList "TextForm" [
     m3.Rows.[0].Input.SelectionAnchor |> Expect.equal "anchor at 0" (Some 0)
     m3.Rows.[0].Input.Cursor |> Expect.equal "cursor at end" 2
   }
+  test "editing focused field removes its error from TFFieldErrors status" {
+    let m = mkForm ()
+    let errors = Map.ofList [("name", "Already taken"); ("email", "Invalid format")]
+    let (m', _) = TextForm.update (TFSetFieldErrors errors) m
+    // Type into the focused (name) field — should clear "name" from TFFieldErrors
+    let (m'', _) = TextForm.update (TFKey (Key.Char 'A')) m'
+    match m''.Status with
+    | TFFieldErrors remaining ->
+      remaining |> Map.containsKey "name"  |> Expect.isFalse "name error cleared"
+      remaining |> Map.containsKey "email" |> Expect.isTrue  "email error stays"
+    | s -> failtestf "expected TFFieldErrors, got %A" s
+  }
+  test "editing last errored field transitions status to TFEditing" {
+    let m = mkForm ()
+    let errors = Map.ofList [("name", "Only error")]
+    let (m', _) = TextForm.update (TFSetFieldErrors errors) m
+    // Type into the focused (name) field — only remaining error — should become TFEditing
+    let (m'', _) = TextForm.update (TFKey (Key.Char 'A')) m'
+    m''.Status |> Expect.equal "status is TFEditing" TFEditing
+  }
   test "TFSetFieldErrors clears row-level client errors preventing dual messages" {
     // Simulate a flow where a field had a client validation error, then TFSetFieldErrors arrives.
     // The row-level client error must be cleared so the field doesn't show both messages.

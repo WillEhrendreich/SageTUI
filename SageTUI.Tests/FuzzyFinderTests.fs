@@ -366,6 +366,18 @@ let asyncTests = testList "FuzzyFinder.searchAsync" [
     let cmd = FuzzyFinder.searchAsync "he" [| "hello"; "world" |] id id
     Cmd.hasAsync cmd |> Expect.isTrue "is async"
   }
+  test "searchAsyncFromModel uses cached Candidates, not items" {
+    // Verify searchAsyncFromModel uses m.Candidates rather than re-running toString.
+    let calls = System.Collections.Generic.List<string>()
+    let toString (s: string) = calls.Add(s); s
+    let items = [| "hello"; "world"; "foo" |]
+    let m = FuzzyFinder.init toString items
+    let callCountAfterInit = calls.Count
+    // searchAsyncFromModel must NOT call toString again
+    let cmd = FuzzyFinder.searchAsyncFromModel "he" m id
+    Cmd.hasAsync cmd |> Expect.isTrue "is async"
+    calls.Count |> Expect.equal "toString not called again" callCountAfterInit
+  }
 ]
 
 [<Tests>]

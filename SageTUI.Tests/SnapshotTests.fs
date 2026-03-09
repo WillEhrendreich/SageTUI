@@ -183,6 +183,24 @@ let widgetSnapshots =
       (render 10 3 (SpinnerWidget.view 0))
     snapshotTest "widget-spinner-frame3"
       (render 10 3 (SpinnerWidget.view 3))
+
+    // SplitPane
+    snapshotTest "widget-splitpane-horizontal"
+      (render 40 10 (SplitPane.view
+        (SplitPane.init SplitHorizontal 50
+          (El.text "Left Pane" |> El.bordered Rounded)
+          (El.text "Right Pane" |> El.bordered Rounded))))
+    snapshotTest "widget-splitpane-vertical"
+      (render 40 10 (SplitPane.view
+        (SplitPane.init SplitVertical 50
+          (El.text "Top Pane" |> El.bordered Rounded)
+          (El.text "Bottom Pane" |> El.bordered Rounded))))
+    snapshotTest "widget-splitpane-horizontal-grown"
+      (render 40 10 (SplitPane.view
+        (SplitPane.init SplitHorizontal 50
+          (El.text "Left" |> El.bordered Rounded)
+          (El.text "Right" |> El.bordered Rounded)
+        |> SplitPane.grow 20)))
   ]
 
 // ============================================================
