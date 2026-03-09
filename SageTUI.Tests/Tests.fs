@@ -4825,8 +4825,113 @@ let sprint40WideCharContinuationTests =
       buf.Cells[3].Rune |> Expect.equal "col3 i" (int 'i')
   ]
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 40 P2: SequencePhase.phaseAt — pure phase computation unit tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+let sprint40SequencePhaseTests = testList "Sprint 40: SequencePhase.phaseAt" [
+  testCase "empty sequence returns (0, 1.0)" <| fun () ->
+    let (idx, localT) = SequencePhase.phaseAt 0.0 []
+    idx |> Expect.equal "index 0" 0
+    localT |> Expect.equal "localT 1.0" 1.0
+
+  testCase "single phase at elapsedMs=0 gives (0, 0.0)" <| fun () ->
+    let ts = [ Fade 200<ms> ]
+    let (idx, localT) = SequencePhase.phaseAt 0.0 ts
+    idx |> Expect.equal "index 0" 0
+    localT |> Expect.equal "localT 0.0" 0.0
+
+  testCase "single phase at half duration gives (0, 0.5)" <| fun () ->
+    let ts = [ Fade 200<ms> ]
+    let (idx, localT) = SequencePhase.phaseAt 100.0 ts
+    idx |> Expect.equal "index 0" 0
+    (abs (localT - 0.5) < 1e-9) |> Expect.isTrue "localT ~0.5"
+
+  testCase "single phase at full duration gives (0, 1.0)" <| fun () ->
+    let ts = [ Fade 200<ms> ]
+    let (idx, localT) = SequencePhase.phaseAt 200.0 ts
+    idx |> Expect.equal "index 0" 0
+    localT |> Expect.equal "localT 1.0" 1.0
+
+  testCase "two equal phases: elapsed=0 → first phase, localT=0.0" <| fun () ->
+    let ts = [ Fade 100<ms>; Wipe(Direction.Right, 100<ms>) ]
+    let (idx, localT) = SequencePhase.phaseAt 0.0 ts
+    idx |> Expect.equal "phase 0" 0
+    localT |> Expect.equal "localT 0.0" 0.0
+
+  testCase "two equal phases: elapsed=50 → first phase, localT=0.5" <| fun () ->
+    let ts = [ Fade 100<ms>; Wipe(Direction.Right, 100<ms>) ]
+    let (idx, localT) = SequencePhase.phaseAt 50.0 ts
+    idx |> Expect.equal "phase 0" 0
+    (abs (localT - 0.5) < 1e-9) |> Expect.isTrue "localT ~0.5"
+
+  testCase "two equal phases: elapsed=100 → first phase ends, localT=1.0" <| fun () ->
+    let ts = [ Fade 100<ms>; Wipe(Direction.Right, 100<ms>) ]
+    let (idx, localT) = SequencePhase.phaseAt 100.0 ts
+    idx |> Expect.equal "phase 0" 0
+    localT |> Expect.equal "localT 1.0" 1.0
+
+  testCase "two equal phases: elapsed=101 → second phase starts, small localT" <| fun () ->
+    let ts = [ Fade 100<ms>; Wipe(Direction.Right, 100<ms>) ]
+    let (idx, localT) = SequencePhase.phaseAt 101.0 ts
+    idx |> Expect.equal "phase 1" 1
+    (localT < 0.02) |> Expect.isTrue "localT near 0"
+
+  testCase "two equal phases: elapsed=150 → second phase, localT=0.5" <| fun () ->
+    let ts = [ Fade 100<ms>; Wipe(Direction.Right, 100<ms>) ]
+    let (idx, localT) = SequencePhase.phaseAt 150.0 ts
+    idx |> Expect.equal "phase 1" 1
+    (abs (localT - 0.5) < 1e-9) |> Expect.isTrue "localT ~0.5"
+
+  testCase "two equal phases: elapsed=200 → last phase, localT=1.0" <| fun () ->
+    let ts = [ Fade 100<ms>; Wipe(Direction.Right, 100<ms>) ]
+    let (idx, localT) = SequencePhase.phaseAt 200.0 ts
+    idx |> Expect.equal "phase 1" 1
+    localT |> Expect.equal "localT 1.0" 1.0
+
+  testCase "three phases with different durations: correct phase selection" <| fun () ->
+    // Fade 100 | Wipe 200 | SlideIn 100 → total 400ms
+    let ts = [ Fade 100<ms>; Wipe(Direction.Down, 200<ms>); SlideIn(Direction.Up, 100<ms>) ]
+    let (i0, t0) = SequencePhase.phaseAt 50.0 ts    // 50ms in: phase 0, localT=0.5
+    let (i1, t1) = SequencePhase.phaseAt 100.0 ts   // 100ms: end of phase 0
+    let (i2, t2) = SequencePhase.phaseAt 200.0 ts   // 200ms: middle of phase 1
+    let (i3, t3) = SequencePhase.phaseAt 300.0 ts   // 300ms: end of phase 1
+    let (i4, t4) = SequencePhase.phaseAt 350.0 ts   // 350ms: middle of phase 2
+    let (i5, t5) = SequencePhase.phaseAt 400.0 ts   // 400ms: end
+    i0 |> Expect.equal "phase@50" 0
+    (abs (t0 - 0.5) < 1e-9) |> Expect.isTrue "t@50=0.5"
+    i1 |> Expect.equal "phase@100" 0
+    t1 |> Expect.equal "t@100" 1.0
+    i2 |> Expect.equal "phase@200" 1
+    (abs (t2 - 0.5) < 1e-9) |> Expect.isTrue "t@200=0.5"
+    i3 |> Expect.equal "phase@300" 1
+    t3 |> Expect.equal "t@300" 1.0
+    i4 |> Expect.equal "phase@350" 2
+    (abs (t4 - 0.5) < 1e-9) |> Expect.isTrue "t@350=0.5"
+    i5 |> Expect.equal "phase@400" 2
+    t5 |> Expect.equal "t@400" 1.0
+
+  testCase "zero-duration first phase: skipped immediately" <| fun () ->
+    let ts = [ Fade 0<ms>; Fade 100<ms> ]
+    let (idx, _) = SequencePhase.phaseAt 0.0 ts
+    idx |> Expect.equal "phase 0 (zero-dur consumed)" 0
+
+  testCase "elapsed beyond total: clamps to last phase at localT=1.0" <| fun () ->
+    let ts = [ Fade 100<ms>; Fade 100<ms> ]
+    let (idx, localT) = SequencePhase.phaseAt 999.0 ts
+    idx |> Expect.equal "last phase" 1
+    localT |> Expect.equal "localT 1.0" 1.0
+
+  testCase "total-duration zero sequence returns last phase at 1.0" <| fun () ->
+    let ts = [ Fade 0<ms>; Fade 0<ms> ]
+    let (idx, localT) = SequencePhase.phaseAt 0.0 ts
+    idx |> Expect.equal "last phase" 1
+    localT |> Expect.equal "localT 1.0" 1.0
+]
+
 [<Tests>]
 let sprint40Tests =
   testList "Sprint 40" [
     sprint40WideCharContinuationTests
+    sprint40SequencePhaseTests
   ]

@@ -400,37 +400,22 @@ module App =
               | 0 -> ()
               | _ ->
                 let elapsedMs = t * float totalMs
-                let mutable remaining = elapsedMs
-                let mutable applied = false
-                let lastIdx = List.length ts - 1
-                let mutable subIdx = 0
-                for sub in ts do
-                  match applied with
-                  | false ->
-                    let dur = float (TransitionDuration.get sub)
-                    // Apply this sub-transition if: remaining time fits within it, OR it's the last one
-                    match remaining <= dur || subIdx = lastIdx with
-                    | true ->
-                      let localT = match dur with 0.0 -> 1.0 | _ -> System.Math.Clamp(remaining / dur, 0.0, 1.0)
-                      // Use per-phase snapshot for phases after the first.
-                      // On first frame of a new phase: capture current backBuf (shows end-of-prev-phase rendering).
-                      let phaseAt =
-                        match subIdx with
-                        | 0 -> at  // phase 0 uses the original SnapshotBefore
-                        | _ ->
-                          match at.PhaseCaptures |> Map.tryFind subIdx with
-                          | Some snap -> { at with SnapshotBefore = snap }
-                          | None ->
-                            // First frame of this phase — capture the current backBuf state
-                            let snap = Array.copy backBuf.Cells
-                            at.PhaseCaptures <- at.PhaseCaptures |> Map.add subIdx snap
-                            { at with SnapshotBefore = snap }
-                      applyTransition localT sub phaseAt
-                      applied <- true
-                    | false ->
-                      remaining <- remaining - dur
-                      subIdx <- subIdx + 1
-                  | true -> ()
+                let (subIdx, localT) = SequencePhase.phaseAt elapsedMs ts
+                let sub = ts |> List.item subIdx
+                // Use per-phase snapshot for phases after the first.
+                // On first frame of a new phase: capture current backBuf (shows end-of-prev-phase rendering).
+                let phaseAt =
+                  match subIdx with
+                  | 0 -> at  // phase 0 uses the original SnapshotBefore
+                  | _ ->
+                    match at.PhaseCaptures |> Map.tryFind subIdx with
+                    | Some snap -> { at with SnapshotBefore = snap }
+                    | None ->
+                      // First frame of this phase — capture the current backBuf state
+                      let snap = Array.copy backBuf.Cells
+                      at.PhaseCaptures <- at.PhaseCaptures |> Map.add subIdx snap
+                      { at with SnapshotBefore = snap }
+                applyTransition localT sub phaseAt
             | Custom(_, f) ->
               TransitionFx.applyCustom t f at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
   

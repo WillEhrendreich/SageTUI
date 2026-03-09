@@ -225,6 +225,43 @@ module TransitionDuration =
     | Custom(d, _) -> int d
     | Sequence ts -> ts |> List.sumBy get  // Duration is pre-computed for when Sequence is implemented; returns 0 for empty list
 
+/// Pure phase computation for Sequence transitions.
+/// Extracts the elapsed-time-to-(phaseIndex, localT) mapping from App.fs so it
+/// can be unit-tested independently of the render loop.
+module SequencePhase =
+  /// Returns the 0-based phase index and local t ∈ [0,1] within that phase
+  /// for a given elapsed millisecond offset within the Sequence.
+  /// - Empty list → (0, 1.0).
+  /// - All-zero durations → last phase at localT = 1.0.
+  /// - elapsed beyond total → last phase at localT = 1.0 (clamp).
+  let phaseAt (elapsedMs: float) (ts: Transition list) : int * float =
+    match ts with
+    | [] -> (0, 1.0)
+    | _ ->
+      let lastIdx = List.length ts - 1
+      let totalMs = ts |> List.sumBy (TransitionDuration.get >> float)
+      match totalMs with
+      | 0.0 -> (lastIdx, 1.0)
+      | _ ->
+        let mutable remaining = elapsedMs
+        let mutable result = (lastIdx, 1.0)
+        let mutable found = false
+        let mutable idx = 0
+        for sub in ts do
+          match found with
+          | false ->
+            let dur = float (TransitionDuration.get sub)
+            match remaining <= dur || idx = lastIdx with
+            | true ->
+              let localT = match dur with 0.0 -> 1.0 | _ -> System.Math.Clamp(remaining / dur, 0.0, 1.0)
+              result <- (idx, localT)
+              found <- true
+            | false ->
+              remaining <- remaining - dur
+              idx <- idx + 1
+          | true -> ()
+        result
+
 module Reconcile =
   let findKeyedElements (el: Element) : Map<string, Element> =
     let rec walk (acc: Map<string, Element>) (e: Element) =
