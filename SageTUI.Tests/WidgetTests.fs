@@ -767,21 +767,21 @@ type TestFormModel = { Name: string; Age: int; Active: bool }
 
 let formTests = testList "Form" [
   let nameField =
-    Form.field "name"
+    Form.field (FieldId "name")
       (fun focused (model: TestFormModel) ->
         let el = El.text (sprintf "Name: %s" model.Name)
         match focused with true -> el |> El.bold | false -> el)
       (fun _event (_model: TestFormModel) -> None)
 
   let ageField =
-    Form.field "age"
+    Form.field (FieldId "age")
       (fun focused (model: TestFormModel) ->
         let el = El.text (sprintf "Age: %d" model.Age)
         match focused with true -> el |> El.bold | false -> el)
       (fun _event (_model: TestFormModel) -> None)
 
   let activeField =
-    Form.field "active"
+    Form.field (FieldId "active")
       (fun focused (model: TestFormModel) ->
         Checkbox.view "Active" focused model.Active)
       (fun _event (_model: TestFormModel) -> None)
@@ -790,18 +790,18 @@ let formTests = testList "Form" [
   let model = { Name = "Alice"; Age = 30; Active = true }
 
   test "ids extracts field identifiers" {
-    Form.ids fields |> Expect.equal "ids" ["name"; "age"; "active"]
+    Form.ids fields |> Expect.equal "ids" [FieldId "name"; FieldId "age"; FieldId "active"]
   }
 
   test "view renders all fields as column" {
-    let elem = Form.view fields "name" model
+    let elem = Form.view fields (FieldId "name") model
     match elem with
     | Column items -> items |> Expect.hasLength "3 fields" 3
     | _ -> failtest "expected Column"
   }
 
   test "view highlights focused field" {
-    let elem = Form.view fields "name" model
+    let elem = Form.view fields (FieldId "name") model
     match elem with
     | Column (first :: _) ->
       match first with
@@ -811,31 +811,31 @@ let formTests = testList "Form" [
   }
 
   test "handleFocus moves to next field" {
-    let next = Form.handleFocus fields "name" FocusNext
-    next |> Expect.equal "next is age" "age"
+    let next = Form.handleFocus fields (FieldId "name") FocusNext
+    next |> Expect.equal "next is age" (FieldId "age")
   }
 
   test "handleFocus moves to previous field" {
-    let prev = Form.handleFocus fields "age" FocusPrev
-    prev |> Expect.equal "prev is name" "name"
+    let prev = Form.handleFocus fields (FieldId "age") FocusPrev
+    prev |> Expect.equal "prev is name" (FieldId "name")
   }
 
   test "handleFocus wraps around" {
-    let next = Form.handleFocus fields "active" FocusNext
-    next |> Expect.equal "wraps to name" "name"
+    let next = Form.handleFocus fields (FieldId "active") FocusNext
+    next |> Expect.equal "wraps to name" (FieldId "name")
   }
 
   test "handleEvent routes to focused field" {
-    let result = Form.handleEvent fields "name" (KeyPressed(Key.Enter, Modifiers.None)) model
+    let result = Form.handleEvent fields (FieldId "name") (KeyPressed(Key.Enter, Modifiers.None)) model
     result |> Expect.isNone "no handler for enter on name"
   }
 
   test "handleEvent with modifier: Ctrl+A dispatches if handler uses it" {
     let ctrlAField =
-      Form.field "search"
+      Form.field (FieldId "search")
         (fun _ _ -> El.empty)
         (fun evt _ -> match evt with KeyPressed(Key.Char 'a', m) when m = Modifiers.Ctrl -> Some () | _ -> None)
-    let result = Form.handleEvent [ctrlAField] "search" (KeyPressed(Key.Char 'a', Modifiers.Ctrl)) ()
+    let result = Form.handleEvent [ctrlAField] (FieldId "search") (KeyPressed(Key.Char 'a', Modifiers.Ctrl)) ()
     result |> Expect.isSome "Ctrl+A handled"
   }
 ]
@@ -843,12 +843,12 @@ let formTests = testList "Form" [
 let textFormTests = testList "TextForm" [
   let mkForm () =
     TextForm.init [
-      TextForm.field "name"  "Name"  |> TextForm.required
-      TextForm.field "email" "Email" |> TextForm.required
-                                     |> TextForm.validate (fun s ->
-                                          match s.Contains("@") with
-                                          | true  -> Ok s
-                                          | false -> Error "Must contain @")
+      TextForm.field (FieldId "name")  "Name"  |> TextForm.required
+      TextForm.field (FieldId "email") "Email" |> TextForm.required
+                                       |> TextForm.validate (fun s ->
+                                            match s.Contains("@") with
+                                            | true  -> Ok s
+                                            | false -> Error "Must contain @")
     ]
 
   let typeStr (s: string) m =
@@ -862,12 +862,12 @@ let textFormTests = testList "TextForm" [
 
   test "TFKey inserts characters into focused field" {
     let f = mkForm () |> typeStr "Alice"
-    TextForm.getValue "name" f |> Expect.equal "name value" (Some "Alice")
+    TextForm.getValue (FieldId "name") f |> Expect.equal "name value" (Some "Alice")
   }
 
   test "TFKey does not affect unfocused field" {
     let f = mkForm () |> typeStr "Alice"
-    TextForm.getValue "email" f |> Expect.equal "email unchanged" (Some "")
+    TextForm.getValue (FieldId "email") f |> Expect.equal "email unchanged" (Some "")
   }
 
   test "TFTabNext moves focus and touches current field" {
@@ -969,15 +969,15 @@ let textFormTests = testList "TextForm" [
 
   test "getValue returns None for unknown fieldId" {
     let f = mkForm ()
-    TextForm.getValue "nonexistent" f |> Expect.isNone "not found"
+    TextForm.getValue (FieldId "nonexistent") f |> Expect.isNone "not found"
   }
   test "TFEvent Pasted inserts text into focused field" {
-    let m = TextForm.init [TextForm.field "q" "Query"]
+    let m = TextForm.init [TextForm.field (FieldId "q") "Query"]
     let m' = TextForm.update (TFEvent (Pasted "hello world")) m |> fst
     m'.Rows.[0].Input.Text |> Expect.equal "pasted text" "hello world"
   }
   test "TFEvent Ctrl+A selects all in focused field" {
-    let m0 = TextForm.init [TextForm.field "q" "Query"]
+    let m0 = TextForm.init [TextForm.field (FieldId "q") "Query"]
     let m1 = TextForm.update (TFKey (Key.Char 'h')) m0 |> fst
     let m2 = TextForm.update (TFKey (Key.Char 'i')) m1 |> fst
     let m3 = TextForm.update (TFEvent (KeyPressed(Key.Char 'a', Modifiers.Ctrl))) m2 |> fst
@@ -986,19 +986,19 @@ let textFormTests = testList "TextForm" [
   }
   test "editing focused field removes its error from TFFieldErrors status" {
     let m = mkForm ()
-    let errors = Map.ofList [("name", "Already taken"); ("email", "Invalid format")]
+    let errors = Map.ofList [(FieldId "name", "Already taken"); (FieldId "email", "Invalid format")]
     let (m', _) = TextForm.update (TFSetFieldErrors errors) m
     // Type into the focused (name) field — should clear "name" from TFFieldErrors
     let (m'', _) = TextForm.update (TFKey (Key.Char 'A')) m'
     match m''.Status with
     | TFFieldErrors remaining ->
-      remaining |> Map.containsKey "name"  |> Expect.isFalse "name error cleared"
-      remaining |> Map.containsKey "email" |> Expect.isTrue  "email error stays"
+      remaining |> Map.containsKey (FieldId "name")  |> Expect.isFalse "name error cleared"
+      remaining |> Map.containsKey (FieldId "email") |> Expect.isTrue  "email error stays"
     | s -> failtestf "expected TFFieldErrors, got %A" s
   }
   test "editing last errored field transitions status to TFEditing" {
     let m = mkForm ()
-    let errors = Map.ofList [("name", "Only error")]
+    let errors = Map.ofList [(FieldId "name", "Only error")]
     let (m', _) = TextForm.update (TFSetFieldErrors errors) m
     // Type into the focused (name) field — only remaining error — should become TFEditing
     let (m'', _) = TextForm.update (TFKey (Key.Char 'A')) m'
@@ -1014,14 +1014,14 @@ let textFormTests = testList "TextForm" [
     let hasClientErrors = m1.Rows |> List.exists (fun r -> r.Error.IsSome)
     hasClientErrors |> Expect.isTrue "form has client errors after failed submit"
     // Now set server field errors (simulating server response after a successful submit attempt)
-    let (m2, _) = TextForm.update (TFSetFieldErrors (Map.ofList [("name", "Server: name taken")])) m1
+    let (m2, _) = TextForm.update (TFSetFieldErrors (Map.ofList [(FieldId "name", "Server: name taken")])) m1
     // All row-level client errors must be cleared
     m2.Rows |> List.forall (fun r -> r.Error.IsNone) |> Expect.isTrue "row errors cleared after TFSetFieldErrors"
-    m2.Status |> Expect.equal "status is TFFieldErrors" (TFFieldErrors (Map.ofList [("name", "Server: name taken")]))
+    m2.Status |> Expect.equal "status is TFFieldErrors" (TFFieldErrors (Map.ofList [(FieldId "name", "Server: name taken")]))
   }
   test "TFSetFieldErrors allows editing after server errors" {
     let m = mkForm ()
-    let errors = Map.ofList [("name", "Already taken")]
+    let errors = Map.ofList [(FieldId "name", "Already taken")]
     let (m', _) = TextForm.update (TFSetFieldErrors errors) m
     m'.Status |> Expect.equal "status is TFFieldErrors" (TFFieldErrors errors)
     // After field errors, key events should still work (not blocked like Submitting)
@@ -1030,7 +1030,7 @@ let textFormTests = testList "TextForm" [
   }
   test "TFSetFieldErrors view renders server error under matching field" {
     let m = mkForm ()
-    let errors = Map.ofList [("name", "Already taken")]
+    let errors = Map.ofList [(FieldId "name", "Already taken")]
     let (m', _) = TextForm.update (TFSetFieldErrors errors) m
     let elem = TextForm.view true m'
     let buf = Buffer.create 60 5

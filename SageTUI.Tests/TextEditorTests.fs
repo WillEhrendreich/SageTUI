@@ -2,6 +2,7 @@ module TextEditorTests
 
 open Expecto
 open Expecto.Flip
+open FsCheck
 open SageTUI
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -620,6 +621,108 @@ let propertyTests = testList "TextEditor.Properties" [
   }
 ]
 
+// ── custom Arbitraries ────────────────────────────────────────────────────────
+
+/// A non-empty string that does NOT contain newlines — valid for a single-line editor.
+type SingleLineContent = SingleLineContent of string
+module SingleLineContent =
+  let unwrap (SingleLineContent s) = s
+  let arb =
+    Arb.Default.String()
+    |> Arb.filter (fun s -> s <> null && s <> "" && not (s.Contains('\n')))
+    |> Arb.convert SingleLineContent unwrap
+
+/// A `TextEditorMsg` that modifies buffer content — guaranteed to produce an undo entry.
+/// Does NOT include TEUndo, TERedo, or any cursor/selection-only message.
+type ContentMsg =
+  | CInsert  of char
+  | CNewline
+  | CBackspace
+  | CDelete
+
+module ContentMsg =
+  let toMsg = function
+    | CInsert c   -> TEInsertChar c
+    | CNewline    -> TENewline
+    | CBackspace  -> TEBackspace
+    | CDelete     -> TEDelete
+
+  let private chars = Gen.elements (Seq.toList "abcdefghijklmnopqrstuvwxyz0123456789 ")
+  let gen =
+    Gen.oneof [
+      Gen.map CInsert chars
+      Gen.constant CNewline
+      Gen.constant CBackspace
+      Gen.constant CDelete
+    ]
+  let arb = Arb.fromGen gen
+
+type Arbs =
+  static member SingleLineContent() = SingleLineContent.arb
+  static member ContentMsg() = ContentMsg.arb
+
+// ── algebraic law property tests ─────────────────────────────────────────────
+
+let undoLawTests =
+  // Register our custom Arbitraries once for the whole list.
+  let config = { FsCheckConfig.defaultConfig with arbitrary = [typeof<Arbs>] }
+
+  testList "TextEditor.UndoLaws" [
+
+    // Law 1 — Undo is the left inverse of a content-modifying edit.
+    // Formally: content(undo(edit(x))) = content(x)
+    // i.e., undoing an edit that actually changed the buffer restores the original content.
+    testPropertyWithConfig config "Law1: undo(edit(x)).content = x.content" <|
+      fun (SingleLineContent initialContent) (msg: ContentMsg) ->
+        let m0 = mk initialContent
+        let um0 = TextEditor.withUndo m0
+        let um1 = TextEditor.updateWithUndo (ContentMsg.toMsg msg) um0
+        // Only test the law when the edit actually changed state (some ops are no-ops at boundaries)
+        match Undoable.canUndo um1 with
+        | false -> true  // vacuously true: no change → nothing to undo → law trivially holds
+        | true  ->
+          let um_back = TextEditor.updateWithUndo TEUndo um1
+          TextEditor.content um_back.Present = initialContent
+
+    // Law 2 — Undo at empty history is idempotent.
+    // Formally: undo(x) = x when Past = []
+    // i.e., undoing when there is nothing to undo leaves the state unchanged.
+    testPropertyWithConfig config "Law2: undo at empty history is identity" <|
+      fun (SingleLineContent initialContent) ->
+        let um = TextEditor.withUndo (mk initialContent)
+        // No edits — Past is empty
+        Undoable.canUndo um = false &&
+        Undoable.undo um = um
+
+    // Law 3 — Redo is the right inverse of undo after a content edit.
+    // Formally: content(redo(undo(edit(x)))) = content(edit(x))
+    // i.e., redo after undo restores the post-edit state.
+    testPropertyWithConfig config "Law3: redo(undo(edit(x))).content = edit(x).content" <|
+      fun (SingleLineContent initialContent) (msg: ContentMsg) ->
+        let m0 = mk initialContent
+        let um0 = TextEditor.withUndo m0
+        let um1 = TextEditor.updateWithUndo (ContentMsg.toMsg msg) um0
+        match Undoable.canUndo um1 with
+        | false -> true  // vacuously true: no change → undo/redo cycle trivially holds
+        | true  ->
+          let editedContent = TextEditor.content um1.Present
+          let um_undone   = TextEditor.updateWithUndo TEUndo  um1
+          let um_redone   = TextEditor.updateWithUndo TERedo  um_undone
+          TextEditor.content um_redone.Present = editedContent
+
+    // Law 4 — Undo history is strictly bounded by updateWithUndoDepth.
+    // Formally: |Past| <= maxDepth after any number of edits with depth cap.
+    testPropertyWithConfig config "Law4: history depth never exceeds cap" <|
+      fun (edits: ContentMsg list) ->
+        let cap = 5
+        let um =
+          edits
+          |> List.fold (fun acc msg ->
+              TextEditor.updateWithUndoDepth cap (ContentMsg.toMsg msg) acc)
+              (TextEditor.withUndo (mk ""))
+        um.Past.Length <= cap
+  ]
+
 [<Tests>]
 let allTextEditorTests = testList "TextEditor" [
   initTests
@@ -635,5 +738,6 @@ let allTextEditorTests = testList "TextEditor" [
   undoTests
   viewTests
   propertyTests
+  undoLawTests
 ]
 

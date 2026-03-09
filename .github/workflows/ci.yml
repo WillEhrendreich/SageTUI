@@ -39,3 +39,66 @@ jobs:
         with:
           name: nuget-${{ matrix.os }}
           path: ./artifacts/*.nupkg
+
+  # ── Benchmark regression gate ──────────────────────────────────────────────
+  # Guards the SIMD diffing moat. Runs only on ubuntu to keep results stable.
+  # On pushes to master: stores JSON results as a baseline artifact.
+  # On PRs: compares against the stored baseline and fails on catastrophic
+  # regression (>5x slowdown on any key benchmark).
+  benchmark-regression:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      deployments: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Restore
+        run: dotnet restore SageTUI.slnx
+
+      - name: Build (Release)
+        run: dotnet build SageTUI.slnx --no-restore -c Release
+
+      - name: Run benchmarks
+        run: >
+          dotnet run -c Release --project SageTUI.Benchmarks --no-build --
+          --exporters json
+          --artifacts ./bench-out
+          --filter '*'
+          --iterationCount 5
+          --warmupCount 3
+          --outlierMode RemoveAll
+        timeout-minutes: 10
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: ./bench-out/**/*.json
+          if-no-files-found: warn
+
+      # Track benchmark results over time using github-action-benchmark.
+      # On master pushes: stores baseline. On PRs: compares and alerts on regression.
+      - name: Store / compare benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'benchmarkdotnet'
+          output-file-path: ./bench-out/results/SageTUI.Benchmarks-report-full-compressed.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Alert when any benchmark is 5x slower than baseline (catastrophic regression only)
+          alert-threshold: '500%'
+          # Only comment on PRs; don't fail the build for non-catastrophic drift
+          comment-on-alert: true
+          fail-on-alert: true
+          # Store results in gh-pages branch (benchmark history page)
+          auto-push: ${{ github.event_name == 'push' }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: benchmarks
+

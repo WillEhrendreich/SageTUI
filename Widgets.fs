@@ -862,8 +862,9 @@ module Modal =
 module Focus =
   /// Compute the next focused key given an ordered list, a current key, and a direction.
   /// Tab goes forward, Shift+Tab goes backward. Wraps around at either end.
+  /// Works with any equality-comparable key type, including `FieldId` and `string`.
   /// Note: `FocusSub` intercepts Tab/Shift+Tab before `KeySub`, so bind other keys with `Keys.bind`.
-  let tabOrder (keys: string list) (focused: string) (dir: FocusDirection) =
+  let tabOrder (keys: 'a list) (focused: 'a) (dir: FocusDirection) : 'a =
     match keys with
     | [] -> focused
     | _ ->
@@ -1155,11 +1156,22 @@ module TreeView =
       | false -> el)
     |> El.column
 
+/// Type-safe field identifier. Prevents mixing up field IDs with arbitrary strings.
+/// Use `FieldId "myField"` at the definition site; compare with structural equality.
+[<Struct>]
+type FieldId = FieldId of string
+
+module FieldId =
+  /// Construct a `FieldId` from a raw string.
+  let create (s: string) = FieldId s
+  /// Extract the raw string value from a `FieldId`.
+  let value (FieldId s) = s
+
 /// A single field descriptor for the Form widget.
-/// Binds a string identifier, a view function, and a terminal-event handler.
+/// Binds a `FieldId`, a view function, and a terminal-event handler.
 type FormField<'model, 'msg> = {
-  /// Unique identifier used for focus routing.
-  Id: string
+  /// Unique identifier used for focus routing. Use `FieldId "name"` at definition.
+  Id: FieldId
   /// Render the field — receives `focused: bool` and the current model.
   View: bool -> 'model -> Element
   /// Handle a terminal event while this field is focused. Return Some msg to dispatch, None to ignore.
@@ -1167,49 +1179,49 @@ type FormField<'model, 'msg> = {
 }
 
 module Form =
-  /// Create a `FormField` from an identifier, view function, and terminal event handler.
+  /// Create a `FormField` from a `FieldId`, view function, and terminal event handler.
   /// Use this to support modifier keys (Ctrl, Shift) inside form fields.
-  let field (id: string) (view: bool -> 'model -> Element) (handleEvent: TerminalEvent -> 'model -> 'msg option) : FormField<'model, 'msg> =
+  let field (id: FieldId) (view: bool -> 'model -> Element) (handleEvent: TerminalEvent -> 'model -> 'msg option) : FormField<'model, 'msg> =
     { Id = id; View = view; HandleEvent = handleEvent }
 
   /// Create a `FormField` that only handles plain keypresses (no modifiers).
   /// Wraps the key-only handler into a TerminalEvent handler.
-  [<System.Obsolete("Use Form.field with a TerminalEvent handler to support modifier keys (Ctrl, Shift, etc.).")>]
-  let fieldFromKey (id: string) (view: bool -> 'model -> Element) (handleKey: Key -> 'model -> 'msg option) : FormField<'model, 'msg> =
+  [<System.Obsolete("Use Form.field with a TerminalEvent handler to support modifier keys (Ctrl, Shift, etc.). Will be removed in v1.0.")>]
+  let fieldFromKey (id: FieldId) (view: bool -> 'model -> Element) (handleKey: Key -> 'model -> 'msg option) : FormField<'model, 'msg> =
     // Match only unmodified keypresses — Ctrl/Shift combos are NOT forwarded to the legacy handler.
     { Id = id; View = view; HandleEvent = fun evt model -> match evt with KeyPressed(k, Modifiers.None) -> handleKey k model | _ -> None }
 
   /// Render all fields as a column, passing `focused = true` to the field whose id matches `focusedId`.
-  let view (fields: FormField<'model, 'msg> list) (focusedId: string) (model: 'model) : Element =
+  let view (fields: FormField<'model, 'msg> list) (focusedId: FieldId) (model: 'model) : Element =
     fields
     |> List.map (fun f -> f.View (f.Id = focusedId) model)
     |> El.column
 
   /// Dispatch a terminal event to the currently focused field. Returns None if no field handles it.
-  let handleEvent (fields: FormField<'model, 'msg> list) (focusedId: string) (event: TerminalEvent) (model: 'model) : 'msg option =
+  let handleEvent (fields: FormField<'model, 'msg> list) (focusedId: FieldId) (event: TerminalEvent) (model: 'model) : 'msg option =
     fields
     |> List.tryFind (fun f -> f.Id = focusedId)
     |> Option.bind (fun f -> f.HandleEvent event model)
 
   /// Dispatch a plain keypress to the currently focused field. Returns None if no field handles the key.
   /// Prefer `Form.handleEvent` to support modifier keys.
-  [<System.Obsolete("Use Form.handleEvent to support modifier keys (Ctrl, Shift, etc.).")>]
-  let handleKey (fields: FormField<'model, 'msg> list) (focusedId: string) (key: Key) (model: 'model) : 'msg option =
+  [<System.Obsolete("Use Form.handleEvent to support modifier keys (Ctrl, Shift, etc.). Will be removed in v1.0.")>]
+  let handleKey (fields: FormField<'model, 'msg> list) (focusedId: FieldId) (key: Key) (model: 'model) : 'msg option =
     handleEvent fields focusedId (KeyPressed(key, Modifiers.None)) model
 
   /// Extract all field identifiers in order. Pass to `Focus.tabOrder` for Tab navigation.
-  let ids (fields: FormField<'model, 'msg> list) : string list =
+  let ids (fields: FormField<'model, 'msg> list) : FieldId list =
     fields |> List.map (fun f -> f.Id)
 
   /// Move focus in the given direction through the form's field list. Convenience over `Focus.tabOrder (Form.ids fields)`.
-  let handleFocus (fields: FormField<'model, 'msg> list) (focusedId: string) (dir: FocusDirection) : string =
+  let handleFocus (fields: FormField<'model, 'msg> list) (focusedId: FieldId) (dir: FocusDirection) : FieldId =
     Focus.tabOrder (ids fields) focusedId dir
 
 // ---- TextForm: batteries-included form with text inputs, labels, and validation ----
 
 /// A single field descriptor: static configuration for one `TextForm` text input field.
 type TextFormField = {
-  Id: string
+  Id: FieldId
   Label: string
   Placeholder: string
   Required: bool
@@ -1235,7 +1247,7 @@ type TextFormStatus =
   | TFSubmitFailed of string
   /// Field-level errors returned from the server, keyed by field ID.
   /// The view renders each error beneath the matching field.
-  | TFFieldErrors of Map<string, string>
+  | TFFieldErrors of Map<FieldId, string>
 
 /// The full TextForm model: an ordered list of field states and focus/status bookkeeping.
 type TextFormModel = {
@@ -1253,7 +1265,7 @@ type TextFormMsg =
   | TFSubmitResult of Result<unit, string>
   /// Set server-side per-field errors (field ID → error message).
   /// Transitions status to TFFieldErrors and resumes editing.
-  | TFSetFieldErrors of Map<string, string>
+  | TFSetFieldErrors of Map<FieldId, string>
   | TFReset
 
 module TextForm =
@@ -1263,7 +1275,7 @@ module TextForm =
     | false -> Ok (value.Trim())
 
   /// Create a `TextFormField` with sensible defaults (not required, passes everything).
-  let field (id: string) (label: string) : TextFormField =
+  let field (id: FieldId) (label: string) : TextFormField =
     { Id = id
       Label = label
       Placeholder = ""
@@ -1372,7 +1384,7 @@ module TextForm =
         | true  -> { m with Rows = validated; Status = TFSubmitting }, true
 
   /// Get the current (untrimmed) text value of a field by ID.
-  let getValue (fieldId: string) (m: TextFormModel) : string option =
+  let getValue (fieldId: FieldId) (m: TextFormModel) : string option =
     m.Rows |> List.tryFind (fun r -> r.Field.Id = fieldId)
     |> Option.map (fun r -> r.Input.Text)
 
