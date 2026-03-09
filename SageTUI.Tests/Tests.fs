@@ -4310,3 +4310,149 @@ let allTests = testList "All" [
   ]
 ]
 
+// ── Sprint 36 ──────────────────────────────────────────────────────────────────
+
+let sprint36TableTests =
+  testList "El.table" [
+    testCase "empty headers returns Empty" <| fun () ->
+      let result = El.table [] []
+      match result with
+      | Empty -> ()
+      | other -> failwithf "expected Empty, got %A" other
+
+    testCase "headers produce Column with 3 children (header, sep, body)" <| fun () ->
+      let result = El.table ["A"; "B"] []
+      match result with
+      | Column rows -> rows |> Expect.hasLength "header+sep+bodyGrid = 3" 3
+      | other -> failwithf "expected Column, got %A" other
+
+    testCase "header row has bold style on each header text" <| fun () ->
+      let result = El.table ["Name"; "Age"] []
+      match result with
+      | Column (headerRow :: _) ->
+        // headerRow is El.grid 2 EqualWidth [ bold "Name"; bold "Age" ]
+        // = Column [Row [Constrained(Fill,bold "Name"); Constrained(Fill,bold "Age")]]
+        let inline hasBold el =
+          match el with
+          | Text(_, st) -> st.Attrs.Value &&& 0x01us = 0x01us  // Bold bit
+          | Styled(st, _) -> st.Attrs.Value &&& 0x01us = 0x01us
+          | Constrained(_, Text(_, st)) -> st.Attrs.Value &&& 0x01us = 0x01us
+          | Constrained(_, Styled(st, _)) -> st.Attrs.Value &&& 0x01us = 0x01us
+          | _ -> false
+        match headerRow with
+        | Column [Row cells] ->
+          cells |> List.forall hasBold |> Expect.isTrue "all header cells are bold"
+        | other -> failwithf "unexpected header structure: %A" other
+      | other -> failwithf "expected Column, got %A" other
+
+    testCase "separator row contains only dash text" <| fun () ->
+      let result = El.table ["Name"; "Age"] []
+      match result with
+      | Column (_ :: sepRow :: _) ->
+        let rec hasDashes = function
+          | Text(s, _) -> s |> Seq.forall (fun c -> c = '─')
+          | Constrained(_, child) -> hasDashes child
+          | Column [Row cells] -> cells |> List.forall hasDashes
+          | _ -> false
+        sepRow |> hasDashes |> Expect.isTrue "separator is all dashes"
+      | other -> failwithf "expected Column, got %A" other
+
+    testCase "body rows are laid out in the body grid" <| fun () ->
+      let rows = [ [El.text "Alice"; El.text "30"]; [El.text "Bob"; El.text "25"] ]
+      let result = El.table ["Name"; "Age"] rows
+      let buf = Buffer.create 40 10
+      let area = { X = 0; Y = 0; Width = 40; Height = 10 }
+      Render.render area Style.empty buf result
+      let s = Buffer.toString buf
+      s |> Expect.stringContains "has Name header" "Name"
+      s |> Expect.stringContains "has Alice row" "Alice"
+      s |> Expect.stringContains "has Bob row" "Bob"
+
+    testCase "short rows are padded with Empty (no crash)" <| fun () ->
+      // Row has fewer cells than headers — should pad with Empty safely
+      let rows = [ [El.text "Only one cell"] ]
+      let result = El.table ["Col1"; "Col2"; "Col3"] rows
+      let buf = Buffer.create 60 5
+      let area = { X = 0; Y = 0; Width = 60; Height = 5 }
+      // Should not throw
+      Render.render area Style.empty buf result
+      let s = Buffer.toString buf
+      s |> Expect.stringContains "single cell rendered" "Only one cell"
+
+    testCase "long rows are truncated to header count (no crash)" <| fun () ->
+      // Row has MORE cells than headers — extra cells should be ignored
+      let rows = [ [El.text "A"; El.text "B"; El.text "C"; El.text "EXTRA"] ]
+      let result = El.table ["H1"; "H2"; "H3"] rows
+      let buf = Buffer.create 60 5
+      let area = { X = 0; Y = 0; Width = 60; Height = 5 }
+      Render.render area Style.empty buf result
+      let s = Buffer.toString buf
+      // EXTRA cell truncated; we just verify no exception and first cells present
+      s |> Expect.stringContains "first cell present" "A"
+  ]
+
+let sprint36FocusRingConstraintTests =
+  testList "FocusRing.isFocused equality constraint" [
+    testCase "isFocused works for string items" <| fun () ->
+      let ring = FocusRing.create ["a"; "b"; "c"]
+      FocusRing.isFocused "a" ring |> Expect.isTrue "first item focused"
+      FocusRing.isFocused "b" ring |> Expect.isFalse "second not focused"
+
+    testCase "isFocused works for int items" <| fun () ->
+      let ring = FocusRing.create [10; 20; 30]
+      FocusRing.isFocused 10 ring |> Expect.isTrue "10 is focused"
+      FocusRing.isFocused 20 ring |> Expect.isFalse "20 not focused"
+
+    testCase "isFocused after next changes focus" <| fun () ->
+      let ring = FocusRing.create ["x"; "y"; "z"] |> FocusRing.next
+      FocusRing.isFocused "y" ring |> Expect.isTrue "y now focused"
+      FocusRing.isFocused "x" ring |> Expect.isFalse "x no longer focused"
+
+    testCase "isFocusedAt works by index" <| fun () ->
+      let ring = FocusRing.create [1; 2; 3]
+      FocusRing.isFocusedAt 0 ring |> Expect.isTrue "index 0 is focused"
+      FocusRing.isFocusedAt 1 ring |> Expect.isFalse "index 1 is not focused"
+  ]
+
+let sprint36DegenerateAnchorTests =
+  testList "TextEditor degenerate anchor guard" [
+    testCase "view with degenerate anchor (anchor=cursor) renders without crash" <| fun () ->
+      let m : TextEditorModel = {
+        Lines = [| "hello" |]
+        Row = 0; Col = 3
+        SelectionAnchor = Some (0, 3)  // anchor = cursor = degenerate!
+        ScrollTop = 0
+        MaxLines = None
+      }
+      let elem = TextEditor.view true 5 m
+      let buf = Buffer.create 20 5
+      let area = { X = 0; Y = 0; Width = 20; Height = 5 }
+      Render.render area Style.empty buf elem
+
+    testCase "view with degenerate anchor renders text normally (cursor not hidden)" <| fun () ->
+      let m : TextEditorModel = {
+        Lines = [| "hello" |]
+        Row = 0; Col = 2
+        SelectionAnchor = Some (0, 2)  // anchor = cursor
+        ScrollTop = 0
+        MaxLines = None
+      }
+      let elem = TextEditor.view true 3 m
+      let buf = Buffer.create 20 3
+      let area = { X = 0; Y = 0; Width = 20; Height = 3 }
+      Render.render area Style.empty buf elem
+      // Buffer should contain the characters of "hello" — check for 'h' and 'o'
+      // (render spaces individual chars into cells with per-char styling for cursor)
+      let s = Buffer.toString buf
+      s |> Expect.stringContains "has 'h' from hello" "h"
+      s |> Expect.stringContains "has 'o' from hello" "o"
+  ]
+
+[<Tests>]
+let sprint36Tests =
+  testList "Sprint 36" [
+    sprint36TableTests
+    sprint36FocusRingConstraintTests
+    sprint36DegenerateAnchorTests
+  ]
+

@@ -460,9 +460,9 @@ module FocusRing =
     | n -> { ring with Index = (ring.Index - 1 + n) % n }
 
   /// Return true if the given item is the currently focused one.
-  /// Note: requires structural equality on 'a. For [<NoEquality>] types (e.g. Element),
+  /// Requires structural equality on 'a. For [<NoEquality>] types (e.g. Element),
   /// use isFocusedAt instead.
-  let isFocused (item: 'a) (ring: FocusRing<'a>) =
+  let isFocused<'a when 'a : equality> (item: 'a) (ring: FocusRing<'a>) =
     match current ring with
     | Some c -> c = item
     | None -> false
@@ -1989,7 +1989,11 @@ module TextEditor =
       | true, Some (ar, ac) ->
         let cursor = (m'.Row, m'.Col)
         let anchor = (ar, ac)
-        Some (if anchor <= cursor then anchor, cursor else cursor, anchor)
+        // Guard: degenerate anchor (anchor = cursor) treated as no selection.
+        // The update path prevents this normally, but this is defensive against
+        // any future path that might set SelectionAnchor = Some cursor.
+        if anchor = cursor then None
+        else Some (if anchor <= cursor then anchor, cursor else cursor, anchor)
 
     let rows =
       visibleLines |> Array.mapi (fun vi line ->

@@ -469,7 +469,41 @@ module El =
   let gridEven (cols: int) (children: Element list) : Element =
     grid cols EqualWidth children
 
-/// Computation expression builders for declarative, imperative-style layout construction.
+  /// Quick tabular layout from string headers and pre-rendered cell Elements.
+  ///
+  /// Headers are rendered bold. A `─` separator divides header from body rows.
+  /// All columns are equal-width (`EqualWidth`). For typed data, fixed widths, or
+  /// fill columns, use `Table.view` from Widgets.fs.
+  ///
+  /// Example:
+  ///   El.table ["Name"; "Age"; "City"] [
+  ///     [El.text "Alice"; El.text "30"; El.text "London"]
+  ///     [El.text "Bob";   El.text "25"; El.text "Paris" ]
+  ///   ]
+  let table (headers: string list) (rows: Element list list) : Element =
+    let cols = List.length headers
+    match cols with
+    | 0 -> Empty
+    | _ ->
+      let headerRow =
+        headers
+        |> List.map (fun h -> Text(h, { Fg = None; Bg = None; Attrs = TextAttrs.bold }))
+        |> grid cols EqualWidth
+      // Each separator cell is a long ─ string that clips to its column width,
+      // producing a seamless full-row horizontal rule.
+      let sepStr = System.String('─', 256)
+      let sepRow = List.replicate cols (text sepStr) |> grid cols EqualWidth
+      let bodyFlat =
+        rows
+        |> List.collect (fun row ->
+          let n = List.length row
+          match n < cols with
+          | true  -> row @ List.replicate (cols - n) Empty
+          | false -> List.truncate cols row)
+      let bodyGrid = bodyFlat |> grid cols EqualWidth
+      Column [ headerRow; sepRow; bodyGrid ]
+
+/// Computation expression buildersfor declarative, imperative-style layout construction.
 ///
 /// Instead of wrapping lists in `[` `]`:
 ///   `El.column [ El.text "A"; if cond then El.text "B" else El.empty ]`
