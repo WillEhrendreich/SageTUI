@@ -150,8 +150,6 @@ type Msg =
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
-let tabOrder = Focus.tabOrder [ Name; Email; Submit ]
-
 let init () =
     { Name      = TextInput.empty
       Email     = TextInput.empty
@@ -172,18 +170,16 @@ let update msg model =
             | false -> FocusRing.next model.Focus
         { model with Focus = focus }, Cmd.none
 
-    | Key(Key.Enter, _) when FocusRing.current model.Focus = Submit ->
+    | Key(Key.Enter, _) when FocusRing.isFocused Submit model.Focus ->
         { model with Submitted = true }, Cmd.none
 
     | Key(k, _) ->
         match FocusRing.current model.Focus with
-        | Name  ->
-            let name', cmd = TextInput.update (TEKey(k, Modifiers.None)) model.Name
-            { model with Name = name' }, Cmd.map Key cmd
-        | Email ->
-            let email', cmd = TextInput.update (TEKey(k, Modifiers.None)) model.Email
-            { model with Email = email' }, Cmd.map Key cmd
-        | Submit -> model, Cmd.none
+        | Some Name  ->
+            { model with Name  = TextInput.handleKey k model.Name  }, Cmd.none
+        | Some Email ->
+            { model with Email = TextInput.handleKey k model.Email }, Cmd.none
+        | _ -> model, Cmd.none
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
@@ -201,17 +197,16 @@ let view model =
         |> El.padAll 2
         |> El.bordered Rounded
     else
-        let focused = FocusRing.current model.Focus
         El.column [
-            El.text "Contact Form" |> El.bold |> Theme.heading theme
+            Theme.heading theme "Contact Form"
             El.text ""
             El.text "Name"  |> El.dim
-            TextInput.viewThemed theme (focused = Name) model.Name
+            TextInput.viewThemed theme (FocusRing.isFocused Name model.Focus) model.Name
             El.text ""
             El.text "Email" |> El.dim
-            TextInput.viewThemed theme (focused = Email) model.Email
+            TextInput.viewThemed theme (FocusRing.isFocused Email model.Focus) model.Email
             El.text ""
-            (if focused = Submit
+            (if FocusRing.isFocused Submit model.Focus
              then El.text "[ Submit ]" |> El.bold |> El.fg theme.Primary
              else El.text "[ Submit ]" |> El.dim)
             El.text ""
@@ -234,7 +229,7 @@ let program : Program<Model, Msg> = {
         // Forward all key events for focus navigation and TextInput handling.
         // quitBinding is checked first; all other keys fall through to Key msg.
         [ quitBinding
-          Sub.KeySub(fun k mods -> Some (Key(k, mods))) ]
+          Sub.KeySub(fun (k, mods) -> Some (Key(k, mods))) ]
 }
 
 [<EntryPoint>]
@@ -245,9 +240,9 @@ let main _ = App.run program; 0
 
 - `FocusRing.create fields` builds the ring from a list of field identifiers.
 - `FocusRing.next` / `FocusRing.prev` advance focus, wrapping at either end.
-- `FocusRing.current` returns the currently focused field.
-- Pass `focused = (FocusRing.current model.Focus = MyField)` to widget view
-  functions to render the focus highlight.
+- `FocusRing.current ring` returns `Some field` (or `None` for an empty ring).
+- `FocusRing.isFocused field ring` returns `true` if `field` is currently focused —
+  the idiomatic way to pass a focused flag to widget view functions.
 
 ---
 
@@ -260,30 +255,36 @@ A theme is a record of `Color` values:
 
 ```fsharp
 type Theme = {
-    Primary:  Color
-    Accent:   Color
-    Success:  Color
-    Warning:  Color
-    Error:    Color
-    TextFg:   Color
-    TextDim:  Color
-    Bg:       Color
+    Primary:    Color
+    Secondary:  Color
+    Accent:     Color
+    Success:    Color
+    Warning:    Color
+    Error:      Color
+    TextFg:     Color
+    TextDim:    Color
+    Background: Color
+    Border:     BorderStyle
 }
 ```
 
 **Convenience helpers** apply theme colors to elements:
 
 ```fsharp
-Theme.heading theme (El.text "Title")  // bold + Primary color
-Theme.panel   theme inner              // bordered + Bg background
-Theme.accent  theme (El.text "Note")  // Accent color
+Theme.heading    theme "Title"       // El.text "Title" |> El.bold |> El.fg theme.Primary
+Theme.subheading theme "Subtitle"    // El.text "Subtitle" |> El.fg theme.Secondary
+Theme.panel      theme "Title" inner // bordered column with heading
+Theme.success    theme "OK"          // El.text "OK" |> El.fg theme.Success
+Theme.warning    theme "Caution"     // El.text "Caution" |> El.fg theme.Warning
+Theme.error      theme "Fail"        // El.text "Fail" |> El.fg theme.Error
+Theme.bordered   theme inner         // El.bordered theme.Border inner
 ```
 
 **Widget-level theming** applies a theme to widget configs or view calls:
 
 ```fsharp
 // Config-based widgets:
-let bar = ProgressBar.withTheme Theme.dracula { Value = 0.7f; Width = 20 }
+let bar = ProgressBar.withTheme Theme.dracula { ProgressBar.defaults with Percent = 0.7 }
 let tab = Tabs.withTheme Theme.nord myTabConfig
 
 // View-based widgets:
@@ -326,8 +327,8 @@ Subscriptions are active input sources. Return them from `Subscribe`:
 ```fsharp
 Subscribe = fun model ->
     [ Keys.bind [ Key.Char 'q', Quit ]          // specific key bindings
-      Sub.KeySub(fun k mods -> Some (Key(k,mods))) // all keypresses
-      Sub.TimerSub(1000, Tick)                   // every 1000 ms
+      Sub.KeySub(fun (k, mods) -> Some (Key(k,mods))) // all keypresses
+      Sub.TimerSub("tick", TimeSpan.FromMilliseconds(1000.), fun () -> Tick) // every 1000 ms
       Sub.ResizeSub(fun (w, h) -> Some (Resize(w, h))) ] // terminal resize
 ```
 

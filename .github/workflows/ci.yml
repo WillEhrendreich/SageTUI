@@ -31,6 +31,10 @@ jobs:
       - name: Test
         run: dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -- --summary-location
 
+      - name: Verify tutorial examples compile
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet fsi docs/tutorial-verify.fsx
+
       - name: Pack
         run: dotnet pack SageTUI.Library.fsproj --no-build -o ./artifacts
 
