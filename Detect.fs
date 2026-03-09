@@ -142,6 +142,9 @@ module RawMode =
   let private ENABLE_PROCESSED_INPUT = 0x0001u
   let private ENABLE_LINE_INPUT = 0x0002u
   let private ENABLE_ECHO_INPUT = 0x0004u
+  // Mouse input and VT sequence passthrough for Windows Terminal / ConPTY
+  let private ENABLE_MOUSE_INPUT = 0x0010u
+  let private ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200u
 
   type SavedModes =
     { Platform: Platform
@@ -159,7 +162,7 @@ module RawMode =
       let mutable outMode = 0u
       GetConsoleMode(stdin, &inMode) |> ignore
       GetConsoleMode(stdout, &outMode) |> ignore
-      SetConsoleMode(stdin, inMode &&& ~~~(ENABLE_LINE_INPUT ||| ENABLE_ECHO_INPUT ||| ENABLE_PROCESSED_INPUT)) |> ignore
+      SetConsoleMode(stdin, (inMode &&& ~~~(ENABLE_LINE_INPUT ||| ENABLE_ECHO_INPUT ||| ENABLE_PROCESSED_INPUT)) ||| ENABLE_MOUSE_INPUT ||| ENABLE_VIRTUAL_TERMINAL_INPUT) |> ignore
       SetConsoleMode(stdout, outMode ||| ENABLE_VIRTUAL_TERMINAL_PROCESSING) |> ignore
       { Platform = Windows; InputMode = inMode; OutputMode = outMode; TermiosSnapshot = Array.empty }
     | MacOS | Linux ->
@@ -224,65 +227,107 @@ module Backend =
       | Some width, Some height -> width, height
       | _ -> 80, 25
 
-  let private mapKey (ki: ConsoleKeyInfo) : Key option =
-    match ki.Key with
-    | ConsoleKey.Escape -> Some Escape
-    | ConsoleKey.Enter -> Some Enter
-    | ConsoleKey.Backspace -> Some Backspace
-    | ConsoleKey.Tab -> Some Tab
-    | ConsoleKey.UpArrow -> Some Up
-    | ConsoleKey.DownArrow -> Some Down
-    | ConsoleKey.LeftArrow -> Some Left
-    | ConsoleKey.RightArrow -> Some Right
-    | ConsoleKey.Home -> Some Home
-    | ConsoleKey.End -> Some End
-    | ConsoleKey.Delete -> Some Delete
-    | ConsoleKey.Insert -> Some Insert
-    | ConsoleKey.PageUp -> Some PageUp
-    | ConsoleKey.PageDown -> Some PageDown
-    | ConsoleKey.F1 -> Some (F 1)
-    | ConsoleKey.F2 -> Some (F 2)
-    | ConsoleKey.F3 -> Some (F 3)
-    | ConsoleKey.F4 -> Some (F 4)
-    | ConsoleKey.F5 -> Some (F 5)
-    | ConsoleKey.F6 -> Some (F 6)
-    | ConsoleKey.F7 -> Some (F 7)
-    | ConsoleKey.F8 -> Some (F 8)
-    | ConsoleKey.F9 -> Some (F 9)
-    | ConsoleKey.F10 -> Some (F 10)
-    | ConsoleKey.F11 -> Some (F 11)
-    | ConsoleKey.F12 -> Some (F 12)
-    | _ ->
-      let c = ki.KeyChar
-      // Guard against lone surrogates and NUL bytes that some ConPTY implementations
-      // inject during startup — these are not valid printable characters.
-      match Char.IsHighSurrogate(c) || Char.IsLowSurrogate(c) || c = '\000' with
-      | true -> None
-      | false -> Some (Key.Char c)
+  /// Start the background stdin reader. Reads raw chars from Console.In and parses
+  /// ANSI/VT escape sequences (including SGR mouse) into TerminalEvents.
+  ///
+  /// Architecture:
+  ///   rawThread:   Console.In.Read() → charQueue (one char per enqueue, blocks until available)
+  ///   parseThread: charQueue → eventQueue (accumulates escape seqs, emits TerminalEvents)
+  ///
+  /// Escape sequence timeout: if no follow-up char arrives within 50ms after ESC,
+  /// emits a bare Escape key. Otherwise accumulates until isCompleteEscSeq returns true.
+  let private startInputReader (eventQueue: Collections.Concurrent.ConcurrentQueue<TerminalEvent>) =
+    let charQueue = Collections.Concurrent.ConcurrentQueue<int>()
 
-  let private mapMods (ki: ConsoleKeyInfo) : Modifiers =
-    let mutable m = Modifiers.None
-    match ki.Modifiers.HasFlag(ConsoleModifiers.Shift) with
-    | true -> m <- m ||| Modifiers.Shift
-    | false -> ()
-    match ki.Modifiers.HasFlag(ConsoleModifiers.Control) with
-    | true -> m <- m ||| Modifiers.Ctrl
-    | false -> ()
-    match ki.Modifiers.HasFlag(ConsoleModifiers.Alt) with
-    | true -> m <- m ||| Modifiers.Alt
-    | false -> ()
-    m
+    // Raw reader: purely drains Console.In into charQueue. Daemon thread; never stops.
+    let rawThread = Threading.Thread(fun () ->
+      let reader = Console.In
+      let mutable running = true
+      while running do
+        try
+          let ch = reader.Read()
+          charQueue.Enqueue(ch)
+        with _ -> running <- false)
+    rawThread.IsBackground <- true
+    rawThread.Name <- "SageTUI.InputRaw"
+    rawThread.Start()
 
-  /// Attempt to read a key event; returns None if Console.ReadKey throws or returns a
-  /// sentinel ConsoleKeyInfo that indicates stdin was closed (e.g. in some ConPTY setups).
-  let private tryReadKeyEvent () : TerminalEvent option =
-    try
-      let ki = Console.ReadKey(true)
-      mapKey ki |> Option.map (fun key -> KeyPressed(key, mapMods ki))
-    with _ -> None
+    // Try to dequeue a raw char within timeoutMs (-1 = wait indefinitely)
+    let tryReadChar (timeoutMs: int) : int =
+      let sw = Diagnostics.Stopwatch.StartNew()
+      let mutable result = Int32.MinValue
+      let mutable ch = 0
+      while result = Int32.MinValue &&
+            (timeoutMs < 0 || sw.ElapsedMilliseconds < int64 timeoutMs) do
+        match charQueue.TryDequeue(&ch) with
+        | true  -> result <- ch
+        | false -> Threading.Thread.Sleep(1)
+      match result with
+      | x when x = Int32.MinValue -> -1  // timeout
+      | x -> x
+
+    // Parse thread: accumulates chars into escape sequences, emits TerminalEvents.
+    let parseThread = Threading.Thread(fun () ->
+      let buf = Text.StringBuilder()
+      let escTimeoutMs = 50
+
+      let emitEscape () =
+        let seq = buf.ToString()
+        buf.Clear() |> ignore
+        AnsiParser.parseEscape seq
+        |> Option.defaultValue (KeyPressed(Key.Escape, Modifiers.None))
+        |> eventQueue.Enqueue
+
+      while true do
+        let raw = tryReadChar -1  // block until char arrives
+        match raw with
+        | -1 | 0 -> ()  // EOF / no-op
+        | 27 ->  // ESC — start sequence accumulation
+          buf.Clear() |> ignore
+          let mutable seqDone = false
+          while not seqDone do
+            let next = tryReadChar escTimeoutMs
+            match next with
+            | -1 ->
+              // Timeout: bare Escape key
+              eventQueue.Enqueue(KeyPressed(Key.Escape, Modifiers.None))
+              seqDone <- true
+            | c ->
+              buf.Append(char c) |> ignore
+              let s = buf.ToString()
+              match AnsiParser.isCompleteEscSeq s with
+              | true ->
+                emitEscape()
+                seqDone <- true
+              | false ->
+                // Guard against malformed/overlong sequences
+                match s.Length > 64 with
+                | true ->
+                  eventQueue.Enqueue(KeyPressed(Key.Escape, Modifiers.None))
+                  seqDone <- true
+                | false -> ()
+        | c ->
+          let ch = char c
+          let event =
+            match ch with
+            | '\r' -> KeyPressed(Key.Enter,     Modifiers.None)
+            | '\b' | '\x7F' -> KeyPressed(Key.Backspace, Modifiers.None)
+            | '\t' -> KeyPressed(Key.Tab,       Modifiers.None)
+            | c when int c >= 1 && int c <= 26 ->
+              // Ctrl-A (1) through Ctrl-Z (26): map to Char 'a'..'z' + Ctrl modifier
+              KeyPressed(Key.Char (char (int c + int 'a' - 1)), Modifiers.Ctrl)
+            | c when Char.IsHighSurrogate(c) || Char.IsLowSurrogate(c) ->
+              KeyPressed(Key.Char ' ', Modifiers.None)  // skip surrogates; use space as sentinel
+            | c -> KeyPressed(Key.Char c, Modifiers.None)
+          eventQueue.Enqueue(event))
+    parseThread.IsBackground <- true
+    parseThread.Name <- "SageTUI.InputParse"
+    parseThread.Start()
 
   let create (profile: TerminalProfile) : TerminalBackend =
     let mutable savedModes = Unchecked.defaultof<RawMode.SavedModes>
+    let mutable inputStarted = false
+    let eventQueue = Collections.Concurrent.ConcurrentQueue<TerminalEvent>()
     let mutable lastW, lastH = profile.Size
     let currentSize () =
       match tryGetConsoleSize () with
@@ -303,8 +348,9 @@ module Backend =
         match checkResize () with
         | Some r -> Some r
         | None ->
-          match Console.KeyAvailable with
-          | true -> tryReadKeyEvent ()
+          let mutable evt = Unchecked.defaultof<TerminalEvent>
+          match eventQueue.TryDequeue(&evt) with
+          | true -> Some evt
           | false ->
             match timeoutMs > 0 with
             | true ->
@@ -312,12 +358,25 @@ module Backend =
               match checkResize () with
               | Some r -> Some r
               | None ->
-                match Console.KeyAvailable with
-                | true -> tryReadKeyEvent ()
+                match eventQueue.TryDequeue(&evt) with
+                | true -> Some evt
                 | false -> None
             | false -> None
-      EnterRawMode = fun () -> savedModes <- RawMode.enter profile.Platform
-      LeaveRawMode = fun () -> RawMode.leave savedModes
+      EnterRawMode = fun () ->
+        savedModes <- RawMode.enter profile.Platform
+        match inputStarted with
+        | false ->
+          startInputReader eventQueue
+          inputStarted <- true
+        | true -> ()
+        // Enable SGR extended mouse: X11 mouse (1000) + button-event tracking (1002) + SGR mode (1006)
+        Console.Write("\x1b[?1000h\x1b[?1002h\x1b[?1006h")
+        Console.Out.Flush()
+      LeaveRawMode = fun () ->
+        // Disable mouse modes in reverse order
+        Console.Write("\x1b[?1006l\x1b[?1002l\x1b[?1000l")
+        Console.Out.Flush()
+        RawMode.leave savedModes
       Profile = profile }
 
   /// Auto-detect terminal capabilities and create a backend. Zero ceremony.

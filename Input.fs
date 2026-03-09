@@ -30,3 +30,85 @@ type TerminalEvent =
   | FocusGained
   | FocusLost
   | Pasted of string
+
+/// Pure ANSI/VT escape sequence parser. No I/O — feeds into the background input reader.
+module AnsiParser =
+
+  /// Parse an SGR extended mouse CSI body.
+  /// Input format (full CSI body after '\x1b['): "<btn;x;yM" or "<btn;x;ym"
+  /// btn bits: 0-1=button (0=left,1=middle,2=right), 4=shift, 8=alt, 16=ctrl, 64=scroll
+  /// Coordinates are 1-indexed; returned X/Y are 0-indexed.
+  let parseSgrMouse (csiBody: string) : MouseEvent option =
+    if csiBody.Length < 5 || csiBody.[0] <> '<' then None
+    else
+      match csiBody.[csiBody.Length - 1] with
+      | 'M' | 'm' ->
+        let inner = csiBody.[1..csiBody.Length - 2]  // strip '<' and M/m terminator
+        let parts = inner.Split(';')
+        match parts.Length with
+        | 3 ->
+          match Int32.TryParse(parts.[0]), Int32.TryParse(parts.[1]), Int32.TryParse(parts.[2]) with
+          | (true, btn), (true, x), (true, y) ->
+            let button =
+              match btn &&& 64 <> 0, btn &&& 3 with
+              | true, 0 -> ScrollUp
+              | true, _ -> ScrollDown
+              | false, 0 -> LeftButton
+              | false, 1 -> MiddleButton
+              | false, _ -> RightButton
+            let mutable m = Modifiers.None
+            if btn &&& 4  <> 0 then m <- m ||| Modifiers.Shift
+            if btn &&& 8  <> 0 then m <- m ||| Modifiers.Alt
+            if btn &&& 16 <> 0 then m <- m ||| Modifiers.Ctrl
+            Some { Button = button; X = x - 1; Y = y - 1; Modifiers = m }
+          | _ -> None
+        | _ -> None
+      | _ -> None
+
+  /// Returns true when the accumulated buffer (everything AFTER the ESC byte)
+  /// forms a syntactically complete VT escape sequence.
+  let isCompleteEscSeq (buf: string) : bool =
+    match buf with
+    | "" -> false
+    | s ->
+      match s.[0] with
+      | '[' ->
+        // CSI: '[' + zero-or-more param/intermediate bytes + one final byte (0x40–0x7E)
+        s.Length >= 2 && s.[s.Length - 1] >= '@' && s.[s.Length - 1] <= '~'
+      | 'O' ->
+        // SS3: 'O' + exactly one char (F1=P, F2=Q, F3=R, F4=S)
+        s.Length = 2
+      | _ ->
+        // Alt+key: single char after ESC
+        s.Length = 1
+
+  /// Parse the accumulated sequence buffer (AFTER the ESC byte) into a TerminalEvent.
+  /// Returns None for unrecognised sequences (caller should emit Escape key instead).
+  let parseEscape (rest: string) : TerminalEvent option =
+    match rest with
+    | "[A" -> Some (KeyPressed(Key.Up,       Modifiers.None))
+    | "[B" -> Some (KeyPressed(Key.Down,     Modifiers.None))
+    | "[C" -> Some (KeyPressed(Key.Right,    Modifiers.None))
+    | "[D" -> Some (KeyPressed(Key.Left,     Modifiers.None))
+    | "[H" | "[1~" | "[7~" -> Some (KeyPressed(Key.Home,    Modifiers.None))
+    | "[F" | "[4~" | "[8~" -> Some (KeyPressed(Key.End,     Modifiers.None))
+    | "[2~" -> Some (KeyPressed(Key.Insert,  Modifiers.None))
+    | "[3~" -> Some (KeyPressed(Key.Delete,  Modifiers.None))
+    | "[5~" -> Some (KeyPressed(Key.PageUp,  Modifiers.None))
+    | "[6~" -> Some (KeyPressed(Key.PageDown,Modifiers.None))
+    | "OP"  -> Some (KeyPressed(Key.F 1,     Modifiers.None))
+    | "OQ"  -> Some (KeyPressed(Key.F 2,     Modifiers.None))
+    | "OR"  -> Some (KeyPressed(Key.F 3,     Modifiers.None))
+    | "OS"  -> Some (KeyPressed(Key.F 4,     Modifiers.None))
+    | "[15~" -> Some (KeyPressed(Key.F 5,   Modifiers.None))
+    | "[17~" -> Some (KeyPressed(Key.F 6,   Modifiers.None))
+    | "[18~" -> Some (KeyPressed(Key.F 7,   Modifiers.None))
+    | "[19~" -> Some (KeyPressed(Key.F 8,   Modifiers.None))
+    | "[20~" -> Some (KeyPressed(Key.F 9,   Modifiers.None))
+    | "[21~" -> Some (KeyPressed(Key.F 10,  Modifiers.None))
+    | "[23~" -> Some (KeyPressed(Key.F 11,  Modifiers.None))
+    | "[24~" -> Some (KeyPressed(Key.F 12,  Modifiers.None))
+    | s when s.Length > 2 && s.[0] = '[' && s.[1] = '<' ->
+      // SGR mouse: CSI body is "[<btn;x;yM" → pass "<btn;x;yM" to parseSgrMouse
+      parseSgrMouse s.[1..] |> Option.map MouseInput
+    | _ -> None
