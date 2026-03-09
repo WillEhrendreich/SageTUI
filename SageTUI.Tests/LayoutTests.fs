@@ -3,6 +3,7 @@ module SageTUI.LayoutTests
 open System.Text
 open Expecto
 open Expecto.Flip
+open FsCheck
 open SageTUI
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -1148,6 +1149,86 @@ let diffInvariantPropertyTests =
         stillDiff.Count = 0
   ]
 
+// ═══════════════════════════════════════════════════════════════════════
+// RENDER EQUIVALENCE PROPERTY TESTS
+// Generates arbitrary Element trees and asserts Render.fs and
+// ArenaRender.fs produce byte-identical Buffer cells for every case.
+// ═══════════════════════════════════════════════════════════════════════
+
+let private genSimpleText : Gen<Element> =
+  Gen.elements [ ""; "A"; "Hi"; "Hello"; "Longer text"; "αβγ"; "行列" ]
+  |> Gen.map El.text
+
+let rec private genElement (depth: int) : Gen<Element> =
+  let leafGen = Gen.oneof [ Gen.constant El.empty; genSimpleText ]
+  match depth with
+  | 0 -> leafGen
+  | d ->
+    let childGen  = genElement (d - 1)
+    let listGen   = Gen.nonEmptyListOf childGen |> Gen.resize 3
+    Gen.frequency [
+      1, Gen.constant El.empty
+      3, genSimpleText
+      2, Gen.map El.row  listGen
+      2, Gen.map El.column listGen
+      1, Gen.map2 (fun bs c -> El.bordered bs c)
+                  (Gen.elements [ Light; Heavy; Double; Rounded ])
+                  childGen
+      1, Gen.map2 (fun n  c -> El.width (max 1 n) c)
+                  (Gen.choose (1, 30))
+                  childGen
+      1, Gen.map2 (fun n  c -> El.height (max 1 n) c)
+                  (Gen.choose (1, 10))
+                  childGen
+      1, Gen.map  (fun c -> El.padAll 1 c) childGen
+    ]
+
+/// FsCheck Arbitrary for Element — used by testPropertyWithConfig.
+type ElementArb() =
+  static member Element() : Arbitrary<Element> =
+    Arb.fromGen (Gen.sized (fun s -> genElement (min s 4)))
+
+let renderEquivalencePropertyTests =
+  testList "Render/ArenaRender parity property tests (FsCheck)" [
+
+    testPropertyWithConfig
+      { FsCheckConfig.defaultConfig with maxTest = 300; arbitrary = [ typeof<ElementArb> ] }
+      "Render and ArenaRender produce identical cells for any element at arbitrary sizes"
+    <| fun (wb: byte) (hb: byte) (elem: Element) ->
+        let w = max 1 (int wb % 60 + 1)
+        let h = max 1 (int hb % 30 + 1)
+        let (treeBuf, arenaBuf) = arenaHelper elem w h
+        arenaBuf.Cells |> Expect.sequenceEqual "cells match" treeBuf.Cells
+
+    testPropertyWithConfig
+      { FsCheckConfig.defaultConfig with maxTest = 200; arbitrary = [ typeof<ElementArb> ] }
+      "Buffer cell count is always w*h regardless of element complexity"
+    <| fun (wb: byte) (hb: byte) (elem: Element) ->
+        let w = max 1 (int wb % 60 + 1)
+        let h = max 1 (int hb % 30 + 1)
+        let (treeBuf, _) = arenaHelper elem w h
+        Array.length treeBuf.Cells = w * h
+
+    testPropertyWithConfig
+      { FsCheckConfig.defaultConfig with maxTest = 200; arbitrary = [ typeof<ElementArb> ] }
+      "ArenaRender produces exactly w*h cells for any element"
+    <| fun (wb: byte) (hb: byte) (elem: Element) ->
+        let w = max 1 (int wb % 60 + 1)
+        let h = max 1 (int hb % 30 + 1)
+        let (_, arenaBuf) = arenaHelper elem w h
+        Array.length arenaBuf.Cells = w * h
+
+    testPropertyWithConfig
+      { FsCheckConfig.defaultConfig with maxTest = 150; arbitrary = [ typeof<ElementArb> ] }
+      "Render is idempotent: same element twice produces identical buffer"
+    <| fun (wb: byte) (hb: byte) (elem: Element) ->
+        let w = max 1 (int wb % 40 + 1)
+        let h = max 1 (int hb % 20 + 1)
+        let (buf1, _) = arenaHelper elem w h
+        let (buf2, _) = arenaHelper elem w h
+        buf2.Cells |> Expect.sequenceEqual "idempotent" buf1.Cells
+  ]
+
 [<Tests>]
 let allLayoutTests = testList "MDN CSS Layout Compliance" [
   measureWidthTests
@@ -1167,4 +1248,5 @@ let allLayoutTests = testList "MDN CSS Layout Compliance" [
   flexShrinkTests
   layoutConservationPropertyTests
   diffInvariantPropertyTests
+  renderEquivalencePropertyTests
 ]

@@ -634,6 +634,96 @@ let parseEscapeModifierTests = testList "AnsiParser.parseEscape modifier keys" [
     AnsiParser.parseEscape "[A" |> Expect.equal "up" (Some (KeyPressed(Key.Up, Modifiers.None)))
   testCase "bare [D still works" <| fun () ->
     AnsiParser.parseEscape "[D" |> Expect.equal "left" (Some (KeyPressed(Key.Left, Modifiers.None)))
+
+  // ── Complete modifier × direction matrix (all 7 modifier codes × 4 arrows) ──
+  // Missing entries from the original set: Shift+Down, Alt+Down, Alt+Left,
+  // Alt+Right, Shift+Right, and all Shift+Ctrl / Alt+Ctrl combos.
+
+  testCase "Shift+Down = [1;2B" <| fun () ->
+    AnsiParser.parseEscape "[1;2B" |> Expect.equal "shift+down" (Some (KeyPressed(Key.Down, Modifiers.Shift)))
+  testCase "Alt+Down = [1;3B" <| fun () ->
+    AnsiParser.parseEscape "[1;3B" |> Expect.equal "alt+down" (Some (KeyPressed(Key.Down, Modifiers.Alt)))
+  testCase "Shift+Alt+Down = [1;4B" <| fun () ->
+    AnsiParser.parseEscape "[1;4B" |> Expect.equal "shift+alt+down" (Some (KeyPressed(Key.Down, Modifiers.Shift ||| Modifiers.Alt)))
+  testCase "Shift+Ctrl+Down = [1;6B" <| fun () ->
+    AnsiParser.parseEscape "[1;6B" |> Expect.equal "shift+ctrl+down" (Some (KeyPressed(Key.Down, Modifiers.Shift ||| Modifiers.Ctrl)))
+  testCase "Alt+Ctrl+Down = [1;7B" <| fun () ->
+    AnsiParser.parseEscape "[1;7B" |> Expect.equal "alt+ctrl+down" (Some (KeyPressed(Key.Down, Modifiers.Alt ||| Modifiers.Ctrl)))
+  testCase "Shift+Alt+Ctrl+Down = [1;8B" <| fun () ->
+    AnsiParser.parseEscape "[1;8B" |> Expect.equal "shift+alt+ctrl+down" (Some (KeyPressed(Key.Down, Modifiers.Shift ||| Modifiers.Alt ||| Modifiers.Ctrl)))
+
+  testCase "Alt+Left = [1;3D" <| fun () ->
+    AnsiParser.parseEscape "[1;3D" |> Expect.equal "alt+left" (Some (KeyPressed(Key.Left, Modifiers.Alt)))
+  testCase "Shift+Alt+Left = [1;4D" <| fun () ->
+    AnsiParser.parseEscape "[1;4D" |> Expect.equal "shift+alt+left" (Some (KeyPressed(Key.Left, Modifiers.Shift ||| Modifiers.Alt)))
+  testCase "Shift+Ctrl+Left = [1;6D" <| fun () ->
+    AnsiParser.parseEscape "[1;6D" |> Expect.equal "shift+ctrl+left" (Some (KeyPressed(Key.Left, Modifiers.Shift ||| Modifiers.Ctrl)))
+  testCase "Alt+Ctrl+Left = [1;7D" <| fun () ->
+    AnsiParser.parseEscape "[1;7D" |> Expect.equal "alt+ctrl+left" (Some (KeyPressed(Key.Left, Modifiers.Alt ||| Modifiers.Ctrl)))
+
+  testCase "Shift+Right = [1;2C" <| fun () ->
+    AnsiParser.parseEscape "[1;2C" |> Expect.equal "shift+right" (Some (KeyPressed(Key.Right, Modifiers.Shift)))
+  testCase "Alt+Right = [1;3C" <| fun () ->
+    AnsiParser.parseEscape "[1;3C" |> Expect.equal "alt+right" (Some (KeyPressed(Key.Right, Modifiers.Alt)))
+  testCase "Shift+Alt+Right = [1;4C" <| fun () ->
+    AnsiParser.parseEscape "[1;4C" |> Expect.equal "shift+alt+right" (Some (KeyPressed(Key.Right, Modifiers.Shift ||| Modifiers.Alt)))
+  testCase "Shift+Ctrl+Up = [1;6A" <| fun () ->
+    AnsiParser.parseEscape "[1;6A" |> Expect.equal "shift+ctrl+up" (Some (KeyPressed(Key.Up, Modifiers.Shift ||| Modifiers.Ctrl)))
+  testCase "Alt+Ctrl+Up = [1;7A" <| fun () ->
+    AnsiParser.parseEscape "[1;7A" |> Expect.equal "alt+ctrl+up" (Some (KeyPressed(Key.Up, Modifiers.Alt ||| Modifiers.Ctrl)))
+  testCase "Alt+Ctrl+Right = [1;7C" <| fun () ->
+    AnsiParser.parseEscape "[1;7C" |> Expect.equal "alt+ctrl+right" (Some (KeyPressed(Key.Right, Modifiers.Alt ||| Modifiers.Ctrl)))
+
+  // ── Home / End with modifiers ─────────────────────────────────────────────
+  testCase "Shift+Home = [1;2H" <| fun () ->
+    AnsiParser.parseEscape "[1;2H" |> Expect.equal "shift+home" (Some (KeyPressed(Key.Home, Modifiers.Shift)))
+  testCase "Alt+Home = [1;3H" <| fun () ->
+    AnsiParser.parseEscape "[1;3H" |> Expect.equal "alt+home" (Some (KeyPressed(Key.Home, Modifiers.Alt)))
+  testCase "Shift+Ctrl+Home = [1;6H" <| fun () ->
+    AnsiParser.parseEscape "[1;6H" |> Expect.equal "shift+ctrl+home" (Some (KeyPressed(Key.Home, Modifiers.Shift ||| Modifiers.Ctrl)))
+  testCase "Shift+End = [1;2F" <| fun () ->
+    AnsiParser.parseEscape "[1;2F" |> Expect.equal "shift+end" (Some (KeyPressed(Key.End, Modifiers.Shift)))
+  testCase "Alt+End = [1;3F" <| fun () ->
+    AnsiParser.parseEscape "[1;3F" |> Expect.equal "alt+end" (Some (KeyPressed(Key.End, Modifiers.Alt)))
+  testCase "Shift+Ctrl+End = [1;6F" <| fun () ->
+    AnsiParser.parseEscape "[1;6F" |> Expect.equal "shift+ctrl+end" (Some (KeyPressed(Key.End, Modifiers.Shift ||| Modifiers.Ctrl)))
+
+  // ── F1-F4 with modifiers (SS3 modifier form [1;nP/Q/R/S) ─────────────────
+  testCase "Ctrl+F1 = [1;5P" <| fun () ->
+    AnsiParser.parseEscape "[1;5P" |> Expect.equal "ctrl+f1" (Some (KeyPressed(Key.F 1, Modifiers.Ctrl)))
+  testCase "Shift+F2 = [1;2Q" <| fun () ->
+    AnsiParser.parseEscape "[1;2Q" |> Expect.equal "shift+f2" (Some (KeyPressed(Key.F 2, Modifiers.Shift)))
+  testCase "Alt+Ctrl+F3 = [1;7R" <| fun () ->
+    AnsiParser.parseEscape "[1;7R" |> Expect.equal "alt+ctrl+f3" (Some (KeyPressed(Key.F 3, Modifiers.Alt ||| Modifiers.Ctrl)))
+  testCase "Shift+F4 = [1;2S" <| fun () ->
+    AnsiParser.parseEscape "[1;2S" |> Expect.equal "shift+f4" (Some (KeyPressed(Key.F 4, Modifiers.Shift)))
+
+  // ── F7-F12 with modifiers ─────────────────────────────────────────────────
+  testCase "Ctrl+F7 = [18;5~" <| fun () ->
+    AnsiParser.parseEscape "[18;5~" |> Expect.equal "ctrl+f7" (Some (KeyPressed(Key.F 7, Modifiers.Ctrl)))
+  testCase "Shift+F8 = [19;2~" <| fun () ->
+    AnsiParser.parseEscape "[19;2~" |> Expect.equal "shift+f8" (Some (KeyPressed(Key.F 8, Modifiers.Shift)))
+  testCase "Alt+F9 = [20;3~" <| fun () ->
+    AnsiParser.parseEscape "[20;3~" |> Expect.equal "alt+f9" (Some (KeyPressed(Key.F 9, Modifiers.Alt)))
+  testCase "Ctrl+F10 = [21;5~" <| fun () ->
+    AnsiParser.parseEscape "[21;5~" |> Expect.equal "ctrl+f10" (Some (KeyPressed(Key.F 10, Modifiers.Ctrl)))
+  testCase "Shift+F11 = [23;2~" <| fun () ->
+    AnsiParser.parseEscape "[23;2~" |> Expect.equal "shift+f11" (Some (KeyPressed(Key.F 11, Modifiers.Shift)))
+  testCase "Ctrl+F12 = [24;5~" <| fun () ->
+    AnsiParser.parseEscape "[24;5~" |> Expect.equal "ctrl+f12" (Some (KeyPressed(Key.F 12, Modifiers.Ctrl)))
+
+  // ── Insert / Delete / PageUp / PageDown with modifiers ────────────────────
+  testCase "Shift+Insert = [2;2~" <| fun () ->
+    AnsiParser.parseEscape "[2;2~" |> Expect.equal "shift+insert" (Some (KeyPressed(Key.Insert, Modifiers.Shift)))
+  testCase "Ctrl+Insert = [2;5~" <| fun () ->
+    AnsiParser.parseEscape "[2;5~" |> Expect.equal "ctrl+insert" (Some (KeyPressed(Key.Insert, Modifiers.Ctrl)))
+  testCase "Shift+Ctrl+Delete = [3;6~" <| fun () ->
+    AnsiParser.parseEscape "[3;6~" |> Expect.equal "shift+ctrl+del" (Some (KeyPressed(Key.Delete, Modifiers.Shift ||| Modifiers.Ctrl)))
+  testCase "Alt+PageDown = [6;3~" <| fun () ->
+    AnsiParser.parseEscape "[6;3~" |> Expect.equal "alt+pgdown" (Some (KeyPressed(Key.PageDown, Modifiers.Alt)))
+  testCase "Shift+Ctrl+PageUp = [5;6~" <| fun () ->
+    AnsiParser.parseEscape "[5;6~" |> Expect.equal "shift+ctrl+pgup" (Some (KeyPressed(Key.PageUp, Modifiers.Shift ||| Modifiers.Ctrl)))
+
   // Unknown modifier-qualified sequence returns None (not bare Escape)
   testCase "unknown base with modifier returns None" <| fun () ->
     AnsiParser.parseEscape "[9;5~" |> Expect.isNone "unknown [9;5~"

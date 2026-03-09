@@ -4673,11 +4673,53 @@ let sprint37InlineResultTests =
       result |> Expect.equal "none" None
   ]
 
+let sprint39AppConfigTests =
+  testList "Sprint 39: AppConfig.MaxDrainMessages" [
+
+    testCase "AppConfig.defaults.MaxDrainMessages is 10_000" <| fun () ->
+      AppConfig.defaults.MaxDrainMessages |> Expect.equal "default drain limit" 10_000
+
+    testCase "custom MaxDrainMessages is respected — lower limit causes failwith before 10k" <| fun () ->
+      // Program dispatches Cmd.ofMsg in a chain: 0 → 1 → 2 → ... → 4 → quit
+      // With MaxDrainMessages = 3, the 4th dispatch triggers the guard.
+      let config = { AppConfig.defaults with MaxDrainMessages = 3 }
+      let backend, _ = TestBackend.create 80 24 []
+      let program : Program<int, int> =
+        { Init = fun () -> 0, Cmd.ofMsg 0
+          Update = fun n _ ->
+            let n' = n + 1
+            n', if n' < 10 then Cmd.ofMsg n' else Quit 0
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> [] }
+      let run () = App.runInlineWith config 3 false backend program |> ignore
+      run |> Expect.throwsT<System.Exception> "guard fires before 10k"
+
+    testCase "AppConfig with MaxDrainMessages = 10_000 (explicit) passes a 5-message chain" <| fun () ->
+      let config = { AppConfig.defaults with MaxDrainMessages = 10_000 }
+      let backend, _ = TestBackend.create 80 24 []
+      let program : Program<int, int> =
+        { Init = fun () -> 0, Cmd.ofMsg 0
+          Update = fun n _ ->
+            let n' = n + 1
+            n', if n' < 5 then Cmd.ofMsg n' else Quit 0
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> [] }
+      App.runInlineWith config 3 false backend program |> ignore
+      // If we get here without exception, the test passes
+      ()
+  ]
+
 [<Tests>]
 let sprint37Tests =
   testList "Sprint 37" [
     sprint37CmdSemanticTests
     sprint37ResizeFixTests
     sprint37InlineResultTests
+  ]
+
+[<Tests>]
+let sprint39Tests =
+  testList "Sprint 39" [
+    sprint39AppConfigTests
   ]
 

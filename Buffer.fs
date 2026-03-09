@@ -81,7 +81,9 @@ module Buffer =
       let mutable col = x
       for rune in span.EnumerateRunes() do
         let w = RuneWidth.getColumnWidth rune
-        if col - x < maxWidth && col >= 0 && col < buf.Width then
+        // Use full-fit check (col - x + w <= maxWidth) to match Render.fs's behaviour:
+        // a wide character that would partially overflow the area is not written.
+        if col - x + w <= maxWidth && col >= 0 && col < buf.Width then
           buf.Cells[y * buf.Width + col] <-
             { Rune = rune.Value; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us }
         col <- col + w

@@ -140,12 +140,24 @@ module ArenaRender =
         maxH <- max maxH h
         idx <- arena.Nodes.[idx].NextSibling
       maxH
-    | 3uy -> // Column — sum of children heights
+    | 3uy -> // Column — sum of children heights, respecting column-context constraint semantics.
+      // Mirrors Measure.measureHeight: in a Column, Constrained(Fixed n) IS a height allocation,
+      // not a width constraint. This matches the F# DU version in Measure.fs.
       let mutable total = 0
       let mutable idx = node.FirstChild
       while idx >= 0 do
-        total <- total + measureHeight arena idx
-        idx <- arena.Nodes.[idx].NextSibling
+        let cn = arena.Nodes.[idx]
+        let h =
+          match cn.Kind with
+          | 6uy ->
+            match cn.ConstraintKind with
+            | 0uy -> int cn.ConstraintVal                                                         // Fixed n → height = n
+            | 1uy -> max (int cn.ConstraintVal) (measureHeight arena cn.FirstChild)              // Min n
+            | 2uy -> min (int cn.ConstraintVal) (measureHeight arena cn.FirstChild)              // Max n
+            | _ -> measureHeight arena cn.FirstChild
+          | _ -> measureHeight arena idx
+        total <- total + h
+        idx <- cn.NextSibling
       total
     | 4uy -> // Overlay — max of children heights
       let mutable maxH = 0

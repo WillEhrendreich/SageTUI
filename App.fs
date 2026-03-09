@@ -9,13 +9,18 @@ open System.Threading
 type AppConfig =
   { ArenaNodes: int
     ArenaChars: int
-    ArenaLayout: int }
+    ArenaLayout: int
+    /// Maximum number of messages drained in a single frame's Update loop.
+    /// Raising this allows bursty message chains; lowering it tightens loop-detection.
+    /// Default: 10,000. Infinite self-dispatch cycles always trigger the guard.
+    MaxDrainMessages: int }
 
 module AppConfig =
   let defaults =
     { ArenaNodes = 4096
       ArenaChars = 65536
-      ArenaLayout = 4096 }
+      ArenaLayout = 4096
+      MaxDrainMessages = 10_000 }
 
 module App =
   let private isTruthyEnvVar (value: string option) =
@@ -255,8 +260,8 @@ module App =
         let mutable drainCount = 0
         while msgChannel.TryDequeue(&msg) do
           drainCount <- drainCount + 1
-          if drainCount > 10_000 then
-            failwith "[SageTUI] Message drain loop exceeded 10,000 messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains."
+          if drainCount > config.MaxDrainMessages then
+            failwith (sprintf "[SageTUI] Message drain loop exceeded %d messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains." config.MaxDrainMessages)
           let newModel, cmd = program.Update msg model
           model <- newModel
           modelChanged <- true
@@ -742,8 +747,8 @@ module App =
         let mutable drainCount = 0
         while msgChannel.TryDequeue(&msg) do
           drainCount <- drainCount + 1
-          if drainCount > 10_000 then
-            failwith "[SageTUI] Message drain loop exceeded 10,000 messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains."
+          if drainCount > config.MaxDrainMessages then
+            failwith (sprintf "[SageTUI] Message drain loop exceeded %d messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains." config.MaxDrainMessages)
           let newModel, cmd = program.Update msg model
           model <- newModel
           modelChanged <- true
