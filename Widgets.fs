@@ -132,6 +132,20 @@ module private TextWidgetHelpers =
   let inline isWordChar (text: string) (i: int) : bool =
     text.[i] = '_' || System.Char.IsLetterOrDigit(text, i)
 
+  /// Number of UTF-16 code units to step backward to reach the previous Rune boundary.
+  /// Returns 2 when the char before `cursor` is the low surrogate of a pair, else 1.
+  let inline leftStep (text: string) (cursor: int) : int =
+    match cursor > 1 && System.Char.IsLowSurrogate(text.[cursor - 1]) with
+    | true  -> 2
+    | false -> 1
+
+  /// Number of UTF-16 code units to step forward to reach the next Rune boundary.
+  /// Returns 2 when the char at `cursor` is the high surrogate of a pair, else 1.
+  let inline rightStep (text: string) (cursor: int) : int =
+    match cursor + 1 < text.Length && System.Char.IsHighSurrogate(text.[cursor]) with
+    | true  -> 2
+    | false -> 1
+
 module TextInput =
   /// Empty input with cursor at position 0.
   let empty = { Text = ""; Cursor = 0; SelectionAnchor = None }
@@ -166,19 +180,21 @@ module TextInput =
     | Key.Backspace ->
       match model.Cursor > 0 with
       | true ->
-        let before = model.Text.[..model.Cursor - 2]
+        let step = leftStep model.Text model.Cursor
+        let before = match model.Cursor - step > 0 with true -> model.Text.[..model.Cursor - step - 1] | false -> ""
         let after = match model.Cursor < model.Text.Length with true -> model.Text.[model.Cursor..] | false -> ""
-        { Text = before + after; Cursor = model.Cursor - 1; SelectionAnchor = None }
+        { Text = before + after; Cursor = model.Cursor - step; SelectionAnchor = None }
       | false -> model
     | Key.Delete ->
       match model.Cursor < model.Text.Length with
       | true ->
+        let step = rightStep model.Text model.Cursor
         let before = match model.Cursor > 0 with true -> model.Text.[..model.Cursor - 1] | false -> ""
-        let after = match model.Cursor + 1 < model.Text.Length with true -> model.Text.[model.Cursor + 1..] | false -> ""
+        let after = match model.Cursor + step < model.Text.Length with true -> model.Text.[model.Cursor + step..] | false -> ""
         { Text = before + after; Cursor = model.Cursor; SelectionAnchor = None }
       | false -> model
-    | Key.Left  -> { model with Cursor = max 0 (model.Cursor - 1); SelectionAnchor = None }
-    | Key.Right -> { model with Cursor = min model.Text.Length (model.Cursor + 1); SelectionAnchor = None }
+    | Key.Left  -> { model with Cursor = max 0 (model.Cursor - leftStep model.Text model.Cursor); SelectionAnchor = None }
+    | Key.Right -> { model with Cursor = min model.Text.Length (model.Cursor + rightStep model.Text model.Cursor); SelectionAnchor = None }
     | Key.Home  -> { model with Cursor = 0; SelectionAnchor = None }
     | Key.End   -> { model with Cursor = model.Text.Length; SelectionAnchor = None }
     | _ -> model
@@ -247,12 +263,12 @@ module TextInput =
   /// Extend selection one character to the left (Shift+Left).
   let selectLeft (model: TextInputModel) =
     let anchor = match model.SelectionAnchor with Some a -> a | None -> model.Cursor
-    { model with Cursor = max 0 (model.Cursor - 1); SelectionAnchor = Some anchor }
+    { model with Cursor = max 0 (model.Cursor - leftStep model.Text model.Cursor); SelectionAnchor = Some anchor }
 
   /// Extend selection one character to the right (Shift+Right).
   let selectRight (model: TextInputModel) =
     let anchor = match model.SelectionAnchor with Some a -> a | None -> model.Cursor
-    { model with Cursor = min model.Text.Length (model.Cursor + 1); SelectionAnchor = Some anchor }
+    { model with Cursor = min model.Text.Length (model.Cursor + rightStep model.Text model.Cursor); SelectionAnchor = Some anchor }
 
   /// Extend selection one word to the left (Shift+Ctrl+Left).
   let selectWordLeft (model: TextInputModel) =

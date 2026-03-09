@@ -403,18 +403,43 @@ module App =
             // TerminalFocusSub: OS-level focus gained/lost (?1004h)
             | TerminalFocusSub handler, FocusGained -> handler true  |> Option.iter dispatch
             | TerminalFocusSub handler, FocusLost   -> handler false |> Option.iter dispatch
+            | PasteSub handler, Pasted text ->
+              handler text |> Option.iter dispatch
             | ResizeSub handler, Resized(w, h) ->
               handler (w, h) |> dispatch
             | _ -> ()
 
         match backend.PollEvent 16 with
         | Some firstEvent ->
-          processEvent firstEvent
+          // Collect all available events in this burst
+          let burst = System.Collections.Generic.List<TerminalEvent>()
+          burst.Add(firstEvent)
           let mutable more = true
           while more do
             match backend.PollEvent 0 with
-            | Some next -> processEvent next
+            | Some next -> burst.Add(next)
             | None -> more <- false
+          // Coalesce: for Motion events with the same button, keep only the last one.
+          // Build a set of which Motion buttons have a later Motion for the same button.
+          let suppressed =
+            let lastMotionIdx = System.Collections.Generic.Dictionary<MouseButton, int>()
+            for i in 0 .. burst.Count - 1 do
+              match burst.[i] with
+              | MouseInput me when me.Phase = Motion -> lastMotionIdx.[me.Button] <- i
+              | _ -> ()
+            let result = System.Collections.Generic.HashSet<int>()
+            for i in 0 .. burst.Count - 1 do
+              match burst.[i] with
+              | MouseInput me when me.Phase = Motion ->
+                match lastMotionIdx.TryGetValue(me.Button) with
+                | true, last when last <> i -> result.Add(i) |> ignore
+                | _ -> ()
+              | _ -> ()
+            result
+          for i in 0 .. burst.Count - 1 do
+            match suppressed.Contains(i) with
+            | false -> processEvent burst.[i]
+            | true -> ()
         | None ->
           Thread.Sleep 1
 

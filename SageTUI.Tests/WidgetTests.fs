@@ -2013,6 +2013,83 @@ let splitPaneTests = testList "SplitPane" [
     | other -> failwithf "unexpected: %A" other
   }
 ]
+
+// ── Sprint 32: Surrogate pair cursor correctness ──────────────────────────────
+// Emoji and supplementary Unicode chars encode as surrogate pairs in .NET strings
+// (two UTF-16 code units). Cursor movement must skip both units atomically.
+let textInputSurrogateTests = testList "TextInput surrogate pair handling" [
+  let emoji = "\U0001F600"  // 😀 — 2 UTF-16 code units: length = 2
+
+  test "Left moves by 2 when cursor is after low surrogate" {
+    // "a😀b": a=0, hi=1, lo=2, b=3 — cursor 3 = after emoji
+    let m = { TextInput.ofString ("a" + emoji + "b") with Cursor = 3 }
+    (TextInput.handleKey Key.Left m).Cursor |> Expect.equal "skipped pair" 1
+  }
+  test "Left moves by 1 for BMP char" {
+    let m = { TextInput.ofString "hello" with Cursor = 3 }
+    (TextInput.handleKey Key.Left m).Cursor |> Expect.equal "normal step" 2
+  }
+  test "Right moves by 2 when cursor is before high surrogate" {
+    let m = { TextInput.ofString ("a" + emoji + "b") with Cursor = 1 }
+    (TextInput.handleKey Key.Right m).Cursor |> Expect.equal "skipped pair" 3
+  }
+  test "Right moves by 1 for BMP char" {
+    let m = { TextInput.ofString "hello" with Cursor = 2 }
+    (TextInput.handleKey Key.Right m).Cursor |> Expect.equal "normal step" 3
+  }
+  test "Backspace deletes entire emoji" {
+    // cursor at 3 (after emoji), backspace should remove both surrogate units
+    let m = { TextInput.ofString ("a" + emoji + "b") with Cursor = 3 }
+    let m2 = TextInput.handleKey Key.Backspace m
+    m2.Text   |> Expect.equal "emoji removed" "ab"
+    m2.Cursor |> Expect.equal "cursor at 1"   1
+  }
+  test "Backspace in BMP removes one char" {
+    let m = { TextInput.ofString "hello" with Cursor = 3 }
+    let m2 = TextInput.handleKey Key.Backspace m
+    m2.Text   |> Expect.equal "char removed" "helo"
+    m2.Cursor |> Expect.equal "cursor at 2"  2
+  }
+  test "Delete removes entire emoji" {
+    // cursor at 1 (before emoji high surrogate), delete should remove both units
+    let m = { TextInput.ofString ("a" + emoji + "b") with Cursor = 1 }
+    let m2 = TextInput.handleKey Key.Delete m
+    m2.Text   |> Expect.equal "emoji removed" "ab"
+    m2.Cursor |> Expect.equal "cursor unchanged" 1
+  }
+  test "Delete in BMP removes one char" {
+    let m = { TextInput.ofString "hello" with Cursor = 2 }
+    let m2 = TextInput.handleKey Key.Delete m
+    m2.Text   |> Expect.equal "char removed" "helo"
+    m2.Cursor |> Expect.equal "cursor unchanged" 2
+  }
+  test "selectLeft extends selection by 2 across emoji" {
+    let m = { TextInput.ofString ("a" + emoji + "b") with Cursor = 3 }
+    let m2 = TextInput.selectLeft m
+    m2.Cursor          |> Expect.equal "skipped pair" 1
+    m2.SelectionAnchor |> Expect.equal "anchor at 3"  (Some 3)
+  }
+  test "selectRight extends selection by 2 across emoji" {
+    let m = { TextInput.ofString ("a" + emoji + "b") with Cursor = 1 }
+    let m2 = TextInput.selectRight m
+    m2.Cursor          |> Expect.equal "skipped pair" 3
+    m2.SelectionAnchor |> Expect.equal "anchor at 1"  (Some 1)
+  }
+  test "insert emoji advances cursor by 2" {
+    let m = TextInput.empty
+    let m2 = TextInput.handleKey (Key.Char (System.Text.Rune 0x1F600)) m
+    m2.Text   |> Expect.equal "emoji inserted" emoji
+    m2.Cursor |> Expect.equal "cursor at 2" 2
+  }
+  test "round-trip: insert then delete restores empty" {
+    let m0 = TextInput.empty
+    let m1 = TextInput.handleKey (Key.Char (System.Text.Rune 0x1F600)) m0
+    let m2 = TextInput.handleKey Key.Backspace m1
+    m2.Text   |> Expect.equal "back to empty" ""
+    m2.Cursor |> Expect.equal "cursor at 0"   0
+  }
+]
+
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -2041,6 +2118,7 @@ let allWidgetTests = testList "Widgets" [
   focusRingTests
   virtualListTests
   textInputWordSelTests
+  textInputSurrogateTests
   virtualTableTests
   splitPaneTests
 ]

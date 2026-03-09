@@ -117,6 +117,69 @@ module AnsiParser =
         // Alt+key: single char after ESC
         s.Length = 1
 
+  /// Map a VT modifier number to `Modifiers` flags.
+  /// VT encodes: 2=Shift, 3=Alt, 4=Shift+Alt, 5=Ctrl, 6=Shift+Ctrl, 7=Alt+Ctrl, 8=Shift+Alt+Ctrl.
+  /// The formula is: bits = (n - 1), where bit 0=Shift, bit 1=Alt, bit 2=Ctrl.
+  let private parseVtModifiers (s: string) : Modifiers option =
+    match Int32.TryParse(s) with
+    | false, _ -> None
+    | true, m when m < 2 || m > 8 -> None
+    | true, m ->
+      let bits = m - 1
+      let mutable result = Modifiers.None
+      if bits &&& 1 <> 0 then result <- result ||| Modifiers.Shift
+      if bits &&& 2 <> 0 then result <- result ||| Modifiers.Alt
+      if bits &&& 4 <> 0 then result <- result ||| Modifiers.Ctrl
+      Some result
+
+  /// Try to parse a modifier-qualified CSI sequence of the form "[<base>;<mod><final>".
+  /// For example: "[1;5A" → (base="1", mod=5, final='A') → Ctrl+Up.
+  /// Returns None for unrecognised base/final combinations.
+  let private parseModifierCsi (s: string) : TerminalEvent option =
+    // s has already had the leading ESC stripped; starts with "["
+    if s.Length < 5 || s.[0] <> '[' then None
+    else
+      let inner = s.[1..]  // drop leading "["
+      let semi = inner.IndexOf(';')
+      match semi with
+      | -1 -> None
+      | i ->
+        let baseStr = inner.[..i - 1]
+        let modAndFinal = inner.[i + 1..]
+        match modAndFinal.Length >= 2 with
+        | false -> None
+        | true ->
+          let modStr  = modAndFinal.[..modAndFinal.Length - 2]
+          let final_  = modAndFinal.[modAndFinal.Length - 1]
+          match parseVtModifiers modStr with
+          | None -> None
+          | Some mods ->
+            match baseStr, final_ with
+            | "1", 'A' -> Some (KeyPressed(Key.Up,       mods))
+            | "1", 'B' -> Some (KeyPressed(Key.Down,     mods))
+            | "1", 'C' -> Some (KeyPressed(Key.Right,    mods))
+            | "1", 'D' -> Some (KeyPressed(Key.Left,     mods))
+            | "1", 'H' -> Some (KeyPressed(Key.Home,     mods))
+            | "1", 'F' -> Some (KeyPressed(Key.End,      mods))
+            | "2", '~' -> Some (KeyPressed(Key.Insert,   mods))
+            | "3", '~' -> Some (KeyPressed(Key.Delete,   mods))
+            | "5", '~' -> Some (KeyPressed(Key.PageUp,   mods))
+            | "6", '~' -> Some (KeyPressed(Key.PageDown, mods))
+            | "15", '~' -> Some (KeyPressed(Key.F 5,     mods))
+            | "17", '~' -> Some (KeyPressed(Key.F 6,     mods))
+            | "18", '~' -> Some (KeyPressed(Key.F 7,     mods))
+            | "19", '~' -> Some (KeyPressed(Key.F 8,     mods))
+            | "20", '~' -> Some (KeyPressed(Key.F 9,     mods))
+            | "21", '~' -> Some (KeyPressed(Key.F 10,    mods))
+            | "23", '~' -> Some (KeyPressed(Key.F 11,    mods))
+            | "24", '~' -> Some (KeyPressed(Key.F 12,    mods))
+            // Some terminals use [1;nP/Q/R/S for F1-F4 with modifiers
+            | "1", 'P'  -> Some (KeyPressed(Key.F 1,     mods))
+            | "1", 'Q'  -> Some (KeyPressed(Key.F 2,     mods))
+            | "1", 'R'  -> Some (KeyPressed(Key.F 3,     mods))
+            | "1", 'S'  -> Some (KeyPressed(Key.F 4,     mods))
+            | _ -> None
+
   /// Parse the accumulated sequence buffer (AFTER the ESC byte) into a TerminalEvent.
   ///
   /// Returns None only for genuinely unrecognised sequences where emitting Escape is the
@@ -153,6 +216,9 @@ module AnsiParser =
     | s when s.Length > 2 && s.[0] = '[' && s.[1] = '<' ->
       // SGR mouse: CSI body is "[<btn;x;yM" → pass "<btn;x;yM" to parseSgrMouse
       parseSgrMouse s.[1..] |> Option.map MouseInput
+    | s when s.Length >= 5 && s.[0] = '[' && s.Contains(";") ->
+      // Modifier-qualified CSI: "[1;5A" = Ctrl+Up, "[15;5~" = Ctrl+F5, etc.
+      parseModifierCsi s
     | s when s.Length = 1 ->
       // Alt+key: ESC followed by a single character (e.g. ESC+'a' = Alt+a)
       // This MUST come after the CSI/SS3 patterns so "[" doesn't match here.

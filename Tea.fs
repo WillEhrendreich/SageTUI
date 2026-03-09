@@ -171,6 +171,9 @@ type Sub<'msg> =
   /// Fires when the terminal window gains or loses OS focus (?1004h must be enabled).
   /// The bool argument is true for focus-gained, false for focus-lost.
   | TerminalFocusSub of (bool -> 'msg option)
+  /// Fires when the terminal sends bracketed-paste content (?2004h must be enabled).
+  /// The string argument contains the full pasted text.
+  | PasteSub of (string -> 'msg option)
   | FocusSub of (FocusDirection -> 'msg option)
   | TimerSub of id: string * interval: TimeSpan * tick: (unit -> 'msg)
   | ResizeSub of (int * int -> 'msg)
@@ -229,6 +232,7 @@ module Sub =
     | ClickSub handler -> ClickSub(fun input -> handler input |> Option.map f)
     | DragSub handler -> DragSub(fun input -> handler input |> Option.map f)
     | TerminalFocusSub handler -> TerminalFocusSub(fun gained -> handler gained |> Option.map f)
+    | PasteSub handler -> PasteSub(fun text -> handler text |> Option.map f)
     | FocusSub handler -> FocusSub(fun input -> handler input |> Option.map f)
     | TimerSub(id, interval, tick) -> TimerSub(id, interval, tick >> f)
     | ResizeSub handler -> ResizeSub(fun input -> handler input |> f)

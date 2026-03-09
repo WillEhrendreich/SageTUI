@@ -343,6 +343,132 @@ let mouseDispatchTests = testList "Mouse dispatch" [
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Sprint 32: Mouse drag coalescing and DragSub
+// ─────────────────────────────────────────────────────────────────────────────
+
+let dragSubTests = testList "Sprint 32: DragSub and motion coalescing" [
+
+  testCase "DragSub fires for Motion phase" <| fun () ->
+    let motionEvent = { Button = LeftButton; X = 10; Y = 5; Modifiers = Modifiers.None; Phase = Motion }
+    let events = [ MouseInput motionEvent; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable dragCount = 0
+    let program : Program<unit, bool> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | true -> dragCount <- dragCount + 1
+          | false -> ()
+          (), if not msg then Quit 0 else NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ DragSub (fun _ -> Some true)
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ] }
+    App.runWithBackend backend program
+    dragCount |> Expect.equal "drag fired for motion" 1
+
+  testCase "DragSub does NOT fire for Pressed phase" <| fun () ->
+    let pressEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Pressed }
+    let events = [ MouseInput pressEvent; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable dragCount = 0
+    let program : Program<unit, bool> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | true -> dragCount <- dragCount + 1
+          | false -> ()
+          (), if not msg then Quit 0 else NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ DragSub (fun _ -> Some true)
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ] }
+    App.runWithBackend backend program
+    dragCount |> Expect.equal "drag not fired for press" 0
+
+  testCase "Multiple consecutive Motion events coalesced to last position" <| fun () ->
+    let motion x y = MouseInput { Button = LeftButton; X = x; Y = y; Modifiers = Modifiers.None; Phase = Motion }
+    let events = [ motion 1 1; motion 2 2; motion 3 3; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable positions : (int * int) list = []
+    let program : Program<unit, (int * int) option> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | Some(x, y) -> positions <- (x, y) :: positions
+          | None -> ()
+          (), match msg with None -> Quit 0 | _ -> NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ DragSub (fun me -> Some (Some (me.X, me.Y)))
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some None | _ -> None) ] }
+    App.runWithBackend backend program
+    // After coalescing, only the last Motion position should arrive
+    positions |> List.rev |> Expect.equal "only last motion retained" [(3, 3)]
+
+  testCase "Motion events from different buttons not coalesced" <| fun () ->
+    let motionL = MouseInput { Button = LeftButton;  X = 1; Y = 1; Modifiers = Modifiers.None; Phase = Motion }
+    let motionR = MouseInput { Button = RightButton; X = 2; Y = 2; Modifiers = Modifiers.None; Phase = Motion }
+    let events = [ motionL; motionR; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable dragCount = 0
+    let program : Program<unit, bool> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | true -> dragCount <- dragCount + 1
+          | false -> ()
+          (), if not msg then Quit 0 else NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ DragSub (fun _ -> Some true)
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ] }
+    App.runWithBackend backend program
+    dragCount |> Expect.equal "both buttons fire" 2
+]
+
+
+
+let bracketedPasteTests = testList "Sprint 32: bracketed paste" [
+
+  testCase "Pasted event dispatched to PasteSub" <| fun () ->
+    let events = [ Pasted "hello world"; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable received : string list = []
+    let program : Program<unit, unit> =
+      { Init = fun () -> (), NoCmd
+        Update = fun () () -> (), Quit 0
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ PasteSub (fun text -> received <- text :: received; None)
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some () | _ -> None) ] }
+    App.runWithBackend backend program
+    received |> Expect.equal "paste received" ["hello world"]
+
+  testCase "PasteSub does not fire for key events" <| fun () ->
+    let events = [ KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.None); KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable pasteCount = 0
+    let program : Program<unit, unit> =
+      { Init = fun () -> (), NoCmd
+        Update = fun () () -> (), Quit 0
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ PasteSub (fun _ -> pasteCount <- pasteCount + 1; None)
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some () | _ -> None) ] }
+    App.runWithBackend backend program
+    pasteCount |> Expect.equal "no paste for key event" 0
+
+  testCase "Sub.map transforms PasteSub messages" <| fun () ->
+    let inner : Sub<string> = PasteSub (fun text -> Some text)
+    let outer : Sub<int> = Sub.map String.length inner
+    match outer with
+    | PasteSub handler ->
+      handler "hello" |> Expect.equal "length mapped" (Some 5)
+    | _ -> failtest "expected PasteSub"
+]
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Sprint 30: Phase filtering, DragSub, TerminalFocusSub, focus parse
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -471,12 +597,57 @@ let sprintThirtyTests = testList "Sprint 30: phase filtering and new subs" [
 ]
 
 
+let parseEscapeModifierTests = testList "AnsiParser.parseEscape modifier keys" [
+  // CSI modifier format: "[1;<mod>A" where mod = 2=Shift, 3=Alt, 5=Ctrl, 7=Alt+Ctrl
+  // Arrows with modifiers
+  testCase "Ctrl+Up = [1;5A" <| fun () ->
+    AnsiParser.parseEscape "[1;5A" |> Expect.equal "ctrl+up" (Some (KeyPressed(Key.Up, Modifiers.Ctrl)))
+  testCase "Shift+Up = [1;2A" <| fun () ->
+    AnsiParser.parseEscape "[1;2A" |> Expect.equal "shift+up" (Some (KeyPressed(Key.Up, Modifiers.Shift)))
+  testCase "Alt+Up = [1;3A" <| fun () ->
+    AnsiParser.parseEscape "[1;3A" |> Expect.equal "alt+up" (Some (KeyPressed(Key.Up, Modifiers.Alt)))
+  testCase "Ctrl+Down = [1;5B" <| fun () ->
+    AnsiParser.parseEscape "[1;5B" |> Expect.equal "ctrl+down" (Some (KeyPressed(Key.Down, Modifiers.Ctrl)))
+  testCase "Ctrl+Left = [1;5D" <| fun () ->
+    AnsiParser.parseEscape "[1;5D" |> Expect.equal "ctrl+left" (Some (KeyPressed(Key.Left, Modifiers.Ctrl)))
+  testCase "Ctrl+Right = [1;5C" <| fun () ->
+    AnsiParser.parseEscape "[1;5C" |> Expect.equal "ctrl+right" (Some (KeyPressed(Key.Right, Modifiers.Ctrl)))
+  testCase "Shift+Ctrl+Right = [1;6C" <| fun () ->
+    AnsiParser.parseEscape "[1;6C" |> Expect.equal "shift+ctrl+right" (Some (KeyPressed(Key.Right, Modifiers.Shift ||| Modifiers.Ctrl)))
+  testCase "Shift+Left = [1;2D" <| fun () ->
+    AnsiParser.parseEscape "[1;2D" |> Expect.equal "shift+left" (Some (KeyPressed(Key.Left, Modifiers.Shift)))
+  testCase "Ctrl+Home = [1;5H" <| fun () ->
+    AnsiParser.parseEscape "[1;5H" |> Expect.equal "ctrl+home" (Some (KeyPressed(Key.Home, Modifiers.Ctrl)))
+  testCase "Ctrl+End = [1;5F" <| fun () ->
+    AnsiParser.parseEscape "[1;5F" |> Expect.equal "ctrl+end" (Some (KeyPressed(Key.End, Modifiers.Ctrl)))
+  // Function keys with modifiers
+  testCase "Ctrl+F5 = [15;5~" <| fun () ->
+    AnsiParser.parseEscape "[15;5~" |> Expect.equal "ctrl+f5" (Some (KeyPressed(Key.F 5, Modifiers.Ctrl)))
+  testCase "Shift+F6 = [17;2~" <| fun () ->
+    AnsiParser.parseEscape "[17;2~" |> Expect.equal "shift+f6" (Some (KeyPressed(Key.F 6, Modifiers.Shift)))
+  testCase "Ctrl+Delete = [3;5~" <| fun () ->
+    AnsiParser.parseEscape "[3;5~" |> Expect.equal "ctrl+del" (Some (KeyPressed(Key.Delete, Modifiers.Ctrl)))
+  testCase "Shift+PageUp = [5;2~" <| fun () ->
+    AnsiParser.parseEscape "[5;2~" |> Expect.equal "shift+pgup" (Some (KeyPressed(Key.PageUp, Modifiers.Shift)))
+  // Existing bare sequences still work (no regression)
+  testCase "bare [A still works" <| fun () ->
+    AnsiParser.parseEscape "[A" |> Expect.equal "up" (Some (KeyPressed(Key.Up, Modifiers.None)))
+  testCase "bare [D still works" <| fun () ->
+    AnsiParser.parseEscape "[D" |> Expect.equal "left" (Some (KeyPressed(Key.Left, Modifiers.None)))
+  // Unknown modifier-qualified sequence returns None (not bare Escape)
+  testCase "unknown base with modifier returns None" <| fun () ->
+    AnsiParser.parseEscape "[9;5~" |> Expect.isNone "unknown [9;5~"
+]
+
 [<Tests>]
 let inputTests =
   testList "Phase 11: Input / AnsiParser" [
     parseSgrMouseTests
     isCompleteEscSeqTests
     parseEscapeTests
+    parseEscapeModifierTests
     mouseDispatchTests
     sprintThirtyTests
+    dragSubTests
+    bracketedPasteTests
   ]
