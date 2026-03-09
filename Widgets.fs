@@ -174,15 +174,20 @@ module TextInput =
 
   // ── Word helpers ────────────────────────────────────────────────────────────
 
+  /// Returns true if the character at index `i` in `text` is a word character.
+  /// Word characters: letters, digits, and underscore.
+  /// Uses the two-arg overload of Char.IsLetterOrDigit to handle surrogate pairs.
+  let private isWordChar (text: string) (i: int) : bool =
+    text.[i] = '_' || System.Char.IsLetterOrDigit(text, i)
+
   /// Find the cursor position after jumping one word to the left (Ctrl+Left).
-  /// Skips non-word chars then word chars, emulating standard editor behaviour.
   let wordLeftPos (pos: int) (text: string) : int =
     let rec skipNonWord i =
-      match i > 0 && not (System.Char.IsLetterOrDigit text.[i - 1]) with
+      match i > 0 && not (isWordChar text (i - 1)) with
       | true -> skipNonWord (i - 1)
       | false -> i
     let rec skipWord i =
-      match i > 0 && System.Char.IsLetterOrDigit text.[i - 1] with
+      match i > 0 && isWordChar text (i - 1) with
       | true -> skipWord (i - 1)
       | false -> i
     pos |> skipNonWord |> skipWord
@@ -190,13 +195,13 @@ module TextInput =
   /// Find the cursor position after jumping one word to the right (Ctrl+Right).
   let wordRightPos (pos: int) (text: string) : int =
     let len = text.Length
-    let rec skipWord i =
-      match i < len && System.Char.IsLetterOrDigit text.[i] with
-      | true -> skipWord (i + 1)
-      | false -> i
     let rec skipNonWord i =
-      match i < len && not (System.Char.IsLetterOrDigit text.[i]) with
+      match i < len && not (isWordChar text i) with
       | true -> skipNonWord (i + 1)
+      | false -> i
+    let rec skipWord i =
+      match i < len && isWordChar text i with
+      | true -> skipWord (i + 1)
       | false -> i
     pos |> skipNonWord |> skipWord
 
@@ -255,13 +260,8 @@ module TextInput =
     match selectionRange model with
     | None -> model
     | Some (lo, hi) ->
-      let newText = model.Text.[..lo - 1 |> max 0 |> min (model.Text.Length - 1)]
-                    |> (fun before ->
-                        match lo = 0 with
-                        | true -> ""
-                        | false -> model.Text.[..lo - 1])
-      let after = match hi < model.Text.Length with true -> model.Text.[hi..] | false -> ""
       let before = match lo > 0 with true -> model.Text.[..lo - 1] | false -> ""
+      let after = match hi < model.Text.Length with true -> model.Text.[hi..] | false -> ""
       { model with Text = before + after; Cursor = lo; SelectionAnchor = None }
 
   /// If there is an active selection, delete it; otherwise apply the normal key action.
@@ -288,6 +288,13 @@ module TextInput =
       let after = match model.Cursor < model.Text.Length with true -> model.Text.[model.Cursor..] | false -> ""
       { model with Text = before + after; Cursor = newCursor; SelectionAnchor = None }
 
+  /// Handle a paste event: strips newlines (replaced with spaces) then inserts at cursor.
+  /// If there is an active selection, it is replaced by the pasted content.
+  let handlePaste (text: string) (model: TextInputModel) =
+    let clean = text.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ")
+    let afterDel = match hasSelection model with true -> deleteSelection model | false -> model
+    insertText clean afterDel
+
   /// Handle a full TerminalEvent (key + modifiers) for rich editing support.
   /// Handles Ctrl+Left/Right (word jump), Shift+Left/Right/Ctrl+Left/Right (extend selection),
   /// Ctrl+A (select all), Ctrl+Backspace (delete word left).
@@ -307,29 +314,47 @@ module TextInput =
     | KeyPressed(Key.Char 'a', m) when m.HasFlag(Modifiers.Ctrl) -> selectAll model
     | KeyPressed(Key.Backspace, m) when m.HasFlag(Modifiers.Ctrl) -> deleteWordLeft model
     | KeyPressed(key, _) -> handleKeyWithSelection key model
+    | Pasted text -> handlePaste text model
     | _ -> model
 
-  /// Handle a paste event: strips newlines (replaced with spaces) then inserts at cursor.
-  let handlePaste (text: string) (model: TextInputModel) =
-    let clean = text.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ")
-    insertText clean model
-
-  /// Render the text input. Shows underline when focused. Empty input renders as a single space.
+  /// Render the text input with visual cursor (reversed char) and selection highlight.
+  /// When unfocused, renders plain text or placeholder. Empty unfocused renders as a space.
   let view (focused: bool) (model: TextInputModel) =
-    let displayText =
-      match model.Text.Length = 0 with
-      | true -> " "
-      | false -> model.Text
+    let text = model.Text
     match focused with
-    | true -> El.text displayText |> El.underline
-    | false -> El.text displayText
+    | false ->
+      match text.Length = 0 with
+      | true -> El.text " "
+      | false -> El.text text
+    | true ->
+      match selectionRange model with
+      | Some (lo, hi) ->
+        // Active selection: before | selected (highlighted) | after
+        let before  = match lo > 0 with true -> text.[..lo - 1] | false -> ""
+        let sel     = text.[lo..hi - 1]
+        let after   = match hi < text.Length with true -> text.[hi..] | false -> ""
+        El.row [
+          if before <> "" then yield El.text before
+          yield El.text sel |> El.reverse
+          if after  <> "" then yield El.text after ]
+      | None ->
+        // No selection: show cursor as reversed char at cursor position
+        let cur  = match model.Cursor < text.Length with true -> string text.[model.Cursor] | false -> " "
+        let pre  = match model.Cursor > 0 with true -> text.[..model.Cursor - 1] | false -> ""
+        let post = match model.Cursor + 1 < text.Length with true -> text.[model.Cursor + 1..] | false -> ""
+        El.row [
+          if pre  <> "" then yield El.text pre
+          yield El.text cur |> El.reverse
+          if post <> "" then yield El.text post ]
 
   /// Render with a dimmed placeholder shown when the input is empty.
+  /// When focused and empty, a reversed space acts as the cursor placeholder.
   let viewWithPlaceholder (placeholder: string) (focused: bool) (model: TextInputModel) =
     match model.Text.Length = 0 with
     | true ->
       match focused with
-      | true -> El.text placeholder |> El.dim |> El.underline
+      | true ->
+        El.row [ El.text placeholder |> El.dim; El.text " " |> El.reverse ]
       | false -> El.text placeholder |> El.dim
     | false ->
       view focused model
@@ -548,7 +573,7 @@ module Table =
 // A stateful virtualizing list widget. Only renders the visible window of rows,
 // enabling efficient display of thousands of items.
 
-/// The model for a VirtualList. Tracks items, selection, and scroll position.
+/// The model for a VirtualList. Tracks items, selection, scroll position, and viewport height.
 type VirtualListModel<'row> = {
   /// All items in the list.
   Items: 'row array
@@ -556,12 +581,12 @@ type VirtualListModel<'row> = {
   SelectedIndex: int option
   /// Index of the first visible item (scroll offset).
   ScrollOffset: int
+  /// Number of rows visible at once. Stored here so navigation is self-contained.
+  ViewportHeight: int
 }
 
 /// Configuration for rendering a VirtualList.
 type VirtualListConfig<'row> = {
-  /// Number of rows visible at once (i.e., the viewport height in rows).
-  ViewportHeight: int
   /// Color to highlight the selected row background. Default: Blue.
   SelectionColor: Color
   /// Render function for each row.
@@ -569,38 +594,22 @@ type VirtualListConfig<'row> = {
 }
 
 module VirtualList =
+  /// Default config with Blue selection and %A renderer. Specify RenderRow for typed usage.
+  let create (renderRow: 'row -> Element) : VirtualListConfig<'row> =
+    { SelectionColor = Color.Named(BaseColor.Blue, Intensity.Normal)
+      RenderRow = renderRow }
+
   /// Create a VirtualList model from an array of items, with nothing selected.
-  let ofArray (items: 'row array) : VirtualListModel<'row> =
+  let ofArray (viewportHeight: int) (items: 'row array) : VirtualListModel<'row> =
     let sel = match items.Length with 0 -> None | _ -> Some 0
-    { Items = items; SelectedIndex = sel; ScrollOffset = 0 }
+    { Items = items; SelectedIndex = sel; ScrollOffset = 0; ViewportHeight = max 1 viewportHeight }
 
   /// Create a VirtualList model from a list of items.
-  let ofList (items: 'row list) : VirtualListModel<'row> =
-    ofArray (List.toArray items)
+  let ofList (viewportHeight: int) (items: 'row list) : VirtualListModel<'row> =
+    ofArray viewportHeight (List.toArray items)
 
-  /// Default rendering config: 10-row viewport, Blue selection, item.ToString() renderer.
-  let defaults : VirtualListConfig<obj> =
-    { ViewportHeight = 10
-      SelectionColor = Color.Named(BaseColor.Blue, Intensity.Normal)
-      RenderRow = fun item -> El.text (sprintf "%A" item) }
-
-  let private clampIndex (n: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
-    match m.Items.Length with
-    | 0 -> { m with SelectedIndex = None; ScrollOffset = 0 }
-    | len ->
-      let i = max 0 (min (len - 1) n)
-      // Ensure scroll offset keeps selected row visible
-      let offset =
-        let o = m.ScrollOffset
-        match i < o with
-        | true -> i
-        | false ->
-          // viewportHeight is not known here — scroll down is handled in ensureVisible
-          max o (i - (max 1 o))
-      { m with SelectedIndex = Some i; ScrollOffset = max 0 offset }
-
-  /// Ensure the selected row is visible within the given viewport height.
-  let ensureVisible (viewportHeight: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+  /// Ensure the selected row is visible within the model's viewport.
+  let ensureVisible (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     match m.SelectedIndex with
     | None -> m
     | Some i ->
@@ -608,52 +617,52 @@ module VirtualList =
         match i < m.ScrollOffset with
         | true -> i
         | false ->
-          match i >= m.ScrollOffset + viewportHeight with
-          | true -> i - viewportHeight + 1
+          match i >= m.ScrollOffset + m.ViewportHeight with
+          | true -> i - m.ViewportHeight + 1
           | false -> m.ScrollOffset
       { m with ScrollOffset = max 0 offset }
 
   /// Move selection up by one row, keeping selection visible.
-  let selectPrev (viewportHeight: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+  let selectPrev (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     match m.SelectedIndex with
     | None -> m
-    | Some i -> { m with SelectedIndex = Some (max 0 (i - 1)) } |> ensureVisible viewportHeight
+    | Some i -> { m with SelectedIndex = Some (max 0 (i - 1)) } |> ensureVisible
 
   /// Move selection down by one row, keeping selection visible.
-  let selectNext (viewportHeight: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+  let selectNext (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     match m.SelectedIndex with
     | None -> m
     | Some i ->
       let next = min (m.Items.Length - 1) (i + 1)
-      { m with SelectedIndex = Some next } |> ensureVisible viewportHeight
+      { m with SelectedIndex = Some next } |> ensureVisible
 
-  /// Jump selection up by a page (viewportHeight rows), keeping selection visible.
-  let pageUp (viewportHeight: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+  /// Jump selection up by a page (ViewportHeight rows), keeping selection visible.
+  let pageUp (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     match m.SelectedIndex with
     | None -> m
-    | Some i -> { m with SelectedIndex = Some (max 0 (i - viewportHeight)) } |> ensureVisible viewportHeight
+    | Some i -> { m with SelectedIndex = Some (max 0 (i - m.ViewportHeight)) } |> ensureVisible
 
   /// Jump selection down by a page, keeping selection visible.
-  let pageDown (viewportHeight: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+  let pageDown (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     match m.SelectedIndex with
     | None -> m
     | Some i ->
-      let next = min (m.Items.Length - 1) (i + viewportHeight)
-      { m with SelectedIndex = Some next } |> ensureVisible viewportHeight
+      let next = min (m.Items.Length - 1) (i + m.ViewportHeight)
+      { m with SelectedIndex = Some next } |> ensureVisible
 
   /// Jump to the first item.
-  let selectFirst (viewportHeight: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+  let selectFirst (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     match m.Items.Length with
     | 0 -> m
-    | _ -> { m with SelectedIndex = Some 0 } |> ensureVisible viewportHeight
+    | _ -> { m with SelectedIndex = Some 0 } |> ensureVisible
 
   /// Jump to the last item.
-  let selectLast (viewportHeight: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+  let selectLast (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     match m.Items.Length with
     | 0 -> m
-    | len -> { m with SelectedIndex = Some (len - 1) } |> ensureVisible viewportHeight
+    | len -> { m with SelectedIndex = Some (len - 1) } |> ensureVisible
 
-  /// Replace the items list, clamping selection to the new length.
+  /// Replace the items list, clamping selection and ensuring it remains visible.
   let setItems (items: 'row array) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     let sel =
       match items.Length with
@@ -662,7 +671,7 @@ module VirtualList =
         match m.SelectedIndex with
         | None -> Some 0
         | Some i -> Some (min (len - 1) i)
-    { m with Items = items; SelectedIndex = sel; ScrollOffset = min m.ScrollOffset (max 0 (items.Length - 1)) }
+    { m with Items = items; SelectedIndex = sel } |> ensureVisible
 
   /// Get the currently selected item, if any.
   let selectedItem (m: VirtualListModel<'row>) : 'row option =
@@ -673,57 +682,71 @@ module VirtualList =
       | true -> Some m.Items[i]
       | false -> None
 
-  /// Render only the visible window of items.
-  /// Returns an Element of exactly `config.ViewportHeight` visible rows.
+  /// Render only the visible window of items, padded to ViewportHeight with empty rows.
+  /// Always produces exactly ViewportHeight rows to prevent layout shifts.
   let view (config: VirtualListConfig<'row>) (m: VirtualListModel<'row>) : Element =
     let total = m.Items.Length
+    let vh = max 1 m.ViewportHeight
     match total with
-    | 0 -> El.empty
+    | 0 ->
+      El.column [ for _ in 1 .. vh -> El.empty ]
     | _ ->
       let offset = max 0 (min m.ScrollOffset (total - 1))
-      let visibleCount = min config.ViewportHeight (total - offset)
+      let visibleCount = min vh (total - offset)
       let rows =
         [ for vi in 0 .. visibleCount - 1 do
             let i = offset + vi
             let rowEl = config.RenderRow m.Items[i]
             match m.SelectedIndex with
-            | Some si when si = i ->
-              yield rowEl |> El.bg config.SelectionColor
-            | _ -> yield rowEl ]
+            | Some si when si = i -> yield rowEl |> El.bg config.SelectionColor
+            | _ -> yield rowEl
+          for _ in visibleCount .. vh - 1 do
+            yield El.empty ]
       El.column rows
 
 // ── VirtualTable ─────────────────────────────────────────────────────────────
 // Combines the column-header/separator structure of Table with VirtualList's
 // efficient windowed rendering. Use for large datasets in a table layout.
 
+/// Configuration for VirtualTable rendering.
+type VirtualTableConfig<'a> = {
+  /// Column definitions (header, width, render function).
+  Columns: TableColumn<'a> list
+  /// Color for the selected row. Default: Blue.
+  SelectionColor: Color
+  /// Border style character for the header separator.
+  SeparatorChar: char
+}
+
 module VirtualTable =
+  /// Default config: Blue selection, standard horizontal separator.
+  let create (columns: TableColumn<'a> list) : VirtualTableConfig<'a> =
+    { Columns = columns
+      SelectionColor = Color.Named(BaseColor.Blue, Intensity.Normal)
+      SeparatorChar = '─' }
+
   /// Render a virtualised table: fixed header + separator + windowed data rows.
-  /// `columns` describes width and render function per column.
-  /// `model` is a VirtualListModel driving scroll/selection state.
-  /// `viewportHeight` is the number of data rows to render (exclude header/sep).
-  let view
-      (columns: TableColumn<'a> list)
-      (viewportHeight: int)
-      (selectionColor: Color)
-      (model: VirtualListModel<'a>)
-      : Element =
+  /// The model's ViewportHeight controls how many data rows are rendered.
+  let view (config: VirtualTableConfig<'a>) (model: VirtualListModel<'a>) : Element =
     let header =
-      columns
+      config.Columns
       |> List.map (fun col -> El.text col.Header |> El.bold |> El.width col.Width)
       |> El.row
     let separator =
-      columns
-      |> List.map (fun col -> El.text (System.String('─', col.Width)) |> El.width col.Width)
+      config.Columns
+      |> List.map (fun col ->
+        match col.Width with
+        | 0 -> El.empty
+        | w -> El.text (System.String(config.SeparatorChar, w)) |> El.width w)
       |> El.row
-    let cfg : VirtualListConfig<'a> = {
-      ViewportHeight = viewportHeight
-      SelectionColor = selectionColor
+    let listCfg : VirtualListConfig<'a> = {
+      SelectionColor = config.SelectionColor
       RenderRow = fun row ->
-        columns
+        config.Columns
         |> List.map (fun col -> col.Render row |> El.width col.Width)
         |> El.row
     }
-    let dataRows = VirtualList.view cfg model
+    let dataRows = VirtualList.view listCfg model
     El.column [ header; separator; dataRows ]
 
 /// Configuration for the Modal overlay widget.

@@ -1076,19 +1076,16 @@ let undoableCommitTests = testList "Undoable.commitIfChanged" [
 
 // ── VirtualList ───────────────────────────────────────────────────────────────
 
-let mkList n = VirtualList.ofArray [| 0 .. n - 1 |]
+let mkList n = VirtualList.ofArray 5 [| 0 .. n - 1 |]
 
-let vlCfg10 = {
-  ViewportHeight = 5
-  SelectionColor = Color.Named(BaseColor.Blue, Normal)
-  RenderRow = fun (i: int) -> El.text (sprintf "item %d" i)
-}
+let vlCfg = VirtualList.create (fun (i: int) -> El.text (sprintf "item %d" i))
 
 let virtualListTests = testList "VirtualList" [
   test "ofArray empty list has no selection" {
-    let m = VirtualList.ofArray [||]
-    m.SelectedIndex |> Expect.equal "no selection" None
-    m.ScrollOffset  |> Expect.equal "offset 0" 0
+    let m = VirtualList.ofArray 5 [||]
+    m.SelectedIndex  |> Expect.equal "no selection" None
+    m.ScrollOffset   |> Expect.equal "offset 0" 0
+    m.ViewportHeight |> Expect.equal "viewport 5" 5
   }
   test "ofArray non-empty selects index 0" {
     let m = mkList 10
@@ -1096,67 +1093,71 @@ let virtualListTests = testList "VirtualList" [
     m.ScrollOffset  |> Expect.equal "offset 0" 0
   }
   test "ofList creates same as ofArray" {
-    let m1 = VirtualList.ofList [ 1; 2; 3 ]
-    let m2 = VirtualList.ofArray [| 1; 2; 3 |]
+    let m1 = VirtualList.ofList 5 [ 1; 2; 3 ]
+    let m2 = VirtualList.ofArray 5 [| 1; 2; 3 |]
     m1.SelectedIndex |> Expect.equal "same sel" m2.SelectedIndex
     m1.ScrollOffset  |> Expect.equal "same off" m2.ScrollOffset
+  }
+  test "ViewportHeight clamped to minimum 1" {
+    let m = VirtualList.ofArray 0 [| 1 |]
+    m.ViewportHeight |> Expect.equal "min 1" 1
   }
   test "selectedItem returns current item" {
     let m = mkList 10
     VirtualList.selectedItem m |> Expect.equal "item 0" (Some 0)
   }
   test "selectedItem None for empty list" {
-    VirtualList.selectedItem (VirtualList.ofArray [||]) |> Expect.equal "none" None
+    VirtualList.selectedItem (VirtualList.ofArray 5 [||]) |> Expect.equal "none" None
   }
   test "selectNext advances selection" {
-    let m = mkList 10 |> VirtualList.selectNext 5
+    let m = mkList 10 |> VirtualList.selectNext
     m.SelectedIndex |> Expect.equal "index 1" (Some 1)
   }
   test "selectNext does not go past last item" {
-    let m = VirtualList.ofArray [| 0 |] |> VirtualList.selectNext 5
+    let m = VirtualList.ofArray 5 [| 0 |] |> VirtualList.selectNext
     m.SelectedIndex |> Expect.equal "stays at 0" (Some 0)
   }
   test "selectPrev does not go below 0" {
-    let m = mkList 10 |> VirtualList.selectPrev 5
+    let m = mkList 10 |> VirtualList.selectPrev
     m.SelectedIndex |> Expect.equal "stays at 0" (Some 0)
   }
   test "selectPrev from item 3 gives item 2" {
-    let m = VirtualList.ofArray [| 0 .. 9 |]
-    let m' = { m with SelectedIndex = Some 3 } |> VirtualList.selectPrev 5
+    let m = VirtualList.ofArray 5 [| 0 .. 9 |]
+    let m' = { m with SelectedIndex = Some 3 } |> VirtualList.selectPrev
     m'.SelectedIndex |> Expect.equal "index 2" (Some 2)
   }
   test "selectFirst jumps to item 0" {
-    let m = VirtualList.ofArray [| 0 .. 9 |]
-    let m' = { m with SelectedIndex = Some 7 } |> VirtualList.selectFirst 5
+    let m = VirtualList.ofArray 5 [| 0 .. 9 |]
+    let m' = { m with SelectedIndex = Some 7 } |> VirtualList.selectFirst
     m'.SelectedIndex |> Expect.equal "index 0" (Some 0)
   }
   test "selectLast jumps to last item" {
-    let m = mkList 10 |> VirtualList.selectLast 5
+    let m = mkList 10 |> VirtualList.selectLast
     m.SelectedIndex |> Expect.equal "index 9" (Some 9)
   }
   test "ensureVisible scrolls down when selection below viewport" {
     let m = mkList 20
-    let m' = { m with SelectedIndex = Some 10 } |> VirtualList.ensureVisible 5
+    let m' = { m with SelectedIndex = Some 10 } |> VirtualList.ensureVisible
     m'.ScrollOffset |> Expect.equal "offset 6" 6
   }
   test "ensureVisible scrolls up when selection above viewport" {
     let m = { (mkList 20) with ScrollOffset = 10; SelectedIndex = Some 3 }
-    let m' = VirtualList.ensureVisible 5 m
+    let m' = VirtualList.ensureVisible m
     m'.ScrollOffset |> Expect.equal "offset 3" 3
   }
-  test "pageDown advances by viewportHeight" {
+  test "pageDown advances by ViewportHeight" {
     let m = mkList 20
-    let m' = VirtualList.pageDown 5 m
+    let m' = VirtualList.pageDown m
     m'.SelectedIndex |> Expect.equal "index 5" (Some 5)
   }
   test "pageDown clamps to last item" {
-    let m = VirtualList.ofArray [| 0 .. 9 |]
-    let m' = { m with SelectedIndex = Some 8 } |> VirtualList.pageDown 5
+    let m = VirtualList.ofArray 5 [| 0 .. 9 |]
+    let m' = { m with SelectedIndex = Some 8 } |> VirtualList.pageDown
     m'.SelectedIndex |> Expect.equal "index 9 clamped" (Some 9)
   }
-  test "pageUp advances by viewportHeight" {
-    let m = VirtualList.ofArray [| 0 .. 9 |]
-    let m' = { m with SelectedIndex = Some 8 } |> VirtualList.pageUp 5
+  test "pageUp retreats by ViewportHeight" {
+    let m = VirtualList.ofArray 5 [| 0 .. 9 |]
+    let m' = { m with SelectedIndex = Some 8 } |> VirtualList.pageUp
     m'.SelectedIndex |> Expect.equal "index 3" (Some 3)
   }
   test "setItems clamps selection to new length" {
@@ -1170,24 +1171,36 @@ let virtualListTests = testList "VirtualList" [
     let m' = VirtualList.setItems [||] m
     m'.SelectedIndex |> Expect.equal "none" None
   }
-  test "view empty returns Empty" {
-    let m = VirtualList.ofArray [||]
-    match VirtualList.view vlCfg10 m with
-    | Empty -> ()
-    | other -> failwith (sprintf "expected Empty, got %A" other)
+  test "setItems with stale high scrollOffset ensureVisible fixes it" {
+    let m = { (mkList 20) with ScrollOffset = 15; SelectedIndex = Some 15 }
+    let m' = VirtualList.setItems [| 0; 1; 2 |] m
+    // sel clamped to 2, offset must not be 15
+    m'.SelectedIndex |> Expect.equal "sel 2" (Some 2)
+    m'.ScrollOffset  |> (fun v -> (v, 3) |> Expect.isLessThan "offset not stale")
   }
-  test "view renders only viewport rows" {
+  test "view produces Column with exactly ViewportHeight rows" {
     let m = mkList 20
-    match VirtualList.view vlCfg10 m with
+    match VirtualList.view vlCfg m with
     | Column children -> children |> Expect.hasLength "5 rows" 5
+    | other -> failwith (sprintf "expected Column, got %A" other)
+  }
+  test "view pads to ViewportHeight when fewer items" {
+    let m = VirtualList.ofArray 5 [| 0; 1; 2 |]
+    match VirtualList.view vlCfg m with
+    | Column children -> children |> Expect.hasLength "padded to 5" 5
+    | other -> failwith (sprintf "expected Column, got %A" other)
+  }
+  test "view empty pads to ViewportHeight" {
+    let m = VirtualList.ofArray 5 [||]
+    match VirtualList.view vlCfg m with
+    | Column children -> children |> Expect.hasLength "5 empty rows" 5
     | other -> failwith (sprintf "expected Column, got %A" other)
   }
   test "view renders correct window after scroll" {
     let m = { (mkList 20) with ScrollOffset = 3; SelectedIndex = Some 5 }
-    match VirtualList.view vlCfg10 m with
+    match VirtualList.view vlCfg m with
     | Column children ->
       children |> Expect.hasLength "5 rows" 5
-      // First visible row should be item 3
       match children[0] with
       | Text(t, _) -> t |> Expect.equal "item 3" "item 3"
       | other -> failwith (sprintf "expected Text, got %A" other)
@@ -1195,9 +1208,8 @@ let virtualListTests = testList "VirtualList" [
   }
   test "view selected row gets highlight style" {
     let m = mkList 5
-    match VirtualList.view vlCfg10 m with
+    match VirtualList.view vlCfg m with
     | Column children ->
-      // Row 0 is selected - should be Styled
       match children[0] with
       | Styled(s, _) ->
         s.Bg |> Expect.equal "blue bg" (Some (Color.Named(BaseColor.Blue, Normal)))
@@ -1206,23 +1218,17 @@ let virtualListTests = testList "VirtualList" [
   }
   test "view non-selected rows are not highlighted" {
     let m = mkList 5
-    match VirtualList.view vlCfg10 m with
+    match VirtualList.view vlCfg m with
     | Column children ->
       match children[1] with
-      | Text _ -> ()  // undecorated text is fine
+      | Text _ -> ()
       | Styled(s, _) ->
-        // if styled, bg must not be the selection color
         match s.Bg with
         | Some c when c = Color.Named(BaseColor.Blue, Normal) ->
           failwith "row 1 should not be selected"
         | _ -> ()
-      | other -> failwith (sprintf "expected Text or Styled, got %A" other)
-    | other -> failwith (sprintf "expected Column, got %A" other)
-  }
-  test "view handles fewer items than viewport gracefully" {
-    let m = mkList 3
-    match VirtualList.view vlCfg10 m with
-    | Column children -> children |> Expect.hasLength "3 rows (< viewport)" 3
+      | Empty -> ()
+      | other -> failwith (sprintf "unexpected: %A" other)
     | other -> failwith (sprintf "expected Column, got %A" other)
   }
 ]
@@ -1255,6 +1261,12 @@ let textInputWordSelTests = testList "TextInput word and selection" [
   }
   test "wordRightPos at end stays at end" {
     TextInput.wordRightPos 5 "hello" |> Expect.equal "pos 5" 5
+  }
+  test "wordRightPos treats underscore as word char" {
+    TextInput.wordRightPos 0 "hello_world foo" |> Expect.equal "pos 11 (underscore included)" 11
+  }
+  test "wordLeftPos treats underscore as word char" {
+    TextInput.wordLeftPos 11 "hello_world foo" |> Expect.equal "pos 0 (underscore included)" 0
   }
   // ── wordLeft / wordRight ─────────────────────────────────────────────────
   test "wordLeft moves cursor backward one word" {
@@ -1404,6 +1416,59 @@ let textInputWordSelTests = testList "TextInput word and selection" [
     m'.SelectionAnchor |> Expect.equal "anchor 2" (Some 2)
   }
 ]
+
+
+// ── VirtualTable ──────────────────────────────────────────────────────────────
+
+let vtColumns = [
+  { Header = "ID"; Width = 5; Render = fun (i: int) -> El.text (sprintf "%d" i) }
+  { Header = "Name"; Width = 10; Render = fun (i: int) -> El.text (sprintf "item%d" i) }
+]
+
+let virtualTableTests = testList "VirtualTable" [
+  test "VirtualTable.create builds config with default selection color" {
+    let cfg = VirtualTable.create vtColumns
+    cfg.SelectionColor |> Expect.equal "blue" (Color.Named(BaseColor.Blue, Normal))
+    cfg.Columns        |> Expect.hasLength "2 cols" 2
+    cfg.SeparatorChar  |> Expect.equal "dash" '─'
+  }
+  test "VirtualTable.view renders header + sep + data Column" {
+    let m = VirtualList.ofArray 3 [| 0; 1; 2 |]
+    let cfg = VirtualTable.create vtColumns
+    match VirtualTable.view cfg m with
+    | Column [header; sep; _] ->
+      match header with
+      | Row _ -> ()
+      | other -> failwith (sprintf "expected Row header, got %A" other)
+      match sep with
+      | Row _ -> ()
+      | other -> failwith (sprintf "expected Row sep, got %A" other)
+    | other -> failwith (sprintf "expected Column[3], got %A" other)
+  }
+  test "VirtualTable.view empty columns produces empty rows" {
+    let m = VirtualList.ofArray 3 [| 0; 1 |]
+    let cfg = VirtualTable.create []
+    match VirtualTable.view cfg m with
+    | Column [Row _; Row _; Column _] -> ()
+    | other -> failwith (sprintf "unexpected: %A" other)
+  }
+  test "VirtualTable.view data window uses model ViewportHeight" {
+    let m = VirtualList.ofArray 5 [| 0 .. 19 |]
+    let cfg = VirtualTable.create vtColumns
+    match VirtualTable.view cfg m with
+    | Column [_; _; Column dataRows] ->
+      dataRows |> Expect.hasLength "5 data rows" 5
+    | other -> failwith (sprintf "unexpected: %A" other)
+  }
+  test "VirtualTable.view zero-width column emits Empty separator cell" {
+    let cols = [{ Header = "X"; Width = 0; Render = fun _ -> El.empty }]
+    let m = VirtualList.ofArray 3 [| 0 |]
+    let cfg = VirtualTable.create cols
+    match VirtualTable.view cfg m with
+    | Column [_; Row [Empty]; _] -> ()
+    | other -> failwith (sprintf "unexpected: %A" other)
+  }
+]
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -1429,4 +1494,5 @@ let allWidgetTests = testList "Widgets" [
   undoableCommitTests
   virtualListTests
   textInputWordSelTests
+  virtualTableTests
 ]
