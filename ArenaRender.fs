@@ -207,6 +207,8 @@ module ArenaRender =
         let n = countChildren arena node.FirstChild
         let ls = arena.LayoutScratch
         let lp = arena.LayoutPos
+        if lp + n + n > ls.Length then
+          failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n) lp ls.Length)
         let cnBase = lp        // n slots: child node indices
         let szBase = lp + n   // n slots: sizes (negative = Fill with encoded content)
         arena.LayoutPos <- lp + n + n
@@ -268,6 +270,8 @@ module ArenaRender =
         let n = countChildren arena node.FirstChild
         let ls = arena.LayoutScratch
         let lp = arena.LayoutPos
+        if lp + n + n > ls.Length then
+          failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n) lp ls.Length)
         let cnBase = lp
         let szBase = lp + n
         arena.LayoutPos <- lp + n + n
@@ -395,6 +399,8 @@ module ArenaRender =
           let n = countChildren arena childNode.FirstChild
           let ls = arena.LayoutScratch
           let lp = arena.LayoutPos
+          if lp + n + n > ls.Length then
+            failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n) lp ls.Length)
           let cnBase = lp
           let szBase = lp + n
           arena.LayoutPos <- lp + n + n
@@ -449,6 +455,8 @@ module ArenaRender =
           let n = countChildren arena childNode.FirstChild
           let ls = arena.LayoutScratch
           let lp = arena.LayoutPos
+          if lp + n + n > ls.Length then
+            failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n) lp ls.Length)
           let cnBase = lp
           let szBase = lp + n
           arena.LayoutPos <- lp + n + n

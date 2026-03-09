@@ -60,13 +60,17 @@ module Buffer =
     if x >= 0 && x < buf.Width && y >= 0 && y < buf.Height
     then buf.Cells[y * buf.Width + x] <- cell
 
+  /// Legacy allocating path — used by Render.fs (reference implementation).
+  /// For new code, prefer writeCharSpan which avoids the intermediate string and
+  /// hoists the loop-invariant y bounds check.
   let writeString x y (fg: int32) (bg: int32) (attrs: uint16) (text: string) buf =
-    let mutable col = x
-    for rune in text.EnumerateRunes() do
-      if col >= 0 && col < buf.Width && y >= 0 && y < buf.Height then
-        buf.Cells[y * buf.Width + col] <-
-          { Rune = rune.Value; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us }
-      col <- col + RuneWidth.getColumnWidth rune
+    if y >= 0 && y < buf.Height then
+      let mutable col = x
+      for rune in text.EnumerateRunes() do
+        if col >= 0 && col < buf.Width then
+          buf.Cells[y * buf.Width + col] <-
+            { Rune = rune.Value; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us }
+        col <- col + RuneWidth.getColumnWidth rune
 
   /// Zero-allocation text write from a pre-allocated char array slice.
   /// Used by ArenaRender to avoid creating intermediate strings per frame.

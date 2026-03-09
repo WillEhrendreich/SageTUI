@@ -53,8 +53,10 @@ module FrameArena =
       LayoutScratch = Array.zeroCreate maxLayoutScratch
       LayoutPos = 0
       Generation = 0
-      CanvasDraws = System.Collections.Generic.List<CanvasConfig>()
-      HitMap = System.Collections.Generic.List<HitEntry>()
+      // Pre-allocate for typical expected counts to avoid startup doubling.
+      // List<T>.Clear() retains capacity — these are one-time startup costs, not per-frame.
+      CanvasDraws = System.Collections.Generic.List<CanvasConfig>(8)
+      HitMap = System.Collections.Generic.List<HitEntry>(32)
       PeakNodes = 0
       PeakChars = 0
       PeakLayout = 0 }

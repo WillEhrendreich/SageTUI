@@ -246,7 +246,13 @@ module App =
         frameSw.Restart()
         ArenaRender.renderRoot arena rootHandle area backBuf
         let renderMs = frameSw.Elapsed.TotalMilliseconds
-        let currentKeyAreas = ArenaRender.keyAreas arena
+        // Build keyed-area map only when transitions are actually active.
+        // For apps without El.keyed elements or with no pending/active transitions,
+        // this avoids allocating a Map<string, Area> (AVL tree) per frame.
+        let currentKeyAreas =
+          match arena.HitMap.Count > 0 && (not (List.isEmpty entering) || not (List.isEmpty exiting) || not (List.isEmpty activeTransitions)) with
+          | true -> ArenaRender.keyAreas arena
+          | false -> prevKeyAreas
 
         // Start enter transitions once we know the rendered keyed areas.
         for (key, newElem) in entering do

@@ -164,4 +164,48 @@ let arenaAllocationTests =
             |> Expect.isLessThanOrEqual
                 (sprintf "Keyed-tree arena per-frame allocation %d B exceeds %d B threshold; HitEntry string materialisation must be deferred to hitTest/keyAreas callers"
                     perFrame MaxSteadyStateBytesPerFrame)
+
+        testCase "PeakLayout is set after reset (LayoutScratch high-water mark)" <| fun () ->
+            let arena = FrameArena.create 4096 65536 4096
+            let buf   = Buffer.create 80 24
+            let area  = { X = 0; Y = 0; Width = 80; Height = 24 }
+
+            FrameArena.reset arena
+            let root = Arena.lower arena dashboardTree
+            ArenaRender.renderRoot arena root area buf
+            let layoutPosBefore = arena.LayoutPos
+
+            // After reset, PeakLayout should reflect the layout scratch consumed
+            FrameArena.reset arena
+
+            (arena.PeakLayout, 0)
+            |> Expect.isGreaterThan
+                "PeakLayout must be set after reset — arena must track layout scratch high-water mark for sizing diagnostics"
+            arena.PeakLayout
+            |> Expect.equal
+                "PeakLayout must equal LayoutPos of the previous frame"
+                layoutPosBefore
+
+        testCase "LayoutScratch overflow raises a diagnostic error" <| fun () ->
+            // Create an arena with a tiny LayoutScratch that cannot fit even a small row.
+            // This verifies the guard fires with an actionable message rather than silently
+            // overwriting array memory or throwing an IndexOutOfRangeException.
+            let tinyArena = FrameArena.create 4096 65536 1 // 1-slot scratch: cannot hold a 2-child row
+            let buf  = Buffer.create 80 24
+            let area = { X = 0; Y = 0; Width = 80; Height = 24 }
+            let twoChildRow =
+                El.row [ El.text "Left"; El.text "Right" ]
+
+            FrameArena.reset tinyArena
+            let root = Arena.lower tinyArena twoChildRow
+            let throws =
+                try
+                    ArenaRender.renderRoot tinyArena root area buf
+                    false
+                with ex ->
+                    ex.Message.Contains("LayoutScratch overflow")
+
+            throws
+            |> Expect.isTrue
+                "LayoutScratch overflow must throw with a diagnostic message containing 'LayoutScratch overflow', not IndexOutOfRangeException"
     ]
