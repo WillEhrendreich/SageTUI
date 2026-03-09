@@ -82,25 +82,29 @@ module Presenter =
       let y = idx / buf.Width
       let cell = buf.Cells.[idx]
 
-      match y <> lastRow || x <> lastCol + 1 with
-      | true -> sb.Append(Ansi.moveCursor y x) |> ignore
-      | false -> ()
+      // Skip continuation cells — they are the right half of a wide character
+      // already rendered by the previous cell's emission.
+      if cell.Rune <> 0 then
 
-      match cell.Fg <> lastFg || cell.Bg <> lastBg || cell.Attrs <> lastAttrs with
-      | true ->
-        sb.Append(Ansi.resetStyle) |> ignore
-        sb.Append(Ansi.fgColorPacked cell.Fg) |> ignore
-        sb.Append(Ansi.bgColorPacked cell.Bg) |> ignore
-        sb.Append(Ansi.textAttrsPacked cell.Attrs) |> ignore
-        lastFg <- cell.Fg
-        lastBg <- cell.Bg
-        lastAttrs <- cell.Attrs
-      | false -> ()
+        match y <> lastRow || x <> lastCol + 1 with
+        | true -> sb.Append(Ansi.moveCursor y x) |> ignore
+        | false -> ()
 
-      let rune = System.Text.Rune(cell.Rune)
-      sb.Append(rune.ToString()) |> ignore
-      lastCol <- x + (RuneWidth.getColumnWidth rune) - 1
-      lastRow <- y
+        match cell.Fg <> lastFg || cell.Bg <> lastBg || cell.Attrs <> lastAttrs with
+        | true ->
+          sb.Append(Ansi.resetStyle) |> ignore
+          sb.Append(Ansi.fgColorPacked cell.Fg) |> ignore
+          sb.Append(Ansi.bgColorPacked cell.Bg) |> ignore
+          sb.Append(Ansi.textAttrsPacked cell.Attrs) |> ignore
+          lastFg <- cell.Fg
+          lastBg <- cell.Bg
+          lastAttrs <- cell.Attrs
+        | false -> ()
+
+        let rune = System.Text.Rune(cell.Rune)
+        sb.Append(rune.ToString()) |> ignore
+        lastCol <- x + (RuneWidth.getColumnWidth rune) - 1
+        lastRow <- y
 
     sb.ToString()
 
@@ -121,25 +125,29 @@ module Presenter =
       let termRow = y + rowOffset
       let cell = buf.Cells.[idx]
 
-      match termRow <> lastTerminalRow || x <> lastCol + 1 with
-      | true -> sb.Append(Ansi.moveCursor termRow x) |> ignore
-      | false -> ()
+      // Skip continuation cells — they are the right half of a wide character
+      // already rendered by the previous cell's emission.
+      if cell.Rune <> 0 then
 
-      match cell.Fg <> lastFg || cell.Bg <> lastBg || cell.Attrs <> lastAttrs with
-      | true ->
-        sb.Append(Ansi.resetStyle) |> ignore
-        sb.Append(Ansi.fgColorPacked cell.Fg) |> ignore
-        sb.Append(Ansi.bgColorPacked cell.Bg) |> ignore
-        sb.Append(Ansi.textAttrsPacked cell.Attrs) |> ignore
-        lastFg <- cell.Fg
-        lastBg <- cell.Bg
-        lastAttrs <- cell.Attrs
-      | false -> ()
+        match termRow <> lastTerminalRow || x <> lastCol + 1 with
+        | true -> sb.Append(Ansi.moveCursor termRow x) |> ignore
+        | false -> ()
 
-      let rune = System.Text.Rune(cell.Rune)
-      sb.Append(rune.ToString()) |> ignore
-      lastCol <- x + (RuneWidth.getColumnWidth rune) - 1
-      lastTerminalRow <- termRow
+        match cell.Fg <> lastFg || cell.Bg <> lastBg || cell.Attrs <> lastAttrs with
+        | true ->
+          sb.Append(Ansi.resetStyle) |> ignore
+          sb.Append(Ansi.fgColorPacked cell.Fg) |> ignore
+          sb.Append(Ansi.bgColorPacked cell.Bg) |> ignore
+          sb.Append(Ansi.textAttrsPacked cell.Attrs) |> ignore
+          lastFg <- cell.Fg
+          lastBg <- cell.Bg
+          lastAttrs <- cell.Attrs
+        | false -> ()
+
+        let rune = System.Text.Rune(cell.Rune)
+        sb.Append(rune.ToString()) |> ignore
+        lastCol <- x + (RuneWidth.getColumnWidth rune) - 1
+        lastTerminalRow <- termRow
 
     sb.ToString()
 

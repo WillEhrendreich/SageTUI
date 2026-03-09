@@ -19,6 +19,12 @@ module PackedCell =
     { Rune = int (Rune ' ').Value
       Fg = 0; Bg = 0; Attrs = 0us; _pad = 0us }
 
+  /// Sentinel written at col X+1 after a wide (2-column) character at col X.
+  /// The Presenter skips cells with Rune=0 — they are visually occupied by the
+  /// left half of the preceding wide character.
+  let wideContinuation =
+    { Rune = 0; Fg = 0; Bg = 0; Attrs = 0us; _pad = 0us }
+
   let create rune fg bg attrs =
     { Rune = rune; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us }
 
@@ -67,10 +73,13 @@ module Buffer =
     if y >= 0 && y < buf.Height then
       let mutable col = x
       for rune in text.EnumerateRunes() do
+        let w = RuneWidth.getColumnWidth rune
         if col >= 0 && col < buf.Width then
           buf.Cells[y * buf.Width + col] <-
             { Rune = rune.Value; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us }
-        col <- col + RuneWidth.getColumnWidth rune
+          if w = 2 && col + 1 < buf.Width then
+            buf.Cells[y * buf.Width + col + 1] <- PackedCell.wideContinuation
+        col <- col + w
 
   /// Zero-allocation text write from a pre-allocated char array slice.
   /// Used by ArenaRender to avoid creating intermediate strings per frame.
@@ -86,6 +95,8 @@ module Buffer =
         if col - x + w <= maxWidth && col >= 0 && col < buf.Width then
           buf.Cells[y * buf.Width + col] <-
             { Rune = rune.Value; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us }
+          if w = 2 && col + 1 < buf.Width then
+            buf.Cells[y * buf.Width + col + 1] <- PackedCell.wideContinuation
         col <- col + w
 
   let clear buf =
@@ -122,6 +133,8 @@ module Buffer =
     for y in 0 .. buf.Height - 1 do
       for x in 0 .. buf.Width - 1 do
         let cell = buf.Cells[y * buf.Width + x]
-        sb.Append(Rune(cell.Rune).ToString()) |> ignore
+        match cell.Rune with
+        | 0 -> sb.Append(' ') |> ignore  // continuation cell for wide char — render as space
+        | v -> sb.Append(Rune(v).ToString()) |> ignore
       if y < buf.Height - 1 then sb.Append('\n') |> ignore
     sb.ToString()

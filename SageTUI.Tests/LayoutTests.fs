@@ -1156,7 +1156,11 @@ let diffInvariantPropertyTests =
 // ═══════════════════════════════════════════════════════════════════════
 
 let private genSimpleText : Gen<Element> =
-  Gen.elements [ ""; "A"; "Hi"; "Hello"; "Longer text"; "αβγ"; "行列" ]
+  Gen.frequency [
+    5, Gen.elements [ ""; "A"; "Hi"; "Hello"; "Longer text" ]
+    3, Gen.elements [ "行列"; "こんにちは"; "你好"; "한국어"; "中文字" ]
+    2, Gen.elements [ "αβγ"; "Ωφψ" ]
+  ]
   |> Gen.map El.text
 
 let rec private genElement (depth: int) : Gen<Element> =
@@ -1227,6 +1231,25 @@ let renderEquivalencePropertyTests =
         let (buf1, _) = arenaHelper elem w h
         let (buf2, _) = arenaHelper elem w h
         buf2.Cells |> Expect.sequenceEqual "idempotent" buf1.Cells
+
+    testPropertyWithConfig
+      { FsCheckConfig.defaultConfig with maxTest = 300; arbitrary = [ typeof<ElementArb> ] }
+      "Wide chars always have Rune=0 continuation at col+1 (both render paths)"
+    <| fun (wb: byte) (hb: byte) (elem: Element) ->
+        let w = max 2 (int wb % 60 + 2)
+        let h = max 1 (int hb % 30 + 1)
+        let (treeBuf, arenaBuf) = arenaHelper elem w h
+        // Check each buffer independently
+        let checkBuf (name: string) (buf: Buffer) =
+          for y in 0 .. h - 1 do
+            for x in 0 .. w - 2 do  // stop at w-2 since we check x+1
+              let cell = buf.Cells[y * w + x]
+              let rune = System.Text.Rune(cell.Rune)
+              if RuneWidth.getColumnWidth rune = 2 then
+                let next = buf.Cells[y * w + x + 1]
+                next.Rune |> Expect.equal (sprintf "%s: col %d+1 after wide char has Rune=0" name x) 0
+        checkBuf "Render" treeBuf
+        checkBuf "ArenaRender" arenaBuf
   ]
 
 [<Tests>]

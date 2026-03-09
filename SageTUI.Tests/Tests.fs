@@ -4723,3 +4723,110 @@ let sprint39Tests =
     sprint39AppConfigTests
   ]
 
+
+// ─── Sprint 40 tests ─────────────────────────────────────────────────────────
+
+let sprint40WideCharContinuationTests =
+  testList "Sprint 40: wide-char continuation sentinel" [
+
+    testCase "PackedCell.wideContinuation has Rune=0" <| fun () ->
+      PackedCell.wideContinuation.Rune |> Expect.equal "Rune is 0" 0
+      PackedCell.wideContinuation.Fg   |> Expect.equal "Fg is 0" 0
+      PackedCell.wideContinuation.Bg   |> Expect.equal "Bg is 0" 0
+
+    testCase "writeString: wide char at col 0 leaves Rune=0 at col 1" <| fun () ->
+      let buf = Buffer.create 10 1
+      Buffer.writeString 0 0 0 0 0us "行" buf
+      buf.Cells[0].Rune |> Expect.equal "col0 is 行" (int '行')
+      buf.Cells[1].Rune |> Expect.equal "col1 is continuation" 0
+
+    testCase "writeString: two wide chars leave continuations at cols 1 and 3" <| fun () ->
+      let buf = Buffer.create 10 1
+      Buffer.writeString 0 0 0 0 0us "行列" buf
+      buf.Cells[0].Rune |> Expect.equal "col0 is 行" (int '行')
+      buf.Cells[1].Rune |> Expect.equal "col1 is continuation" 0
+      buf.Cells[2].Rune |> Expect.equal "col2 is 列" (int '列')
+      buf.Cells[3].Rune |> Expect.equal "col3 is continuation" 0
+
+    testCase "writeString: wide char at right boundary writes continuation at last col" <| fun () ->
+      let buf = Buffer.create 2 1
+      Buffer.writeString 0 0 0 0 0us "行" buf
+      buf.Cells[0].Rune |> Expect.equal "col0 is 行" (int '行')
+      buf.Cells[1].Rune |> Expect.equal "col1 is continuation" 0
+
+    testCase "writeCharSpan: wide char at col 0 leaves Rune=0 at col 1" <| fun () ->
+      let buf = Buffer.create 10 1
+      let chars = "行列".ToCharArray()
+      Buffer.writeCharSpan 0 0 0 0 0us chars 0 chars.Length 10 buf
+      buf.Cells[0].Rune |> Expect.equal "col0 is 行" (int '行')
+      buf.Cells[1].Rune |> Expect.equal "col1 is continuation" 0
+      buf.Cells[2].Rune |> Expect.equal "col2 is 列" (int '列')
+      buf.Cells[3].Rune |> Expect.equal "col3 is continuation" 0
+
+    testCase "writeCharSpan: wide char inside area writes continuation" <| fun () ->
+      let buf = Buffer.create 5 1
+      let chars = "行A".ToCharArray()
+      Buffer.writeCharSpan 0 0 0 0 0us chars 0 chars.Length 3 buf
+      buf.Cells[0].Rune |> Expect.equal "col0 is 行" (int '行')
+      buf.Cells[1].Rune |> Expect.equal "col1 is continuation" 0
+      buf.Cells[2].Rune |> Expect.equal "col2 is A" (int 'A')
+
+    testCase "Buffer.toString: Rune=0 cells render as space, not NUL" <| fun () ->
+      let buf = Buffer.create 4 1
+      Buffer.writeString 0 0 0 0 0us "行A" buf
+      let s = Buffer.toString buf
+      s.Length |> Expect.equal "length is buf width" 4
+      s.[0] |> Expect.equal "col0 is 行" '行'
+      s.[1] |> Expect.equal "col1 is space" ' '
+      s.[2] |> Expect.equal "col2 is A" 'A'
+      s.[1] |> Expect.notEqual "col1 is not NUL" '\000'
+
+    testCase "Presenter.present: skips Rune=0 continuation cells" <| fun () ->
+      let front = Buffer.create 5 1
+      let back  = Buffer.create 5 1
+      Buffer.writeString 0 0 0 0 0us "行" back
+      let changes = Buffer.diff front back
+      changes |> Seq.contains 0 |> Expect.isTrue "col 0 dirty"
+      changes |> Seq.contains 1 |> Expect.isTrue "col 1 dirty"
+      let output = Presenter.present changes back
+      output |> Expect.stringContains "wide char in output" "行"
+      // cursor-move to col 1 would be CSI 1;2H — must NOT appear
+      output.Contains("\x1b[1;2H") |> Expect.isFalse "no move to col 1"
+
+    testCase "Presenter.present: two wide chars — no cursor moves to continuations" <| fun () ->
+      let front = Buffer.create 6 1
+      let back  = Buffer.create 6 1
+      Buffer.writeString 0 0 0 0 0us "行列" back
+      let changes = Buffer.diff front back
+      let output = Presenter.present changes back
+      output |> Expect.stringContains "行 in output" "行"
+      output |> Expect.stringContains "列 in output" "列"
+      output.Contains("\x1b[1;2H") |> Expect.isFalse "no move to col 1"
+      output.Contains("\x1b[1;4H") |> Expect.isFalse "no move to col 3"
+
+    testCase "Render.render: Text with wide chars produces continuation cells" <| fun () ->
+      let buf = Buffer.create 10 1
+      let area = { X = 0; Y = 0; Width = 10; Height = 1 }
+      Render.render area Style.empty buf (El.text "行Hi")
+      buf.Cells[0].Rune |> Expect.equal "col0 行" (int '行')
+      buf.Cells[1].Rune |> Expect.equal "col1 continuation" 0
+      buf.Cells[2].Rune |> Expect.equal "col2 H" (int 'H')
+      buf.Cells[3].Rune |> Expect.equal "col3 i" (int 'i')
+
+    testCase "ArenaRender: Text with wide chars produces continuation cells" <| fun () ->
+      let buf   = Buffer.create 10 1
+      let arena = FrameArena.create 1024 4096 256
+      let area  = { X = 0; Y = 0; Width = 10; Height = 1 }
+      let root  = Arena.lower arena (El.text "行Hi")
+      ArenaRender.renderRoot arena root area buf
+      buf.Cells[0].Rune |> Expect.equal "col0 行" (int '行')
+      buf.Cells[1].Rune |> Expect.equal "col1 continuation" 0
+      buf.Cells[2].Rune |> Expect.equal "col2 H" (int 'H')
+      buf.Cells[3].Rune |> Expect.equal "col3 i" (int 'i')
+  ]
+
+[<Tests>]
+let sprint40Tests =
+  testList "Sprint 40" [
+    sprint40WideCharContinuationTests
+  ]
