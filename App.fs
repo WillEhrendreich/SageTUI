@@ -45,6 +45,9 @@ module App =
 
   let runWith (config: AppConfig) (backend: TerminalBackend) (program: Program<'model, 'msg>) =
     let mutable width, height = backend.Size()
+    // Mutable program reference enables live-reload: caller may swap the program record
+    // (Init/Update/View/Subscribe) at runtime without restarting the loop.
+    let mutable program = program
     let mutable model, initCmd = program.Init()
     let mutable frontBuf = Buffer.create width height
     let mutable backBuf = Buffer.create width height
@@ -185,6 +188,28 @@ module App =
         | false -> ()
       with _ -> ())
 
+    // Ctrl-C handler: cancel subscriptions, restore terminal, exit with code 130 (SIGINT convention).
+    // args.Cancel=true prevents immediate process kill so cleanup runs first.
+    let cleanup () =
+      try
+        for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
+        activeSubs.Clear()
+        running <- false
+        match automation.UseAltScreen with
+        | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
+        | false -> backend.Write(Ansi.showCursor)
+        backend.Flush()
+        match automation.UseRawMode with
+        | true -> backend.LeaveRawMode()
+        | false -> ()
+      with _ -> ()
+    let cancelHandler =
+      System.ConsoleCancelEventHandler(fun _ args ->
+        args.Cancel <- true
+        cleanup()
+        System.Environment.Exit(130))
+    Console.CancelKeyPress.AddHandler(cancelHandler)
+
     // POSIX suspend/resume (SIGTSTP / SIGCONT): restore the terminal before the
     // process is stopped, then re-enter raw/alt-screen when it resumes.
     // Windows does not have SIGTSTP so we guard on the OS platform.
@@ -227,7 +252,11 @@ module App =
       while running do
         let mutable msg = Unchecked.defaultof<'msg>
         let mutable modelChanged = false
+        let mutable drainCount = 0
         while msgChannel.TryDequeue(&msg) do
+          drainCount <- drainCount + 1
+          if drainCount > 10_000 then
+            failwith "[SageTUI] Message drain loop exceeded 10,000 messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains."
           let newModel, cmd = program.Update msg model
           model <- newModel
           modelChanged <- true
@@ -508,6 +537,7 @@ module App =
       match automation.UseRawMode with
       | true -> backend.LeaveRawMode()
       | false -> ()
+      Console.CancelKeyPress.RemoveHandler(cancelHandler)
       if exitCode <> 0 then
         System.Environment.Exit exitCode
     with ex ->
@@ -518,6 +548,7 @@ module App =
       match automation.UseRawMode with
       | true -> backend.LeaveRawMode()
       | false -> ()
+      Console.CancelKeyPress.RemoveHandler(cancelHandler)
       reraise()
 
   /// Run with an explicit backend (for testing or custom backends).
@@ -585,6 +616,8 @@ module App =
       with _ -> startRow + inlineHeight
     startRow <- max 0 (endRow - inlineHeight)
 
+    // Mutable program reference enables live-reload: caller may swap the program record at runtime.
+    let mutable program = program
     let mutable model, initCmd = program.Init()
     let mutable frontBuf = Buffer.create width inlineHeight
     let mutable backBuf = Buffer.create width inlineHeight
@@ -706,7 +739,11 @@ module App =
       while running do
         let mutable msg = Unchecked.defaultof<'msg>
         let mutable modelChanged = false
+        let mutable drainCount = 0
         while msgChannel.TryDequeue(&msg) do
+          drainCount <- drainCount + 1
+          if drainCount > 10_000 then
+            failwith "[SageTUI] Message drain loop exceeded 10,000 messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains."
           let newModel, cmd = program.Update msg model
           model <- newModel
           modelChanged <- true

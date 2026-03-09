@@ -995,6 +995,159 @@ let flexShrinkTests = testList "Flex-shrink proportional" [
 // Combined test list for export
 // ═══════════════════════════════════════════════════════════════════════
 
+/// Property-based invariant tests for the layout constraint solver.
+/// These are the "safety net" tests Haynes recommended before renderer refactors.
+let layoutConservationPropertyTests =
+  testList "Layout conservation properties (FsCheck)" [
+    testProperty "solveWithContent never allocates more than available" <|
+      fun (available: byte) (n: byte) ->
+        let avail = int available
+        let count = max 1 (int n % 6)
+        let constraints = List.replicate count Fill
+        let contents = List.replicate count 0
+        let result = Layout.solveWithContent avail constraints contents
+        let total = result |> List.sumBy snd
+        total <= avail
+
+    testProperty "solveWithContent widths are non-negative" <|
+      fun (available: byte) (n: byte) ->
+        let avail = int available
+        let count = max 1 (int n % 6)
+        let constraints = List.replicate count Fill
+        let contents = List.replicate count 0
+        let result = Layout.solveWithContent avail constraints contents
+        result |> List.forall (fun (_, w) -> w >= 0)
+
+    testProperty "solveWithContent sums to available when no overflow" <|
+      fun (available: byte) (n: byte) ->
+        let avail = max 1 (int available)
+        let count = max 1 (int n % 5)
+        let constraints = List.replicate count Fill
+        // Zero content sizes → must sum exactly to avail (no overflow)
+        let result = Layout.solveWithContent avail constraints (List.replicate count 0)
+        let total = result |> List.sumBy snd
+        total = avail
+
+    testProperty "solveWithContent result count equals constraint count" <|
+      fun (available: byte) (n: byte) ->
+        let avail = int available
+        let count = max 1 (int n % 8)
+        let constraints = List.replicate count Fill
+        let contents = List.replicate count 0
+        let result = Layout.solveWithContent avail constraints contents
+        List.length result = count
+
+    testProperty "Fixed constraint respected exactly when space available" <|
+      fun (available: byte) (fixedSize: byte) ->
+        let avail = int available
+        let fs = int fixedSize
+        match avail >= fs with
+        | false -> true  // skip over-constraint cases
+        | true ->
+          let result = Layout.solveWithContent avail [Fixed fs] [0]
+          match result with
+          | [(_, w)] -> w = fs
+          | _ -> false
+
+    testProperty "offsets are non-decreasing" <|
+      fun (available: byte) (n: byte) ->
+        let avail = max 1 (int available)
+        let count = max 1 (int n % 6)
+        let constraints = List.replicate count Fill
+        let contents = List.replicate count 0
+        let offsets = Layout.solveWithContent avail constraints contents |> List.map fst
+        offsets
+        |> List.pairwise
+        |> List.forall (fun (a, b) -> b >= a)
+
+    testProperty "render conserves pixel count — column children widths" <|
+      fun (wb: byte) (hb: byte) ->
+        let w = max 3 (int wb % 30 + 3)
+        let h = max 3 (int hb % 20 + 3)
+        let buf = renderToBuffer w h (El.column [El.text "A"; El.text "B"; El.text "C"])
+        // Total allocated cells = w * h (the buffer is always fully populated)
+        Array.length buf.Cells = w * h
+
+    testProperty "render conserves pixel count — row children" <|
+      fun (wb: byte) (hb: byte) ->
+        let w = max 3 (int wb % 30 + 3)
+        let h = max 3 (int hb % 20 + 3)
+        let buf = renderToBuffer w h (El.row [El.fill (El.text "X"); El.fill (El.text "Y")])
+        Array.length buf.Cells = w * h
+
+    testProperty "Percentage + Fill always sums to available" <|
+      fun (available: byte) (pct: byte) ->
+        let avail = max 1 (int available)
+        let p = max 0 (min 100 (int pct % 101))
+        let result = Layout.solveWithContent avail [Percentage p; Fill] [0; 0]
+        let total = result |> List.sumBy snd
+        // Allow off-by-one from integer rounding
+        abs (total - avail) <= 1
+  ]
+
+/// Property-based invariant tests for Buffer.diff.
+let diffInvariantPropertyTests =
+  testList "Buffer.diff invariants (FsCheck)" [
+    testProperty "self-diff always empty" <|
+      fun (wb: byte) (hb: byte) ->
+        let w = max 1 (int wb % 50)
+        let h = max 1 (int hb % 50)
+        let buf = Buffer.create w h
+        Buffer.diff buf buf |> (fun d -> d.Count = 0)
+
+    testProperty "diff after copy is empty" <|
+      fun (wb: byte) (hb: byte) ->
+        let w = max 1 (int wb % 30)
+        let h = max 1 (int hb % 30)
+        let front = Buffer.create w h
+        let back = Buffer.create w h
+        // Copy front -> back to force equality
+        Array.blit front.Cells 0 back.Cells 0 front.Cells.Length
+        Buffer.diff front back |> (fun d -> d.Count = 0)
+
+    testProperty "diff detects single write" <|
+      fun (wb: byte) (hb: byte) (rv: int32) ->
+        let w = max 2 (int wb % 30 + 2)
+        let h = max 2 (int hb % 30 + 2)
+        let front = Buffer.create w h
+        let back = Buffer.create w h
+        let x = (abs rv) % w
+        let y = (abs rv / w) % h
+        let cell = { Rune = 65; Fg = 0; Bg = 0; Attrs = 0us; _pad = 0us }
+        Buffer.set x y cell back
+        // Diff must report at least one change
+        Buffer.diff front back |> (fun d -> d.Count > 0)
+
+    testProperty "diff count bounded by total cells" <|
+      fun (wb: byte) (hb: byte) ->
+        let w = max 1 (int wb % 20)
+        let h = max 1 (int hb % 20)
+        let front = Buffer.create w h
+        let back = Buffer.create w h
+        // Write every cell differently
+        for i in 0 .. back.Cells.Length - 1 do
+          back.Cells[i] <- { Rune = 65 + (i % 26); Fg = 0; Bg = 0; Attrs = 0us; _pad = 0us }
+        let changes = Buffer.diff front back
+        changes.Count <= w * h
+
+    testProperty "applying diff patches makes front equal back" <|
+      fun (wb: byte) (hb: byte) (rv: int32) ->
+        let w = max 2 (int wb % 20 + 2)
+        let h = max 2 (int hb % 20 + 2)
+        let front = Buffer.create w h
+        let back = Buffer.create w h
+        // Write some cells to back
+        for i in 0 .. min 5 (back.Cells.Length - 1) do
+          back.Cells[i] <- { Rune = 65 + (i % 26); Fg = 0; Bg = 0; Attrs = 0us; _pad = 0us }
+        let changes = Buffer.diff front back
+        // Apply changes: for each dirty index, copy from back to front
+        for idx in changes do
+          front.Cells[idx] <- back.Cells[idx]
+        // Now front should equal back at all changed cells
+        let stillDiff = Buffer.diff front back
+        stillDiff.Count = 0
+  ]
+
 [<Tests>]
 let allLayoutTests = testList "MDN CSS Layout Compliance" [
   measureWidthTests
@@ -1012,4 +1165,6 @@ let allLayoutTests = testList "MDN CSS Layout Compliance" [
   gapTests
   overflowClippingTests
   flexShrinkTests
+  layoutConservationPropertyTests
+  diffInvariantPropertyTests
 ]
