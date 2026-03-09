@@ -174,6 +174,9 @@ let _cmdCancellable : Cmd<DataMsg> =
             dispatch (DataLoaded "result")
         })
 
+// Cmd.cancel — cancel a running cancellable async by its id string
+let _cmdCancel : Cmd<DataMsg> = Cmd.cancel "my-fetch"
+
 // ── Section 8: Subscription patterns ─────────────────────────────────────────
 
 type AppMsg2 = Key of Key * Modifiers | Tick | Resize of int * int | Quit2

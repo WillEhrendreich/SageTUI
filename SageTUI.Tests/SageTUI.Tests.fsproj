@@ -16,6 +16,7 @@
     <Compile Include="HtmlTests.fs" />
     <Compile Include="CssTests.fs" />
     <Compile Include="IntegrationTests.fs" />
+    <Compile Include="ArenaAllocationTests.fs" />
     <Compile Include="SnapshotTests.fs" />
     <Compile Include="SampleShowcaseTests.fs" />
     <Compile Include="RecordingTests.fs" />

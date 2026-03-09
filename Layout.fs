@@ -1,5 +1,6 @@
 namespace SageTUI
 
+[<Struct>]
 type Area = { X: int; Y: int; Width: int; Height: int }
 
 [<RequireQualifiedAccess>]

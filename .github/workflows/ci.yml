@@ -31,6 +31,20 @@ jobs:
       - name: Test
         run: dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -- --summary-location
 
+      - name: Verify README test count matches actual
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # Extract actual test count from the test binary (runs fast, just lists tests)
+          ACTUAL=$(dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -- --list-tests 2>/dev/null | wc -l)
+          # Extract the count from the README h1 line: "N,NNN tests"
+          README=$(grep -oP '\d[\d,]*(?= tests)' README.md | head -1 | tr -d ',')
+          echo "Actual test count: $ACTUAL"
+          echo "README test count: $README"
+          if [ "$ACTUAL" != "$README" ]; then
+            echo "ERROR: README says '$README' tests but found '$ACTUAL'. Update the count in README.md."
+            exit 1
+          fi
+
       - name: Verify tutorial examples compile
         if: matrix.os == 'ubuntu-latest'
         run: dotnet fsi docs/tutorial-verify.fsx
@@ -84,7 +98,6 @@ jobs:
           --filter '*'
           --iterationCount 15
           --warmupCount 5
-          --outlierMode RemoveAll
         timeout-minutes: 20
 
       - name: Verify benchmark output exists

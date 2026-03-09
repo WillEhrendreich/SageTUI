@@ -338,6 +338,18 @@ Cmd.ofCancellableAsync "my-fetch" (fun _ct dispatch ->
     })
 ```
 
+Cancelling is a first-class operation — pass the same `id` string to `Cmd.cancel`:
+
+```fsharp
+| CancelFetch ->
+    { model with Loading = false }, Cmd.cancel "my-fetch"
+```
+
+F# async uses cooperative cancellation: the `CancellationToken` is passed to
+`Async.AwaitTask` and `.NET` task continuations automatically; your own loops
+should check `ct.IsCancellationRequested` or use `Async.Sleep` (which checks it).
+A cancelled operation simply stops dispatching — no exception reaches `Update`.
+
 ---
 
 ## 8. Subscriptions

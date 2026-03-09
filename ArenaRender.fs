@@ -201,17 +201,7 @@ module ArenaRender =
           match node.AttrsPacked with
           | 0us -> inheritedAttrs
           | v -> v ||| inheritedAttrs
-        let text = System.String(arena.TextBuf, node.DataStart, node.DataLen)
-        let mutable col = 0
-        let sb = StringBuilder()
-        for rune in text.EnumerateRunes() do
-          let w = RuneWidth.getColumnWidth rune
-          match col + w <= area.Width with
-          | true ->
-            sb.Append(rune.ToString()) |> ignore
-            col <- col + w
-          | false -> ()
-        Buffer.writeString area.X area.Y fg bg attrs (sb.ToString()) buf
+        Buffer.writeCharSpan area.X area.Y fg bg attrs arena.TextBuf node.DataStart node.DataLen area.Width buf
 
       | 2uy -> // Row — uses LayoutScratch, zero managed allocation for common case
         let n = countChildren arena node.FirstChild

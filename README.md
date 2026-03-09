@@ -2,7 +2,7 @@
 
 **Build beautiful terminal UIs in F# with zero ceremony.**
 
-Elm Architecture • SIMD rendering • 1,557 tests • Core package has zero external dependencies
+Elm Architecture • SIMD rendering • 1,560 tests • Core package has zero external dependencies
 
 ## See It In Action
 
