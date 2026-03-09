@@ -197,6 +197,101 @@ module Sub =
     | CustomSub(id, start) ->
       CustomSub(id, fun dispatch ct -> start (f >> dispatch) ct)
 
+  /// Subscribe to an `IObservable<'msg>`. Dispatches each emitted value as a message.
+  /// The subscription is automatically cancelled when the app leaves the state that
+  /// returns this sub. Disposal is handled by the runtime via CancellationToken.
+  ///
+  /// Example:
+  ///   `Sub.fromObservable "prices" priceStream`
+  let fromObservable (id: string) (observable: System.IObservable<'msg>) : Sub<'msg> =
+    CustomSub(id, fun dispatch ct ->
+      async {
+        use _ = observable.Subscribe(fun msg ->
+          match ct.IsCancellationRequested with
+          | false -> dispatch msg
+          | true -> ())
+        do! Async.AwaitWaitHandle(ct.WaitHandle) |> Async.Ignore
+      })
+
+  /// Subscribe to an `IAsyncEnumerable<'msg>`. Iterates the stream and dispatches each value.
+  /// The subscription stops when the sequence completes or the token is cancelled.
+  ///
+  /// Example:
+  ///   `Sub.fromStream "updates" myAsyncEnumerable`
+  let fromStream (id: string) (stream: System.Collections.Generic.IAsyncEnumerable<'msg>) : Sub<'msg> =
+    CustomSub(id, fun dispatch ct ->
+      async {
+        let enumerator = stream.GetAsyncEnumerator(ct)
+        try
+          let mutable running = true
+          while running && not ct.IsCancellationRequested do
+            let! hasMore = enumerator.MoveNextAsync().AsTask() |> Async.AwaitTask
+            match hasMore && not ct.IsCancellationRequested with
+            | true -> dispatch enumerator.Current
+            | false -> running <- false
+        finally
+          enumerator.DisposeAsync().AsTask() |> Async.AwaitTask |> Async.RunSynchronously
+      })
+
+/// Generic undo/redo wrapper for any model type.
+/// Wrap your model in `UndoableModel` and use `Undoable.commit` in Update
+/// to get Ctrl+Z / Ctrl+Y for free.
+///
+/// Example:
+///   type Model = UndoableModel<Counter>
+///   let update msg model =
+///     match msg with
+///     | Increment -> Undoable.commit { model.Present with Count = model.Present.Count + 1 } model, NoCmd
+///     | Undo      -> Undoable.undo model, NoCmd
+type UndoableModel<'model> = {
+  /// Previous states (head = most recent past state).
+  Past: 'model list
+  /// The current visible state.
+  Present: 'model
+  /// States that have been undone (head = next redo target).
+  Future: 'model list
+}
+
+/// Operations on UndoableModel.
+module Undoable =
+  /// Initialise an undo stack with an initial state. Past and Future are empty.
+  let init (model: 'model) : UndoableModel<'model> =
+    { Past = []; Present = model; Future = [] }
+
+  /// Returns true when there is at least one state to undo.
+  let canUndo (m: UndoableModel<'model>) = not (List.isEmpty m.Past)
+
+  /// Returns true when there is at least one state to redo.
+  let canRedo (m: UndoableModel<'model>) = not (List.isEmpty m.Future)
+
+  /// Undo the last committed change. No-op when Past is empty.
+  let undo (m: UndoableModel<'model>) : UndoableModel<'model> =
+    match m.Past with
+    | [] -> m
+    | p :: rest -> { Past = rest; Present = p; Future = m.Present :: m.Future }
+
+  /// Redo the next change. No-op when Future is empty.
+  let redo (m: UndoableModel<'model>) : UndoableModel<'model> =
+    match m.Future with
+    | [] -> m
+    | f :: rest -> { Past = m.Present :: m.Past; Present = f; Future = rest }
+
+  /// Commit a new present state. Pushes current Present to Past; clears Future.
+  let commit (newPresent: 'model) (m: UndoableModel<'model>) : UndoableModel<'model> =
+    { Past = m.Present :: m.Past; Present = newPresent; Future = [] }
+
+  /// Commit only if `newPresent` differs from current Present (structural equality).
+  let commitIfChanged (newPresent: 'model) (m: UndoableModel<'model>) : UndoableModel<'model> =
+    match System.Collections.Generic.EqualityComparer<'model>.Default.Equals(m.Present, newPresent) with
+    | true -> m
+    | false -> commit newPresent m
+
+  /// Truncate the undo history to at most `maxDepth` entries. Oldest entries are discarded.
+  let truncate (maxDepth: int) (m: UndoableModel<'model>) : UndoableModel<'model> =
+    match m.Past.Length > maxDepth with
+    | true -> { m with Past = m.Past |> List.truncate maxDepth }
+    | false -> m
+
 /// The Elm Architecture program definition. Init/Update/View/Subscribe.
 type Program<'model, 'msg> = {
   Init: unit -> 'model * Cmd<'msg>

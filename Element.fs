@@ -322,3 +322,49 @@ module El =
       | Gapped(g, child) ->
         label (sprintf "Gap%d" g) (Gapped(g, dbg (depth + 1) child))
     dbg 0 elem
+
+/// Computation expression builders for declarative, imperative-style layout construction.
+///
+/// Instead of wrapping lists in `[` `]`:
+///   `El.column [ El.text "A"; if cond then El.text "B" else El.empty ]`
+///
+/// Use CE syntax:
+///   `col { "A"; if cond then "B" }`
+///
+/// `yield!` splices an `Element list` and `for` iterates sequences:
+///   `col { yield! headerItems; for x in items do row { El.text x.Name } }`
+module View =
+  type ColumnBuilder() =
+    member _.Yield(e: Element) = [e]
+    member _.Yield(s: string) = [El.text s]
+    member _.YieldFrom(es: Element list) = es
+    member _.YieldFrom(e: Element) = [e]
+    member _.Zero() = []
+    member _.Combine(a: Element list, b: Element list) = a @ b
+    member _.Delay(f: unit -> Element list) = f()
+    member _.For(xs: #seq<'a>, f: 'a -> Element list) =
+      xs |> Seq.toList |> List.collect f
+    member _.Run(es: Element list) = El.column es
+
+  type RowBuilder() =
+    member _.Yield(e: Element) = [e]
+    member _.Yield(s: string) = [El.text s]
+    member _.YieldFrom(es: Element list) = es
+    member _.YieldFrom(e: Element) = [e]
+    member _.Zero() = []
+    member _.Combine(a: Element list, b: Element list) = a @ b
+    member _.Delay(f: unit -> Element list) = f()
+    member _.For(xs: #seq<'a>, f: 'a -> Element list) =
+      xs |> Seq.toList |> List.collect f
+    member _.Run(es: Element list) = El.row es
+
+  /// Build a `Column` using computation expression syntax.
+  /// Supports `yield`, `yield!`, `if`, and `for`.
+  let col = ColumnBuilder()
+
+  /// Build a `Row` using computation expression syntax.
+  /// Supports `yield`, `yield!`, `if`, and `for`.
+  let row = RowBuilder()
+
+  /// Alias for `col` — build a `Column` using CE syntax.
+  let view = ColumnBuilder()

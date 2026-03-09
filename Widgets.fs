@@ -774,3 +774,193 @@ module Form =
   /// Move focus in the given direction through the form's field list. Convenience over `Focus.tabOrder (Form.keys fields)`.
   let handleFocus (fields: FormField<'model, 'msg> list) (focusedKey: string) (dir: FocusDirection) : string =
     Focus.tabOrder (keys fields) focusedKey dir
+
+// ---- TextForm: batteries-included form with text inputs, labels, and validation ----
+
+/// A single field descriptor: static configuration for one `TextForm` text input field.
+type TextFormField = {
+  Id: string
+  Label: string
+  Placeholder: string
+  Required: bool
+  /// Returns `Ok trimmedValue` on success, `Error message` on failure.
+  Validator: string -> Result<string, string>
+}
+
+/// Runtime state for one field in a `TextFormModel`.
+type TextFormFieldState = {
+  Field: TextFormField
+  Input: TextInputModel
+  Error: string option
+  /// True once the field has been tabbed away from at least once — enables live validation.
+  Touched: bool
+}
+
+/// Overall submission lifecycle for a `TextFormModel`.
+type TextFormStatus =
+  | TFEditing
+  | TFSubmitting
+  | TFSubmitted
+  | TFSubmitFailed of string
+
+/// The full TextForm model: an ordered list of field states and focus/status bookkeeping.
+type TextFormModel = {
+  Rows: TextFormFieldState list
+  FocusIndex: int
+  Status: TextFormStatus
+}
+
+type TextFormMsg =
+  | TFKey        of Key
+  | TFTabNext
+  | TFTabPrev
+  | TFSubmit
+  | TFSubmitResult of Result<unit, string>
+  | TFReset
+
+module TextForm =
+  let private defaultValidator (required: bool) (value: string) : Result<string, string> =
+    match required && value.Trim() = "" with
+    | true  -> Error "Required"
+    | false -> Ok (value.Trim())
+
+  /// Create a `TextFormField` with sensible defaults (not required, passes everything).
+  let field (id: string) (label: string) : TextFormField =
+    { Id = id
+      Label = label
+      Placeholder = ""
+      Required = false
+      Validator = defaultValidator false }
+
+  /// Mark a field as required (empty value fails validation).
+  let required   (f: TextFormField) = { f with Required = true; Validator = defaultValidator true }
+  /// Set placeholder text shown when the field is empty.
+  let placeholder (p: string) (f: TextFormField) = { f with Placeholder = p }
+  /// Override with a custom validation function.
+  let validate    (v: string -> Result<string, string>) (f: TextFormField) = { f with Validator = v }
+
+  /// Initialize a form from a list of field descriptors. Focus starts at index 0.
+  let init (fields: TextFormField list) : TextFormModel =
+    { Rows = fields |> List.map (fun f ->
+        { Field = f; Input = TextInput.empty; Error = None; Touched = false })
+      FocusIndex = 0
+      Status = TFEditing }
+
+  let private runValidation (row: TextFormFieldState) =
+    match row.Field.Validator row.Input.Text with
+    | Ok _    -> { row with Error = None }
+    | Error e -> { row with Error = Some e }
+
+  let private allValid (rows: TextFormFieldState list) =
+    rows |> List.forall (fun r ->
+      match r.Field.Validator r.Input.Text with
+      | Ok _ -> true
+      | Error _ -> false)
+
+  let private blurCurrent (m: TextFormModel) =
+    m.Rows |> List.mapi (fun i r ->
+      match i = m.FocusIndex with
+      | false -> r
+      | true  -> runValidation { r with Touched = true })
+
+  /// Update the form. Returns `(newModel, submitRequested)`.
+  /// When `submitRequested = true`, fire your submit `Cmd` and then dispatch `TFSubmitResult`.
+  let update (msg: TextFormMsg) (m: TextFormModel) : TextFormModel * bool =
+    match msg with
+    | TFReset ->
+        init (m.Rows |> List.map (fun r -> r.Field)), false
+
+    | TFSubmitResult (Ok _) ->
+        { m with Status = TFSubmitted }, false
+
+    | TFSubmitResult (Error e) ->
+        { m with Status = TFSubmitFailed e }, false
+
+    | _ when m.Status = TFSubmitting || m.Status = TFSubmitted ->
+        m, false
+
+    | TFKey key ->
+        let idx = m.FocusIndex
+        let rows =
+          m.Rows |> List.mapi (fun i r ->
+            match i = idx with
+            | false -> r
+            | true  ->
+                let updated = { r with Input = TextInput.handleKey key r.Input }
+                match r.Touched with
+                | true  -> runValidation updated
+                | false -> updated)
+        { m with Rows = rows }, false
+
+    | TFTabNext ->
+        let blurred = blurCurrent m
+        let next = (m.FocusIndex + 1) % m.Rows.Length
+        { m with Rows = blurred; FocusIndex = next }, false
+
+    | TFTabPrev ->
+        let blurred = blurCurrent m
+        let prev = (m.FocusIndex - 1 + m.Rows.Length) % m.Rows.Length
+        { m with Rows = blurred; FocusIndex = prev }, false
+
+    | TFSubmit ->
+        let validated = m.Rows |> List.map (fun r -> runValidation { r with Touched = true })
+        match allValid validated with
+        | false -> { m with Rows = validated }, false
+        | true  -> { m with Rows = validated; Status = TFSubmitting }, true
+
+  /// Get the current (untrimmed) text value of a field by ID.
+  let getValue (fieldId: string) (m: TextFormModel) : string option =
+    m.Rows |> List.tryFind (fun r -> r.Field.Id = fieldId)
+    |> Option.map (fun r -> r.Input.Text)
+
+  /// True when all fields currently pass validation.
+  let isValid (m: TextFormModel) = allValid m.Rows
+
+  /// Render the form as a column. Each field shows a focus indicator, label, text input,
+  /// and an optional error line beneath it.
+  let view (focused: bool) (m: TextFormModel) : Element =
+    let labelWidth =
+      match m.Rows |> List.map (fun r -> r.Field.Label.Length) with
+      | [] -> 10
+      | lens -> List.max lens
+
+    let statusBanner =
+      match m.Status with
+      | TFSubmitting     -> El.text " Submitting…"  |> El.fg (Named(Yellow, Bright)) |> Some
+      | TFSubmitted      -> El.text " ✓ Submitted"   |> El.fg (Named(Green, Bright))  |> Some
+      | TFSubmitFailed e -> El.text (sprintf " ✗ %s" e) |> El.fg (Named(Red, Bright)) |> Some
+      | TFEditing        -> None
+
+    let fieldRows =
+      m.Rows |> List.mapi (fun i r ->
+        let isFocused = focused && i = m.FocusIndex
+        let indicator =
+          match isFocused with
+          | true  -> El.text "▶ " |> El.fg (Named(Cyan, Bright))
+          | false -> El.text "  "
+        let pad = String.replicate (labelWidth - r.Field.Label.Length + 1) " "
+        let labelEl =
+          let t = El.text (r.Field.Label + pad)
+          match isFocused with true -> t |> El.bold | false -> t
+        let inputEl =
+          let text = match r.Input.Text = "" && not isFocused with
+                     | true  -> r.Field.Placeholder
+                     | false -> ""
+          let _ = text  // placeholder shown via TextInput.view
+          TextInput.view isFocused r.Input
+        let fieldRow = El.row [ indicator; labelEl; inputEl |> El.fill ]
+        let errorEl =
+          match r.Error with
+          | None -> []
+          | Some msg ->
+              let indent = String.replicate (labelWidth + 3) " "
+              [ El.text (indent + "⚠ " + msg) |> El.fg (Named(Red, Normal)) ]
+        fieldRow :: errorEl)
+      |> List.concat
+
+    let allRows =
+      match statusBanner with
+      | Some b -> fieldRows @ [b]
+      | None -> fieldRows
+
+    El.column allRows

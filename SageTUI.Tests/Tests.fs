@@ -3403,6 +3403,194 @@ let allTests = testList "All" [
   testList "Sprint 3" [
     remoteDataTests
   ]
+  testList "Sprint 4" [
+    testList "View CE (col/row/view builders)" [
+      testCase "col yields a single element as Column" <| fun () ->
+        match View.col { El.text "hello" } with
+        | Column [Text("hello", _)] -> ()
+        | other -> failwithf "expected Column[Text hello], got %A" other
+
+      testCase "col collects multiple yields" <| fun () ->
+        match View.col { El.text "a"; El.text "b"; El.text "c" } with
+        | Column [Text("a",_); Text("b",_); Text("c",_)] -> ()
+        | other -> failwithf "expected 3-item column, got %A" other
+
+      testCase "col accepts string yield" <| fun () ->
+        match View.col { "hello" } with
+        | Column [Text("hello", _)] -> ()
+        | other -> failwithf "expected string sugar to yield Text, got %A" other
+
+      testCase "col supports conditional yield true" <| fun () ->
+        let show = true
+        match View.col { El.text "always"; if show then El.text "conditional" } with
+        | Column [Text("always",_); Text("conditional",_)] -> ()
+        | other -> failwithf "expected 2-item column, got %A" other
+
+      testCase "col conditional false omits item" <| fun () ->
+        let show = false
+        match View.col { El.text "always"; if show then El.text "hidden" } with
+        | Column [Text("always",_)] -> ()
+        | other -> failwithf "expected 1-item column, got %A" other
+
+      testCase "col yield! splices a list" <| fun () ->
+        let items = [El.text "x"; El.text "y"]
+        match View.col { El.text "header"; yield! items } with
+        | Column [Text("header",_); Text("x",_); Text("y",_)] -> ()
+        | other -> failwithf "expected 3-item column, got %A" other
+
+      testCase "col for iterates a sequence" <| fun () ->
+        let names = ["Alice"; "Bob"]
+        match View.col { for n in names do El.text n } with
+        | Column [Text("Alice",_); Text("Bob",_)] -> ()
+        | other -> failwithf "expected 2-item column, got %A" other
+
+      testCase "row yields elements as Row" <| fun () ->
+        match View.row { El.text "left"; El.text "right" } with
+        | Row [Text("left",_); Text("right",_)] -> ()
+        | other -> failwithf "expected Row[left,right], got %A" other
+
+      testCase "row supports for loop" <| fun () ->
+        let cols = ["A";"B";"C"]
+        match View.row { for c in cols do El.text c } with
+        | Row [Text("A",_); Text("B",_); Text("C",_)] -> ()
+        | other -> failwithf "expected 3-item row, got %A" other
+
+      testCase "view is alias for col (produces Column)" <| fun () ->
+        match View.view { El.text "hi" } with
+        | Column _ -> ()
+        | other -> failwithf "expected Column, got %A" other
+
+      testCase "empty CE produces empty Column" <| fun () ->
+        match View.col { () } with
+        | Column [] -> ()
+        | other -> failwithf "expected empty Column, got %A" other
+
+      testCase "col renders without crash" <| fun () ->
+        let el = View.col {
+          El.text "Title" |> El.bold
+          View.row { El.text "A" |> El.fill; El.text "B" |> El.width 10 }
+          "footer"
+        }
+        let buf = Buffer.create 40 5
+        Render.render { X=0; Y=0; Width=40; Height=5 } Style.empty buf el
+        buf.Width |> Expect.equal "buffer width unchanged" 40
+    ]
+
+    testList "Undoable" [
+      testCase "init has empty Past and Future" <| fun () ->
+        let m = Undoable.init 0
+        m.Past |> Expect.isEmpty "no past"
+        m.Future |> Expect.isEmpty "no future"
+        m.Present |> Expect.equal "present" 0
+
+      testCase "commit pushes Present to Past" <| fun () ->
+        let m = Undoable.init 0 |> Undoable.commit 1
+        m.Present |> Expect.equal "present is 1" 1
+        m.Past |> Expect.equal "past has 0" [0]
+        m.Future |> Expect.isEmpty "future cleared"
+
+      testCase "commit clears Future" <| fun () ->
+        let m = Undoable.init 0 |> Undoable.commit 1 |> Undoable.undo |> Undoable.commit 99
+        m.Future |> Expect.isEmpty "future cleared after commit"
+        m.Present |> Expect.equal "present" 99
+
+      testCase "undo restores previous Present" <| fun () ->
+        let m = Undoable.init 0 |> Undoable.commit 1 |> Undoable.commit 2 |> Undoable.undo
+        m.Present |> Expect.equal "undone to 1" 1
+        m.Past |> Expect.equal "past has 0" [0]
+        m.Future |> Expect.equal "future has 2" [2]
+
+      testCase "undo on empty Past is no-op" <| fun () ->
+        let m = Undoable.init 42
+        (Undoable.undo m) |> Expect.equal "unchanged" m
+
+      testCase "redo restores next Future" <| fun () ->
+        let m = Undoable.init 0 |> Undoable.commit 1 |> Undoable.commit 2 |> Undoable.undo |> Undoable.redo
+        m.Present |> Expect.equal "redone to 2" 2
+        m.Future |> Expect.isEmpty "future empty after redo"
+
+      testCase "redo on empty Future is no-op" <| fun () ->
+        let m = Undoable.init 0 |> Undoable.commit 1
+        (Undoable.redo m) |> Expect.equal "unchanged" m
+
+      testCase "canUndo false when no past" <| fun () ->
+        Undoable.init 0 |> Undoable.canUndo |> Expect.isFalse "no past"
+
+      testCase "canUndo true after commit" <| fun () ->
+        Undoable.init 0 |> Undoable.commit 1 |> Undoable.canUndo |> Expect.isTrue "has past"
+
+      testCase "canRedo true after undo" <| fun () ->
+        Undoable.init 0 |> Undoable.commit 1 |> Undoable.undo |> Undoable.canRedo |> Expect.isTrue "has future"
+
+      testCase "multiple undo/redo round-trips" <| fun () ->
+        let m =
+          Undoable.init 0
+          |> Undoable.commit 1
+          |> Undoable.commit 2
+          |> Undoable.commit 3
+          |> Undoable.undo
+          |> Undoable.undo
+        m.Present |> Expect.equal "at 1" 1
+        let m2 = m |> Undoable.redo |> Undoable.redo
+        m2.Present |> Expect.equal "back to 3" 3
+
+      testCase "commitIfChanged does not duplicate on equal value" <| fun () ->
+        let m = Undoable.init 5 |> Undoable.commitIfChanged 5
+        m.Past |> Expect.isEmpty "no duplicate"
+        m.Present |> Expect.equal "unchanged" 5
+
+      testCase "commitIfChanged commits on different value" <| fun () ->
+        let m = Undoable.init 5 |> Undoable.commitIfChanged 6
+        m.Present |> Expect.equal "updated" 6
+        m.Past |> Expect.equal "old in past" [5]
+
+      testCase "truncate limits undo depth" <| fun () ->
+        let m =
+          Undoable.init 0
+          |> Undoable.commit 1
+          |> Undoable.commit 2
+          |> Undoable.commit 3
+          |> Undoable.commit 4
+          |> Undoable.truncate 2
+        m.Past |> Expect.hasLength "max 2 past" 2
+        m.Present |> Expect.equal "present unchanged" 4
+    ]
+
+    testList "Sub adapters" [
+      /// Minimal IObservable for testing — no System.Reactive dependency.
+      testCaseAsync "Sub.fromObservable dispatches observed values" <| async {
+        // Minimal synchronous Subject-like IObservable
+        let mutable observer : System.IObserver<int> option = None
+        let observable =
+          { new System.IObservable<int> with
+              member _.Subscribe(obs) =
+                observer <- Some obs
+                { new System.IDisposable with member _.Dispose() = () } }
+
+        let results = System.Collections.Generic.List<int>()
+        let sub = Sub.fromObservable "test-obs" observable
+
+        match sub with
+        | CustomSub(id, start) ->
+          id |> Expect.equal "id preserved" "test-obs"
+          use cts = new System.Threading.CancellationTokenSource()
+          let task = Async.StartAsTask(start (fun msg -> results.Add(msg)) cts.Token)
+          do! Async.Sleep 20  // allow the subscription to hook up
+          match observer with
+          | Some obs ->
+            obs.OnNext(10)
+            obs.OnNext(20)
+            obs.OnNext(30)
+          | None -> failtest "observer was not subscribed"
+          do! Async.Sleep 20
+          cts.Cancel()
+          try do! task |> Async.AwaitTask with _ -> ()
+        | _ -> failtest "expected CustomSub"
+
+        results |> Seq.toList |> Expect.equal "dispatched in order" [10; 20; 30]
+      }
+    ]
+  ]
   testList "Debug + API" [
     testList "El.debugLayout" [
       testCase "wraps text in labeled border" <| fun () ->

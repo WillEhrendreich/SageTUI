@@ -830,6 +830,139 @@ let formTests = testList "Form" [
   }
 ]
 
+let textFormTests = testList "TextForm" [
+  let mkForm () =
+    TextForm.init [
+      TextForm.field "name"  "Name"  |> TextForm.required
+      TextForm.field "email" "Email" |> TextForm.required
+                                     |> TextForm.validate (fun s ->
+                                          match s.Contains("@") with
+                                          | true  -> Ok s
+                                          | false -> Error "Must contain @")
+    ]
+
+  let typeStr (s: string) m =
+    s |> Seq.fold (fun acc c -> TextForm.update (TFKey (Key.Char c)) acc |> fst) m
+
+  test "init: focus on first field, not valid" {
+    let f = mkForm ()
+    f.FocusIndex |> Expect.equal "focus=0" 0
+    f |> TextForm.isValid |> Expect.isFalse "empty is invalid"
+  }
+
+  test "TFKey inserts characters into focused field" {
+    let f = mkForm () |> typeStr "Alice"
+    TextForm.getValue "name" f |> Expect.equal "name value" (Some "Alice")
+  }
+
+  test "TFKey does not affect unfocused field" {
+    let f = mkForm () |> typeStr "Alice"
+    TextForm.getValue "email" f |> Expect.equal "email unchanged" (Some "")
+  }
+
+  test "TFTabNext moves focus and touches current field" {
+    let f = mkForm () |> typeStr "Alice"
+    let (f2, _) = TextForm.update TFTabNext f
+    f2.FocusIndex |> Expect.equal "moved to field 1" 1
+    f2.Rows.[0].Touched |> Expect.isTrue "field 0 touched"
+  }
+
+  test "TFTabPrev wraps around to last field" {
+    let (f, _) = mkForm () |> TextForm.update TFTabPrev
+    f.FocusIndex |> Expect.equal "wrapped to last" 1
+  }
+
+  test "TFTabNext wraps around to first field" {
+    let f = mkForm () |> typeStr "Alice"
+    let (f2, _) = TextForm.update TFTabNext f
+    let (f3, _) = TextForm.update TFTabNext f2
+    f3.FocusIndex |> Expect.equal "wrapped back to 0" 0
+  }
+
+  test "not-yet-touched field shows no error even when empty" {
+    let f = mkForm ()
+    f.Rows.[0].Error |> Expect.isNone "no error before touch"
+  }
+
+  test "TFTabNext triggers live-validation on touched field" {
+    let f = mkForm () |> typeStr "Alice"
+    let (f2, _) = TextForm.update TFTabNext f  // touch name, move to email
+    // Now type invalid email and tab back — should show error live
+    let f3 = f2 |> typeStr "bad"
+    let (f4, _) = TextForm.update TFTabPrev f3  // blur email
+    f4.Rows.[1].Error |> Expect.isSome "error on invalid email"
+  }
+
+  test "TFSubmit with all-valid fields returns shouldSubmit=true and sets Submitting" {
+    let f = mkForm () |> typeStr "Alice"
+    let (f2, _) = TextForm.update TFTabNext f
+    let f3 = f2 |> typeStr "alice@example.com"
+    let (f4, shouldSubmit) = TextForm.update TFSubmit f3
+    shouldSubmit |> Expect.isTrue "should submit"
+    f4.Status |> Expect.equal "status is Submitting" TFSubmitting
+  }
+
+  test "TFSubmit with invalid fields returns shouldSubmit=false and surfaces errors" {
+    let (f, shouldSubmit) = mkForm () |> TextForm.update TFSubmit
+    shouldSubmit |> Expect.isFalse "should not submit"
+    f.Rows |> List.forall (fun r -> r.Touched) |> Expect.isTrue "all touched"
+    f.Rows.[0].Error |> Expect.isSome "name error shown"
+  }
+
+  test "TFSubmitResult Ok sets status to Submitted" {
+    let f = mkForm () |> typeStr "Alice"
+    let (f2, _) = TextForm.update TFTabNext f
+    let f3 = f2 |> typeStr "alice@example.com"
+    let (f4, _)  = TextForm.update TFSubmit f3
+    let (f5, _)  = TextForm.update (TFSubmitResult (Ok ())) f4
+    f5.Status |> Expect.equal "Submitted" TFSubmitted
+  }
+
+  test "TFSubmitResult Error sets SubmitFailed" {
+    let f = mkForm () |> typeStr "Alice"
+    let (f2, _) = TextForm.update TFTabNext f
+    let f3 = f2 |> typeStr "alice@example.com"
+    let (f4, _) = TextForm.update TFSubmit f3
+    let (f5, _) = TextForm.update (TFSubmitResult (Error "Server error")) f4
+    f5.Status |> Expect.equal "SubmitFailed" (TFSubmitFailed "Server error")
+  }
+
+  test "TFReset restores to empty form" {
+    let f = mkForm () |> typeStr "Alice"
+    let (f2, _) = TextForm.update TFTabNext f
+    let f3 = f2 |> typeStr "alice@example.com"
+    let (f4, _) = TextForm.update TFSubmit f3
+    let (f5, _) = TextForm.update (TFSubmitResult (Ok ())) f4
+    let (f6, _) = TextForm.update TFReset f5
+    f6.Status |> Expect.equal "back to Editing" TFEditing
+    f6.FocusIndex |> Expect.equal "focus reset" 0
+    f6.Rows |> List.forall (fun r -> r.Input.Text = "") |> Expect.isTrue "all fields cleared"
+  }
+
+  test "commitIfChanged: keys-only after Submitting are no-ops" {
+    let f = mkForm () |> typeStr "Alice"
+    let (f2, _) = TextForm.update TFTabNext f
+    let f3 = f2 |> typeStr "alice@example.com"
+    let (submitting, _) = TextForm.update TFSubmit f3
+    let (after, _) = TextForm.update (TFKey (Key.Char 'X')) submitting
+    // Key events must not mutate state while Submitting
+    after.Rows.[1].Input.Text |> Expect.equal "email unchanged" "alice@example.com"
+  }
+
+  test "view renders without crash" {
+    let f = mkForm () |> typeStr "Alice"
+    let elem = TextForm.view true f
+    let buf = Buffer.create 60 10
+    Render.render { X=0; Y=0; Width=60; Height=10 } Style.empty buf elem
+    buf.Width |> Expect.equal "width unchanged" 60
+  }
+
+  test "getValue returns None for unknown fieldId" {
+    let f = mkForm ()
+    TextForm.getValue "nonexistent" f |> Expect.isNone "not found"
+  }
+]
+
 let themeTests = testList "Theme" [
   test "dark theme has expected primary" {
     match Theme.dark.Primary with
@@ -898,5 +1031,6 @@ let allWidgetTests = testList "Widgets" [
   treeViewTests
   lazyTests
   formTests
+  textFormTests
   themeTests
 ]
