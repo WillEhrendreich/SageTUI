@@ -247,6 +247,27 @@ module Arena =
           first
       arena.Nodes.[idx] <- mkNode 13uy 0UL 0us 0uy 0s fc -1 0 0
       h
+    | ResponsiveH breakpoints ->
+      // Kind 15: same as Kind 13 but selects by height. Breakpoint wrappers are Kind 16.
+      let h = FrameArena.allocNode arena
+      let (NodeHandle idx) = h
+      let fc =
+        match breakpoints with
+        | [] -> -1
+        | _ ->
+          let wrappers =
+            breakpoints |> List.map (fun (minH, child) ->
+              let wh = FrameArena.allocNode arena
+              let (NodeHandle wi) = wh
+              let (NodeHandle ci) = lower arena child
+              arena.Nodes.[wi] <- mkNode 16uy 0UL 0us 0uy (int16 minH) ci -1 0 0
+              wi)
+          let first = wrappers.[0]
+          wrappers |> List.pairwise |> List.iter (fun (a, b) ->
+            arena.Nodes.[a] <- { arena.Nodes.[a] with NextSibling = b })
+          first
+      arena.Nodes.[idx] <- mkNode 15uy 0UL 0us 0uy 0s fc -1 0 0
+      h
 
   and lowerChildren (arena: FrameArena) (children: Element list) : int =
     match children with

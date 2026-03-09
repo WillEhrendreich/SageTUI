@@ -118,3 +118,15 @@ module Render =
           match List.tryHead breakpoints with
           | Some (_, child) -> render area inheritedStyle buf child
           | None -> ()
+      | ResponsiveH breakpoints ->
+        let selected =
+          breakpoints
+          |> List.filter (fun (minH, _) -> area.Height >= minH)
+          |> List.tryLast
+          |> Option.map snd
+        match selected with
+        | Some child -> render area inheritedStyle buf child
+        | None ->
+          match List.tryHead breakpoints with
+          | Some (_, child) -> render area inheritedStyle buf child
+          | None -> ()

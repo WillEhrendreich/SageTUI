@@ -126,6 +126,15 @@ module TextInput =
   /// Create an input pre-filled with a string, cursor placed at the end.
   let ofString s = { Text = s; Cursor = String.length s }
 
+  /// Clamp cursor to [0, text.Length]. Use after any external mutation of the model.
+  let clamp (model: TextInputModel) =
+    { model with Cursor = max 0 (min model.Text.Length model.Cursor) }
+
+  /// Replace the text content, clamping the cursor to the new text length.
+  /// Use when you need to update text programmatically without losing cursor position.
+  let setText (text: string) (model: TextInputModel) =
+    { model with Text = text; Cursor = max 0 (min text.Length model.Cursor) }
+
   /// Insert a string at the current cursor position, advancing the cursor.
   let insertText (s: string) (model: TextInputModel) =
     let before = match model.Cursor > 0 with true -> model.Text.[..model.Cursor - 1] | false -> ""

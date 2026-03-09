@@ -124,6 +124,13 @@ module HtmlRender =
       Elem.div
         [ Attr.style "display:contents" ]
         [ render child ]
+    | ResponsiveH breakpoints ->
+      // Height breakpoints: simple fallback to first breakpoint in HTML context
+      let child =
+        breakpoints |> List.tryHead |> Option.map snd |> Option.defaultValue Element.Empty
+      Elem.div
+        [ Attr.style "display:contents" ]
+        [ render child ]
 
   /// Render Element to HTML string
   let renderToString (el: Element) : string =

@@ -54,6 +54,10 @@ type Element =
   /// The last breakpoint whose minWidth ≤ available width is selected.
   /// Breakpoints are evaluated from first to last; use ascending order.
   | Responsive of (int * Element) list
+  /// Height-based responsive layout breakpoints. Each tuple is (minHeight, element).
+  /// The last breakpoint whose minHeight ≤ available height is selected.
+  /// Composes with Responsive for 2D breakpoints.
+  | ResponsiveH of (int * Element) list
 
 /// Element constructors and combinators. All functions return Element values.
 module El =
@@ -258,31 +262,49 @@ module El =
   let responsive (breakpoints: (int * Element) list) : Element =
     Responsive breakpoints
 
+  /// Height-based responsive breakpoints. Like `El.responsive` but selects by `area.Height`.
+  /// Composes with `El.responsive` for 2D breakpoints:
+  ///   El.responsive [ (0, El.responsiveH [(0, small); (20, large)]) ]
+  let responsiveH (breakpoints: (int * Element) list) : Element =
+    ResponsiveH breakpoints
+
   /// Memoize a view function: returns cached Element when input equals the previous input.
   /// are compared correctly. Declare at module level to persist the cache across renders.
   /// Use at module level: `let lazyCounter = El.lazy' Counter.view`
-  let lazy' (viewFn: 'a -> Element) : ('a -> Element) =
+  ///
+  /// Requires `'a : equality` — if your model type contains functions or [<NoEquality>] types,
+  /// you will get a compile error here. Use `El.lazy'With` with a custom comparer instead.
+  let lazy' (viewFn: 'a -> Element) : ('a -> Element) when 'a : equality =
     let mutable prev: struct('a * Element) voption = ValueNone
     fun model ->
       match prev with
-      | ValueSome struct(oldModel, oldElem)
-        when System.Collections.Generic.EqualityComparer<'a>.Default.Equals(oldModel, model) -> oldElem
+      | ValueSome struct(oldModel, oldElem) when oldModel = model -> oldElem
       | _ ->
         let elem = viewFn model
         prev <- ValueSome struct(model, elem)
         elem
 
   /// Memoize a 2-argument view function.
-  let lazy2 (viewFn: 'a -> 'b -> Element) : ('a -> 'b -> Element) =
+  let lazy2 (viewFn: 'a -> 'b -> Element) : ('a -> 'b -> Element) when 'a : equality and 'b : equality =
     let mutable prev: struct('a * 'b * Element) voption = ValueNone
     fun a b ->
       match prev with
-      | ValueSome struct(oldA, oldB, oldElem)
-        when System.Collections.Generic.EqualityComparer<'a>.Default.Equals(oldA, a)
-          && System.Collections.Generic.EqualityComparer<'b>.Default.Equals(oldB, b) -> oldElem
+      | ValueSome struct(oldA, oldB, oldElem) when oldA = a && oldB = b -> oldElem
       | _ ->
         let elem = viewFn a b
         prev <- ValueSome struct(a, b, elem)
+        elem
+
+  /// Memoize a view function with a custom equality comparer.
+  /// Use when `'a` does not support structural equality (e.g., contains functions).
+  let lazy'With (comparer: 'a -> 'a -> bool) (viewFn: 'a -> Element) : ('a -> Element) =
+    let mutable prev: struct('a * Element) voption = ValueNone
+    fun model ->
+      match prev with
+      | ValueSome struct(oldModel, oldElem) when comparer oldModel model -> oldElem
+      | _ ->
+        let elem = viewFn model
+        prev <- ValueSome struct(model, elem)
         elem
 
   /// Recursively wraps each element with a colored border showing its type and constraint.
@@ -339,6 +361,8 @@ module El =
         label (sprintf "Gap%d" g) (Gapped(g, dbg (depth + 1) child))
       | Responsive breakpoints ->
         label "Resp" (Responsive(breakpoints |> List.map (fun (minW, child) -> (minW, dbg (depth + 1) child))))
+      | ResponsiveH breakpoints ->
+        label "RespH" (ResponsiveH(breakpoints |> List.map (fun (minH, child) -> (minH, dbg (depth + 1) child))))
     dbg 0 elem
 
 /// Computation expression builders for declarative, imperative-style layout construction.

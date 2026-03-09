@@ -23,6 +23,8 @@ let rec countLeaves (el: Element) =
   | Element.Canvas _ -> 1
   | Element.Responsive bps ->
     bps |> List.tryHead |> Option.map (snd >> countLeaves) |> Option.defaultValue 0
+  | Element.ResponsiveH bps ->
+    bps |> List.tryHead |> Option.map (snd >> countLeaves) |> Option.defaultValue 0
 
 let isRow el = match el with Element.Row _ -> true | _ -> false
 let isCol el = match el with Element.Column _ -> true | _ -> false

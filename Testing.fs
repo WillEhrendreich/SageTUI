@@ -557,3 +557,34 @@ module Testing =
   let replayFromLines (deserialize: string -> 'msg option) (lines: string array) : 'msg list =
     lines |> Array.choose deserialize |> Array.toList
 
+  /// Route a single `TerminalEvent` through the appropriate TestHarness handler.
+  ///
+  /// Mapping:
+  ///   KeyPressed(key, mods)  → TestHarness.pressKeyWith
+  ///   Resized(w, h)          → TestHarness.resize
+  ///   MouseInput me          → TestHarness.clickAt (LeftButton only)
+  ///   FocusGained/FocusLost  → no-op (no Sub equivalent in test harness)
+  let routeTerminalEvent (event: TerminalEvent) (app: TestApp<'model,'msg>) : TestApp<'model,'msg> =
+    match event with
+    | KeyPressed(key, mods) -> TestHarness.pressKeyWith key mods app
+    | Resized(w, h)         -> TestHarness.resize w h app
+    | MouseInput me         ->
+      match me.Button with
+      | LeftButton -> TestHarness.clickAt me.X me.Y app
+      | _          -> app
+    | FocusGained           -> app
+    | FocusLost             -> app
+    | Pasted _              -> app  // No PasteSub in TestHarness yet
+
+  /// Replay a recorded session file against a TestApp.
+  ///
+  /// Reads the file at `path` using `Recording.readAllLines`, decodes each line as a
+  /// `TerminalEvent`, and routes it through `routeTerminalEvent`. Lines that fail to
+  /// decode are silently skipped (same behaviour as `Recording.playback`).
+  ///
+  /// Combine with `shrinkReplay` to find minimal reproducing event sequences.
+  let replayRecording (path: string) (app: TestApp<'model,'msg>) : TestApp<'model,'msg> =
+    Recording.readAllLines path
+    |> List.choose Recording.decodeEvent
+    |> List.fold (fun a evt -> routeTerminalEvent evt a) app
+

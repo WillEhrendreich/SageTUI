@@ -120,6 +120,10 @@ module ArenaRender =
       match node.FirstChild with
       | -1 -> 0
       | wi -> measureWidth arena arena.Nodes.[wi].FirstChild
+    | 15uy -> // ResponsiveH — measure first child (smallest breakpoint)
+      match node.FirstChild with
+      | -1 -> 0
+      | wi -> measureWidth arena arena.Nodes.[wi].FirstChild
     | _ -> 0
 
   /// Measure intrinsic height of an arena node.
@@ -167,6 +171,10 @@ module ArenaRender =
     | 12uy -> // Gapped — passthrough
       measureHeight arena node.FirstChild
     | 13uy -> // Responsive — measure first child (smallest breakpoint)
+      match node.FirstChild with
+      | -1 -> 0
+      | wi -> measureHeight arena arena.Nodes.[wi].FirstChild
+    | 15uy -> // ResponsiveH — measure first child (smallest breakpoint)
       match node.FirstChild with
       | -1 -> 0
       | wi -> measureHeight arena arena.Nodes.[wi].FirstChild
@@ -513,6 +521,26 @@ module ArenaRender =
           | false -> ()
           wIdx <- wrapper.NextSibling
         // Fallback to first breakpoint if nothing matched
+        let target =
+          match selected with
+          | -1 ->
+            match node.FirstChild with
+            | -1 -> -1
+            | wi -> arena.Nodes.[wi].FirstChild
+          | idx -> idx
+        match target with
+        | -1 -> ()
+        | idx -> render arena idx area inheritedFg inheritedBg inheritedAttrs buf
+
+      | 15uy -> // ResponsiveH — pick last breakpoint where minHeight ≤ area.Height
+        let mutable selected = -1
+        let mutable wIdx = node.FirstChild
+        while wIdx >= 0 do
+          let wrapper = arena.Nodes.[wIdx]
+          match wrapper.Kind = 16uy && area.Height >= int wrapper.ConstraintVal with
+          | true  -> selected <- wrapper.FirstChild
+          | false -> ()
+          wIdx <- wrapper.NextSibling
         let target =
           match selected with
           | -1 ->
