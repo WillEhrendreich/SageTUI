@@ -253,6 +253,137 @@ let textInputClampTests = testList "TextInput.clamp" [
     m'.Cursor |> Expect.equal "cursor stays at 0" 0
   }
 ]
+// ── E2E mouse pipeline tests ─────────────────────────────────────────────────
+
+// A mouse-aware program: tracks click position (ClickSub), drag position (DragSub),
+// release position (MouseSub for Released phase), and click count.
+type MouseMsg =
+  | Clicked of int * int
+  | Dragged of int * int
+  | MouseReleased of int * int
+
+type MouseModel = {
+  ClickPos: (int * int) option
+  DragPos: (int * int) option
+  ReleasePos: (int * int) option
+  ClickCount: int
+}
+
+let mouseProgramInit () =
+  { ClickPos = None; DragPos = None; ReleasePos = None; ClickCount = 0 }, Cmd.none
+
+let mouseProgramUpdate msg model =
+  match msg with
+  | Clicked(x, y)       -> { model with ClickPos = Some(x, y); ClickCount = model.ClickCount + 1 }, Cmd.none
+  | Dragged(x, y)       -> { model with DragPos = Some(x, y) }, Cmd.none
+  | MouseReleased(x, y) -> { model with ReleasePos = Some(x, y) }, Cmd.none
+
+let mouseProgram : Program<MouseModel, MouseMsg> =
+  { Init = mouseProgramInit
+    Update = mouseProgramUpdate
+    View = fun _ -> El.text "mouse test"
+    Subscribe = fun _ ->
+      [ ClickSub  (fun (me, _key) -> Some (Clicked  (me.X, me.Y)))
+        DragSub   (fun me         -> Some (Dragged   (me.X, me.Y)))
+        MouseSub  (fun me -> match me.Phase with
+                             | MousePhase.Released -> Some (MouseReleased (me.X, me.Y))
+                             | _ -> None) ] }
+
+let mousePipelineTests = testList "E2E: mouse pipeline (ClickSub / DragSub / MouseSub)" [
+  test "clickAt fires ClickSub with correct coordinates" {
+    let app = TestHarness.init 80 24 mouseProgram
+    let app' = TestHarness.clickAt 10 5 app
+    app'.Model.ClickPos  |> Expect.equal "click pos (10,5)" (Some(10,5))
+    app'.Model.ClickCount |> Expect.equal "click count 1" 1
+  }
+
+  test "dragAt fires DragSub with correct coordinates" {
+    let app = TestHarness.init 80 24 mouseProgram
+    let app' = TestHarness.dragAt 15 8 LeftButton app
+    app'.Model.DragPos |> Expect.equal "drag pos (15,8)" (Some(15,8))
+  }
+
+  test "releaseAt fires MouseSub.Released with correct coordinates" {
+    let app = TestHarness.init 80 24 mouseProgram
+    let app' = TestHarness.releaseAt 12 6 app
+    app'.Model.ReleasePos |> Expect.equal "release pos (12,6)" (Some(12,6))
+  }
+
+  test "click does NOT fire DragSub" {
+    let app = TestHarness.init 80 24 mouseProgram
+    let app' = TestHarness.clickAt 10 5 app
+    app'.Model.DragPos |> Expect.isNone "no drag from click"
+  }
+
+  test "drag does NOT fire ClickSub" {
+    let app = TestHarness.init 80 24 mouseProgram
+    let app' = TestHarness.dragAt 10 5 LeftButton app
+    app'.Model.ClickPos |> Expect.isNone "no click from drag"
+    app'.Model.ClickCount |> Expect.equal "click count stays 0" 0
+  }
+
+  test "routeTerminalEvent Pressed routes to clickAt" {
+    let app = TestHarness.init 80 24 mouseProgram
+    let event = MouseInput { Button = LeftButton; X = 20; Y = 10; Modifiers = Modifiers.None; Phase = Pressed }
+    let app' = Testing.routeTerminalEvent event app
+    app'.Model.ClickPos |> Expect.equal "clicked at (20,10)" (Some(20,10))
+  }
+
+  test "routeTerminalEvent Motion routes to dragAt (DragSub fires)" {
+    let app = TestHarness.init 80 24 mouseProgram
+    let event = MouseInput { Button = LeftButton; X = 25; Y = 12; Modifiers = Modifiers.None; Phase = Motion }
+    let app' = Testing.routeTerminalEvent event app
+    app'.Model.DragPos |> Expect.equal "dragged to (25,12)" (Some(25,12))
+    app'.Model.ClickPos |> Expect.isNone "no click from motion event"
+  }
+
+  test "routeTerminalEvent Released routes to releaseAt (MouseSub.Released fires)" {
+    let app = TestHarness.init 80 24 mouseProgram
+    let event = MouseInput { Button = LeftButton; X = 30; Y = 15; Modifiers = Modifiers.None; Phase = MousePhase.Released }
+    let app' = Testing.routeTerminalEvent event app
+    app'.Model.ReleasePos |> Expect.equal "released at (30,15)" (Some(30,15))
+    app'.Model.DragPos |> Expect.isNone "no drag from release event"
+  }
+
+  test "Recording.encodeEvent / decodeEvent round-trips MouseInput Pressed" {
+    let event = MouseInput { Button = LeftButton; X = 10; Y = 5; Modifiers = Modifiers.None; Phase = Pressed }
+    let encoded = Recording.encodeEvent 0L event
+    let decoded = Recording.decodeEvent encoded
+    decoded |> Expect.equal "round-trips" (Some event)
+  }
+
+  test "Recording.encodeEvent / decodeEvent round-trips MouseInput Motion" {
+    let event = MouseInput { Button = LeftButton; X = 15; Y = 8; Modifiers = Modifiers.None; Phase = Motion }
+    let encoded = Recording.encodeEvent 0L event
+    let decoded = Recording.decodeEvent encoded
+    decoded |> Expect.equal "round-trips" (Some event)
+  }
+
+  test "Recording.encodeEvent / decodeEvent round-trips MouseInput Released" {
+    let event = MouseInput { Button = LeftButton; X = 12; Y = 6; Modifiers = Modifiers.None; Phase = MousePhase.Released }
+    let encoded = Recording.encodeEvent 0L event
+    let decoded = Recording.decodeEvent encoded
+    decoded |> Expect.equal "round-trips" (Some event)
+  }
+
+  test "full press-drag-release sequence all fire correct handlers" {
+    let app = TestHarness.init 80 24 mouseProgram
+    let press   = MouseInput { Button = LeftButton; X = 10; Y = 5; Modifiers = Modifiers.None; Phase = Pressed }
+    let motion1 = MouseInput { Button = LeftButton; X = 12; Y = 7; Modifiers = Modifiers.None; Phase = Motion }
+    let motion2 = MouseInput { Button = LeftButton; X = 14; Y = 9; Modifiers = Modifiers.None; Phase = Motion }
+    let release = MouseInput { Button = LeftButton; X = 14; Y = 9; Modifiers = Modifiers.None; Phase = MousePhase.Released }
+    let app' =
+      app
+      |> Testing.routeTerminalEvent press
+      |> Testing.routeTerminalEvent motion1
+      |> Testing.routeTerminalEvent motion2
+      |> Testing.routeTerminalEvent release
+    app'.Model.ClickPos   |> Expect.equal "pressed at (10,5)" (Some(10,5))
+    app'.Model.DragPos    |> Expect.equal "last drag at (14,9)" (Some(14,9))
+    app'.Model.ReleasePos |> Expect.equal "released at (14,9)" (Some(14,9))
+  }
+]
+
 [<Tests>]
 let allReplayAndShrinkTests = testList "Testing.replayAndShrink" [
   replaySessionTests
@@ -261,4 +392,5 @@ let allReplayAndShrinkTests = testList "Testing.replayAndShrink" [
   routeTerminalEventTests
   replayRecordingTests
   textInputClampTests
+  mousePipelineTests
 ]

@@ -72,6 +72,36 @@ module Recording =
 
   // ── TerminalEvent encoding ─────────────────────────────────────────────────
 
+  let private encodeButton (b: MouseButton) =
+    match b with
+    | LeftButton   -> "L"
+    | RightButton  -> "R"
+    | MiddleButton -> "M"
+    | ScrollUp     -> "SU"
+    | ScrollDown   -> "SD"
+
+  let private decodeButton (s: string) =
+    match s with
+    | "L"  -> Some LeftButton
+    | "R"  -> Some RightButton
+    | "M"  -> Some MiddleButton
+    | "SU" -> Some ScrollUp
+    | "SD" -> Some ScrollDown
+    | _    -> None
+
+  let private encodePhase (p: MousePhase) =
+    match p with
+    | Pressed  -> "P"
+    | Released -> "R"
+    | Motion   -> "M"
+
+  let private decodePhase (s: string) =
+    match s with
+    | "P" -> Some Pressed
+    | "R" -> Some Released
+    | "M" -> Some Motion
+    | _   -> None
+
   let encodeEvent (ms: int64) (event: TerminalEvent) : RecordLine =
     match event with
     | KeyPressed(key, mods) ->
@@ -80,7 +110,7 @@ module Recording =
       { T = "resize"; D = sprintf "%dx%d" w h; Ms = ms }
     | MouseInput me ->
       { T = "mouse"
-        D = sprintf "%A:%d:%d:%d" me.Button me.X me.Y (int me.Modifiers)
+        D = sprintf "%s:%d:%d:%d:%s" (encodeButton me.Button) me.X me.Y (int me.Modifiers) (encodePhase me.Phase)
         Ms = ms }
     | FocusGained -> { T = "focus"; D = "gained"; Ms = ms }
     | FocusLost   -> { T = "focus"; D = "lost";   Ms = ms }
@@ -92,7 +122,7 @@ module Recording =
       let parts = line.D.Split(',')
       match parts with
       | [| keyStr; modsStr |] ->
-        match decodeKey keyStr, Int32.TryParse modsStr with
+        match decodeKey keyStr, System.Int32.TryParse modsStr with
         | Some k, (true, m) -> Some (KeyPressed(k, enum<Modifiers> m))
         | _ -> None
       | _ -> None
@@ -100,8 +130,18 @@ module Recording =
       let parts = line.D.Split('x')
       match parts with
       | [| ws; hs |] ->
-        match Int32.TryParse ws, Int32.TryParse hs with
+        match System.Int32.TryParse ws, System.Int32.TryParse hs with
         | (true, w), (true, h) -> Some (Resized(w, h))
+        | _ -> None
+      | _ -> None
+    | "mouse" ->
+      let parts = line.D.Split(':')
+      match parts with
+      | [| btnStr; xStr; yStr; modsStr; phaseStr |] ->
+        match decodeButton btnStr, System.Int32.TryParse xStr, System.Int32.TryParse yStr,
+              System.Int32.TryParse modsStr, decodePhase phaseStr with
+        | Some btn, (true, x), (true, y), (true, m), Some phase ->
+          Some (MouseInput { Button = btn; X = x; Y = y; Modifiers = enum<Modifiers> m; Phase = phase })
         | _ -> None
       | _ -> None
     | "focus" ->

@@ -233,6 +233,35 @@ module TestHarness =
           | _ -> () ]
     applyMsgs app.VirtualTime app msgs
 
+  /// Simulate a mouse button release at (x, y). Routes to MouseSub handlers.
+  /// Note: ClickSub receives presses only; release events go to MouseSub.
+  let releaseAt (x: int) (y: int) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
+    let mouseEvent = { Button = LeftButton; X = x; Y = y; Modifiers = Modifiers.None; Phase = Released }
+    let msgs =
+      [ for sub in app.Program.Subscribe app.Model do
+          match sub with
+          | MouseSub handler ->
+            match handler mouseEvent with
+            | Some msg -> yield msg
+            | None -> ()
+          | _ -> () ]
+    applyMsgs app.VirtualTime app msgs
+
+  /// Simulate a mouse drag motion event at (x, y). Routes to DragSub handlers only.
+  /// Button-event tracking (?1002h) must be enabled in a real terminal for motion events
+  /// to be received; in the test harness this fires DragSub regardless.
+  let dragAt (x: int) (y: int) (button: MouseButton) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
+    let mouseEvent = { Button = button; X = x; Y = y; Modifiers = Modifiers.None; Phase = Motion }
+    let msgs =
+      [ for sub in app.Program.Subscribe app.Model do
+          match sub with
+          | DragSub handler ->
+            match handler mouseEvent with
+            | Some msg -> yield msg
+            | None -> ()
+          | _ -> () ]
+    applyMsgs app.VirtualTime app msgs
+
   /// Simulate a terminal resize. Routes through ResizeSub handlers and updates
   /// Width/Height so subsequent renders use the new dimensions.
   let resize (width: int) (height: int) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
@@ -575,9 +604,10 @@ module Testing =
     | KeyPressed(key, mods) -> TestHarness.pressKeyWith key mods app
     | Resized(w, h)         -> TestHarness.resize w h app
     | MouseInput me         ->
-      match me.Button with
-      | LeftButton -> TestHarness.clickAt me.X me.Y app
-      | _          -> app
+      match me.Phase with
+      | Pressed  -> TestHarness.clickAt me.X me.Y app
+      | Released -> TestHarness.releaseAt me.X me.Y app
+      | Motion   -> TestHarness.dragAt me.X me.Y me.Button app
     | FocusGained           -> app
     | FocusLost             -> app
     | Pasted _              -> app  // No PasteSub in TestHarness yet
