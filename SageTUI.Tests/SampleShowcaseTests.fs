@@ -68,4 +68,7 @@ let sampleSnapshotTests =
 
     snapshotTest "sample-system-monitor-overview"
       (renderProgram 100 28 SystemMonitor.program)
+
+    snapshotTest "sample-composable-counter-initial"
+      (renderProgram 80 24 ComposableCounter.program)
   ]

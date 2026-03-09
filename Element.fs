@@ -75,6 +75,16 @@ type Element =
   /// Composes with Responsive for 2D breakpoints.
   | ResponsiveH of (int * Element) list
 
+/// Column width distribution for El.grid.
+type GridColumns =
+  /// All columns share available width equally (equivalent to all Fill).
+  | EqualWidth
+  /// Each column gets a fixed pixel width. The last value repeats if the list is shorter than cols.
+  | FixedWidths of int list
+  /// Each column gets a proportional share of available width.
+  /// The last value repeats if the list is shorter than cols.
+  | WeightedWidths of int list
+
 /// Element constructors and combinators. All functions return Element values.
 module El =
   /// An empty element that renders nothing.
@@ -408,6 +418,56 @@ module El =
       | ResponsiveH breakpoints ->
         label "RespH" (ResponsiveH(breakpoints |> List.map (fun (minH, child) -> (minH, dbg (depth + 1) child))))
     dbg 0 elem
+
+  /// Lay children out in a grid of `cols` columns.
+  ///
+  /// `colWidths` controls how width is distributed across columns:
+  ///   - `EqualWidth` — all columns share available width equally
+  ///   - `FixedWidths [10; 20]` — first column is 10 wide, second 20; last value repeats
+  ///   - `WeightedWidths [1; 2; 3]` — proportional widths (1:2:3 ratio)
+  ///
+  /// If the child count is not a multiple of `cols`, the last row is padded with Empty.
+  let grid (cols: int) (colWidths: GridColumns) (children: Element list) : Element =
+    match cols <= 0 with
+    | true -> Empty
+    | false ->
+      let padded =
+        let rem = List.length children % cols
+        match rem with
+        | 0 -> children
+        | _ -> children @ List.replicate (cols - rem) Empty
+      let constraints =
+        match colWidths with
+        | EqualWidth -> List.replicate cols Fill
+        | FixedWidths [] -> List.replicate cols Fill
+        | FixedWidths widths ->
+          let lastW = List.last widths
+          [ for i in 0 .. cols - 1 ->
+              Fixed (List.tryItem i widths |> Option.defaultValue lastW) ]
+        | WeightedWidths [] -> List.replicate cols Fill
+        | WeightedWidths weights ->
+          let lastW = List.last weights
+          let totalW = List.sum weights
+          match totalW with
+          | 0 -> List.replicate cols Fill
+          | _ ->
+            [ for i in 0 .. cols - 1 ->
+                let w = List.tryItem i weights |> Option.defaultValue lastW
+                Ratio(w, totalW) ]
+      let rows =
+        padded
+        |> List.chunkBySize cols
+        |> List.map (fun rowItems ->
+          let cells =
+            rowItems |> List.mapi (fun i item ->
+              Constrained(List.item i constraints, item))
+          Row cells)
+      Column rows
+
+  /// Lay children out in a grid of `cols` equal-width columns.
+  /// Shorthand for `El.grid cols EqualWidth children`.
+  let gridEven (cols: int) (children: Element list) : Element =
+    grid cols EqualWidth children
 
 /// Computation expression builders for declarative, imperative-style layout construction.
 ///

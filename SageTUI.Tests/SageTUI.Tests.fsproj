@@ -36,6 +36,7 @@
     <ProjectReference Include="..\examples\Counter\Counter.fsproj" />
     <ProjectReference Include="..\samples\04-InteractiveForm\InteractiveForm.fsproj" />
     <ProjectReference Include="..\samples\09-SystemMonitor\SystemMonitor.fsproj" />
+    <ProjectReference Include="..\samples\10-ComposableCounter\ComposableCounter.fsproj" />
   </ItemGroup>
 
   <ItemGroup>

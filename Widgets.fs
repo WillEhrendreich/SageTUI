@@ -113,6 +113,16 @@ module Theme =
       content
     ] |> El.bordered theme.Border |> El.padHV 1 0
 
+  /// Wrap a program's view so every rendered element is styled with the theme.
+  /// The theme foreground and background are applied at the root of the element tree.
+  let forProgram (theme: Theme) (program: Program<'model, 'msg>) : Program<'model, 'msg> =
+    { program with View = fun model -> apply theme (program.View model) }
+
+  /// Replace a program's view with a theme-aware view function.
+  /// The new view receives the theme as its first argument, enabling styled elements.
+  let withThemedView (theme: Theme) (view: Theme -> 'model -> Element) (program: Program<'model, 'msg>) : Program<'model, 'msg> =
+    { program with View = view theme }
+
 /// Single-line text input widget with cursor movement, word navigation, and selection.
 type TextInputModel = {
   /// The current text content.

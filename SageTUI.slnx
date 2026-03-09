@@ -15,6 +15,9 @@
   <Folder Name="/samples/09-SystemMonitor/">
     <Project Path="samples/09-SystemMonitor/SystemMonitor.fsproj" />
   </Folder>
+  <Folder Name="/samples/10-ComposableCounter/">
+    <Project Path="samples/10-ComposableCounter/ComposableCounter.fsproj" />
+  </Folder>
   <Project Path="SageTUI.Benchmarks/SageTUI.Benchmarks.fsproj" />
   <Project Path="SageTUI.Html/SageTUI.Html.fsproj" />
   <Project Path="SageTUI.Library.fsproj" />

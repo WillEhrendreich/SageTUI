@@ -4152,5 +4152,161 @@ let allTests = testList "All" [
         Render.render { X = 0; Y = 0; Width = 60; Height = 20 } Style.empty buf debug
     ]
   ]
+  testList "Sprint 35" [
+    testList "El.grid" [
+      testCase "cols=0 returns Empty" <| fun () ->
+        match El.grid 0 EqualWidth [El.text "x"] with
+        | Empty -> ()
+        | other -> failwithf "cols=0 should return Empty, got %A" other
+
+      testCase "empty children returns Column []" <| fun () ->
+        match El.grid 2 EqualWidth [] with
+        | Column [] -> ()
+        | other -> failwithf "no children should return Column [], got %A" other
+
+      testCase "even count 2-column grid produces Column with 1 Row" <| fun () ->
+        let a = El.text "A"
+        let b = El.text "B"
+        match El.grid 2 EqualWidth [a; b] with
+        | Column [Row [Constrained(Fill, Text("A",_)); Constrained(Fill, Text("B",_))]] -> ()
+        | other -> failwithf "unexpected: %A" other
+
+      testCase "odd count pads last row with Empty" <| fun () ->
+        let items = [El.text "A"; El.text "B"; El.text "C"]
+        match El.grid 2 EqualWidth items with
+        | Column [Row _; Row [Constrained(Fill, Text("C",_)); Constrained(Fill, Empty)]] -> ()
+        | other -> failwithf "expected last row padded, got %A" other
+
+      testCase "3-column even grid has 2 rows" <| fun () ->
+        let items = List.init 6 (fun i -> El.text (string i))
+        match El.grid 3 EqualWidth items with
+        | Column rows -> rows |> Expect.hasLength "2 rows" 2
+        | other -> failwithf "expected Column, got %A" other
+
+      testCase "FixedWidths applies Fixed constraints" <| fun () ->
+        let a = El.text "A"
+        let b = El.text "B"
+        match El.grid 2 (FixedWidths [10; 20]) [a; b] with
+        | Column [Row [Constrained(Fixed 10, _); Constrained(Fixed 20, _)]] -> ()
+        | other -> failwithf "unexpected: %A" other
+
+      testCase "FixedWidths repeats last value when list too short" <| fun () ->
+        let items = List.init 4 (fun i -> El.text (string i))
+        match El.grid 4 (FixedWidths [5; 10]) items with
+        | Column [Row [Constrained(Fixed 5,_); Constrained(Fixed 10,_); Constrained(Fixed 10,_); Constrained(Fixed 10,_)]] -> ()
+        | other -> failwithf "expected last Fixed repeated, got %A" other
+
+      testCase "WeightedWidths applies Ratio constraints" <| fun () ->
+        let a = El.text "A"
+        let b = El.text "B"
+        let c = El.text "C"
+        match El.grid 3 (WeightedWidths [1; 2; 3]) [a; b; c] with
+        | Column [Row [Constrained(Ratio(1,6),_); Constrained(Ratio(2,6),_); Constrained(Ratio(3,6),_)]] -> ()
+        | other -> failwithf "unexpected: %A" other
+
+      testCase "WeightedWidths empty list falls back to EqualWidth" <| fun () ->
+        let items = [El.text "A"; El.text "B"]
+        match El.grid 2 (WeightedWidths []) items with
+        | Column [Row [Constrained(Fill,_); Constrained(Fill,_)]] -> ()
+        | other -> failwithf "expected Fill fallback, got %A" other
+
+      testCase "gridEven is shorthand for EqualWidth" <| fun () ->
+        let items = [El.text "A"; El.text "B"]
+        match El.gridEven 2 items, El.grid 2 EqualWidth items with
+        | Column [Row [Constrained(Fill,_); Constrained(Fill,_)]],
+          Column [Row [Constrained(Fill,_); Constrained(Fill,_)]] -> ()
+        | other -> failwithf "expected both to produce equal-width rows, got %A" (fst other)
+
+      testCase "grid renders without crash (EqualWidth, 80x10)" <| fun () ->
+        let items = List.init 6 (fun i -> El.text (sprintf "Cell%d" i))
+        let g = El.grid 3 EqualWidth items
+        let buf = Buffer.create 80 10
+        Render.render { X=0; Y=0; Width=80; Height=10 } Style.empty buf g
+        buf.Width |> Expect.equal "buffer width" 80
+
+      testCase "grid renders without crash (FixedWidths, 80x10)" <| fun () ->
+        let items = List.init 4 (fun i -> El.text (sprintf "C%d" i))
+        let g = El.grid 2 (FixedWidths [20; 30]) items
+        let buf = Buffer.create 80 10
+        Render.render { X=0; Y=0; Width=80; Height=10 } Style.empty buf g
+        buf.Width |> Expect.equal "buffer width" 80
+
+      testCase "grid renders without crash (WeightedWidths, 80x10)" <| fun () ->
+        let items = List.init 6 (fun i -> El.text (sprintf "W%d" i))
+        let g = El.grid 3 (WeightedWidths [1; 2; 3]) items
+        let buf = Buffer.create 80 10
+        Render.render { X=0; Y=0; Width=80; Height=10 } Style.empty buf g
+        buf.Width |> Expect.equal "buffer width" 80
+
+      testCase "single-column grid wraps each item in Row" <| fun () ->
+        let items = [El.text "A"; El.text "B"; El.text "C"]
+        match El.grid 1 EqualWidth items with
+        | Column rows ->
+          rows |> Expect.hasLength "3 rows" 3
+          rows |> List.forall (function Row [Constrained(Fill,_)] -> true | _ -> false)
+          |> Expect.isTrue "each row has 1 Fill-constrained child"
+        | other -> failwithf "expected Column, got %A" other
+    ]
+
+    testList "Theme.forProgram" [
+      testCase "forProgram wraps view with theme fg/bg" <| fun () ->
+        let prog : Program<int, unit> = {
+          Init = fun () -> 0, Cmd.none
+          Update = fun () m -> m, Cmd.none
+          View = fun _ -> El.text "hello"
+          Subscribe = fun _ -> []
+        }
+        let themed = Theme.forProgram Theme.dark prog
+        match themed.View 0 with
+        | Styled({ Fg = Some fg; Bg = Some bg }, Text("hello", _)) ->
+          fg |> Expect.equal "fg matches theme" Theme.dark.TextFg
+          bg |> Expect.equal "bg matches theme" Theme.dark.Background
+        | Styled(_, Styled(_, Text("hello",_))) ->
+          // Theme.apply wraps with fg then bg = two Styled nodes (also acceptable)
+          ()
+        | other -> failwithf "expected Styled wrapping, got %A" other
+
+      testCase "forProgram preserves Init and Update" <| fun () ->
+        let prog : Program<int, int> = {
+          Init = fun () -> 42, Cmd.none
+          Update = fun msg m -> m + msg, Cmd.none
+          View = fun m -> El.text (string m)
+          Subscribe = fun _ -> []
+        }
+        let themed = Theme.forProgram Theme.nord prog
+        let initModel, _ = themed.Init()
+        initModel |> Expect.equal "init model preserved" 42
+        let updated, _ = themed.Update 10 initModel
+        updated |> Expect.equal "update preserved" 52
+
+      testCase "withThemedView provides theme to view function" <| fun () ->
+        let prog : Program<int, unit> = {
+          Init = fun () -> 0, Cmd.none
+          Update = fun () m -> m, Cmd.none
+          View = fun _ -> El.text "original"
+          Subscribe = fun _ -> []
+        }
+        let mutable capturedTheme : Theme option = None
+        let themedView (t: Theme) (m: int) =
+          capturedTheme <- Some t
+          El.text (sprintf "themed:%d" m)
+        let prog2 = Theme.withThemedView Theme.dracula themedView prog
+        let elem = prog2.View 7
+        capturedTheme |> Expect.equal "theme passed to view" (Some Theme.dracula)
+        match elem with
+        | Text(s, _) -> s |> Expect.equal "text rendered" "themed:7"
+        | other -> failwithf "expected Text, got %A" other
+
+      testCase "withThemedView preserves Subscribe" <| fun () ->
+        let prog : Program<int, unit> = {
+          Init = fun () -> 0, Cmd.none
+          Update = fun () m -> m, Cmd.none
+          View = fun _ -> El.text "x"
+          Subscribe = fun m -> [ Keys.bind [Key.Escape, ()] ]
+        }
+        let prog2 = Theme.withThemedView Theme.catppuccin (fun _ m -> El.text (string m)) prog
+        prog2.Subscribe 0 |> Expect.hasLength "subscribe preserved" 1
+    ]
+  ]
 ]
 
