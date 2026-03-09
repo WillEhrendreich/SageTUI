@@ -28,13 +28,20 @@ type Transition =
   | Fade of duration: int<ms>
   | ColorMorph of duration: int<ms>
   | Wipe of direction: Direction * duration: int<ms>
-  /// Not yet implemented — has no visual effect. Use <c>Fade</c>, <c>ColorMorph</c>, <c>Wipe</c>, or <c>Dissolve</c> instead.
+  /// Slides new content in from the given direction while the snapshot slides out.
   | SlideIn of direction: Direction * duration: int<ms>
   | Dissolve of duration: int<ms>
-  /// Not yet implemented — has no visual effect. Use <c>Fade</c>, <c>ColorMorph</c>, <c>Wipe</c>, or <c>Dissolve</c> instead.
+  /// Reveals new content expanding outward from the center using Chebyshev distance.
+  /// Even-dimensioned areas: snapshot shown at t=0 (no cell at Chebyshev distance 0).
+  /// Odd-dimensioned areas: single center cell revealed at t=0.
   | Grow of duration: int<ms>
-  /// Not yet implemented — has no visual effect. To achieve sequential effects today,
-  /// use multiple <c>El.keyed</c> elements with staggered enter/exit transitions instead.
+  /// Plays sub-transitions sequentially on the same keyed element.
+  /// <remarks>
+  /// Sub-transitions share the original snapshot captured at the start of the Sequence —
+  /// each sub-transition blends from that same snapshot to the current frame content.
+  /// For pixel-perfect independent chaining, use multiple <c>El.keyed</c> elements
+  /// with staggered enter/exit transitions instead.
+  /// </remarks>
   | Sequence of Transition list
   /// Not yet implemented — has no visual effect.
   | Custom of (float -> int -> int -> int)

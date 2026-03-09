@@ -2920,20 +2920,6 @@ let reconcileTests = testList "Reconcile" [
     exiting.Length |> Expect.equal "0 exiting" 0
 ]
 
-let durationTests = testList "TransitionDuration" [
-  testCase "Fade duration" <| fun () ->
-    TransitionDuration.get (Fade 200<ms>) |> Expect.equal "200" 200
-  testCase "ColorMorph duration" <| fun () ->
-    TransitionDuration.get (ColorMorph 150<ms>) |> Expect.equal "150" 150
-  testCase "Wipe duration" <| fun () ->
-    TransitionDuration.get (Wipe(Direction.Right, 300<ms>)) |> Expect.equal "300" 300
-  testCase "Sequence sums durations" <| fun () ->
-    TransitionDuration.get (Sequence [Fade 100<ms>; ColorMorph 200<ms>])
-    |> Expect.equal "300" 300
-  testCase "Custom defaults to 200" <| fun () ->
-    TransitionDuration.get (Custom (fun _ a _ -> a))
-    |> Expect.equal "200" 200
-]
 
 let activeTransitionTests = testList "ActiveTransition" [
   testCase "progress at start = 0" <| fun () ->
@@ -3196,6 +3182,10 @@ let transitionDurationTests= testList "TransitionDuration.get" [
     TransitionDuration.get
       (Sequence [ Fade 100<ms>; Sequence [ Wipe(Direction.Down, 200<ms>); Dissolve 300<ms> ] ])
     |> Expect.equal "600ms" 600
+
+  testCase "Custom defaults to 200" <| fun () ->
+    TransitionDuration.get (Custom (fun _ a _ -> a))
+    |> Expect.equal "200" 200
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3632,7 +3622,6 @@ let allTests = testList "All" [
     wipeTests
     dissolveTests
     reconcileTests
-    durationTests
     activeTransitionTests
     slideInTests
     growTests
