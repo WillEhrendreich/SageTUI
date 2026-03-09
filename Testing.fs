@@ -215,7 +215,7 @@ module TestHarness =
   let clickAt (x: int) (y: int) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
     let arena, _ = renderArena app
     let hitKey = ArenaRender.hitTest arena x y
-    let mouseEvent = { Button = LeftButton; X = x; Y = y; Modifiers = Modifiers.None }
+    let mouseEvent = { Button = LeftButton; X = x; Y = y; Modifiers = Modifiers.None; Phase = Pressed }
     let msgs =
       [ for sub in app.Program.Subscribe app.Model do
           match sub with

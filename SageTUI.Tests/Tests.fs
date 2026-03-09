@@ -1789,7 +1789,7 @@ let inputTypeTests = testList "Input types" [
     events |> List.length |> Expect.equal "5 events" 5
 
   testCase "MouseEvent record" <| fun () ->
-    let me = { Button = LeftButton; X = 10; Y = 5; Modifiers = Modifiers.None }
+    let me = { Button = LeftButton; X = 10; Y = 5; Modifiers = Modifiers.None; Phase = Pressed }
     me.X |> Expect.equal "x" 10
     me.Y |> Expect.equal "y" 5
 ]
@@ -1973,7 +1973,7 @@ let terminalEventTests = testList "TerminalEvent" [
     | _ -> failwith "expected Pasted"
 
   testCase "MouseInput destructure" <| fun () ->
-    let me = { Button = ScrollUp; X = 3; Y = 7; Modifiers = Modifiers.Alt }
+    let me = { Button = ScrollUp; X = 3; Y = 7; Modifiers = Modifiers.Alt; Phase = Pressed }
     match MouseInput me with
     | MouseInput m ->
       m.Button |> Expect.equal "button" ScrollUp

@@ -238,6 +238,9 @@ module Backend =
   /// emits a bare Escape key. Otherwise accumulates until isCompleteEscSeq returns true.
   let private startInputReader (eventQueue: Collections.Concurrent.ConcurrentQueue<TerminalEvent>) =
     let charQueue = Collections.Concurrent.ConcurrentQueue<int>()
+    // Semaphore signals PollEvent the instant an event is enqueued,
+    // eliminating the fixed-sleep worst-case latency.
+    let eventSignal = new Threading.SemaphoreSlim(0)
 
     // Raw reader: purely drains Console.In into charQueue. Daemon thread; never stops.
     let rawThread = Threading.Thread(fun () ->
@@ -266,6 +269,10 @@ module Backend =
       | x when x = Int32.MinValue -> -1  // timeout
       | x -> x
 
+    let enqueueEvent (ev: TerminalEvent) =
+      eventQueue.Enqueue(ev)
+      eventSignal.Release() |> ignore
+
     // Parse thread: accumulates chars into escape sequences, emits TerminalEvents.
     let parseThread = Threading.Thread(fun () ->
       let buf = Text.StringBuilder()
@@ -276,7 +283,7 @@ module Backend =
         buf.Clear() |> ignore
         AnsiParser.parseEscape seq
         |> Option.defaultValue (KeyPressed(Key.Escape, Modifiers.None))
-        |> eventQueue.Enqueue
+        |> enqueueEvent
 
       while true do
         let raw = tryReadChar -1  // block until char arrives
@@ -290,7 +297,7 @@ module Backend =
             match next with
             | -1 ->
               // Timeout: bare Escape key
-              eventQueue.Enqueue(KeyPressed(Key.Escape, Modifiers.None))
+              enqueueEvent (KeyPressed(Key.Escape, Modifiers.None))
               seqDone <- true
             | c ->
               buf.Append(char c) |> ignore
@@ -303,7 +310,7 @@ module Backend =
                 // Guard against malformed/overlong sequences
                 match s.Length > 64 with
                 | true ->
-                  eventQueue.Enqueue(KeyPressed(Key.Escape, Modifiers.None))
+                  enqueueEvent (KeyPressed(Key.Escape, Modifiers.None))
                   seqDone <- true
                 | false -> ()
         | c ->
@@ -319,15 +326,17 @@ module Backend =
             | c when Char.IsHighSurrogate(c) || Char.IsLowSurrogate(c) ->
               KeyPressed(Key.Char ' ', Modifiers.None)  // skip surrogates; use space as sentinel
             | c -> KeyPressed(Key.Char c, Modifiers.None)
-          eventQueue.Enqueue(event))
+          enqueueEvent event)
     parseThread.IsBackground <- true
     parseThread.Name <- "SageTUI.InputParse"
     parseThread.Start()
+    eventSignal
 
   let create (profile: TerminalProfile) : TerminalBackend =
     let mutable savedModes = Unchecked.defaultof<RawMode.SavedModes>
     let mutable inputStarted = false
     let eventQueue = Collections.Concurrent.ConcurrentQueue<TerminalEvent>()
+    let mutable eventSignal : Threading.SemaphoreSlim = null
     let mutable lastW, lastH = profile.Size
     let currentSize () =
       match tryGetConsoleSize () with
@@ -352,29 +361,42 @@ module Backend =
           match eventQueue.TryDequeue(&evt) with
           | true -> Some evt
           | false ->
-            match timeoutMs > 0 with
+            match timeoutMs > 0 && eventSignal <> null with
             | true ->
-              Threading.Thread.Sleep(timeoutMs)
+              // Wait on the semaphore: returns immediately when parse thread enqueues an event,
+              // or after timeoutMs if nothing arrives — no more fixed-sleep worst-case latency.
+              eventSignal.Wait(timeoutMs) |> ignore
               match checkResize () with
               | Some r -> Some r
               | None ->
                 match eventQueue.TryDequeue(&evt) with
                 | true -> Some evt
                 | false -> None
-            | false -> None
+            | false ->
+              match timeoutMs > 0 with
+              | true ->
+                Threading.Thread.Sleep(timeoutMs)
+                match checkResize () with
+                | Some r -> Some r
+                | None ->
+                  match eventQueue.TryDequeue(&evt) with
+                  | true -> Some evt
+                  | false -> None
+              | false -> None
       EnterRawMode = fun () ->
         savedModes <- RawMode.enter profile.Platform
         match inputStarted with
         | false ->
-          startInputReader eventQueue
+          eventSignal <- startInputReader eventQueue
           inputStarted <- true
         | true -> ()
-        // Enable SGR extended mouse: X11 mouse (1000) + button-event tracking (1002) + SGR mode (1006)
-        Console.Write("\x1b[?1000h\x1b[?1002h\x1b[?1006h")
+        // Enable SGR mouse mode: normal button tracking (?1000h) + SGR extended coords (?1006h)
+        // ?1002h (button-event motion) is intentionally omitted until MousePhase.Motion is
+        // fully representable and tested. Re-enable with ?1002h when motion tracking is needed.
+        Console.Write("\x1b[?1000h\x1b[?1006h")
         Console.Out.Flush()
       LeaveRawMode = fun () ->
-        // Disable mouse modes in reverse order
-        Console.Write("\x1b[?1006l\x1b[?1002l\x1b[?1000l")
+        Console.Write("\x1b[?1006l\x1b[?1000l")
         Console.Out.Flush()
         RawMode.leave savedModes
       Profile = profile }

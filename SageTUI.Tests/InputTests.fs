@@ -6,58 +6,95 @@ open FsCheck
 open SageTUI
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AnsiParser.parseSgrMouse
+// AnsiParser.parseSgrMouse — press, release, motion, modifiers, phase
 // ─────────────────────────────────────────────────────────────────────────────
 
 let parseSgrMouseTests = testList "AnsiParser.parseSgrMouse" [
 
   testCase "left button press" <| fun () ->
     AnsiParser.parseSgrMouse "<0;10;5M"
-    |> Expect.equal "left press" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.None })
+    |> Expect.equal "left press" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Pressed })
 
-  testCase "left button release" <| fun () ->
+  testCase "left button release has Released phase" <| fun () ->
     AnsiParser.parseSgrMouse "<0;10;5m"
-    |> Expect.equal "left release" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.None })
+    |> Expect.equal "left release" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Released })
+
+  testCase "press and release are distinguishable" <| fun () ->
+    let press   = AnsiParser.parseSgrMouse "<0;5;5M" |> Option.map (fun e -> e.Phase)
+    let release = AnsiParser.parseSgrMouse "<0;5;5m" |> Option.map (fun e -> e.Phase)
+    press   |> Expect.equal "press phase"   (Some Pressed)
+    release |> Expect.equal "release phase" (Some Released)
+
+  testCase "motion event (btn=32) has Motion phase with LeftButton" <| fun () ->
+    // btn=32 = bit 5 set (motion flag); button bits (0-1) = 0 → LeftButton held
+    AnsiParser.parseSgrMouse "<32;10;5M"
+    |> Expect.equal "left drag"
+         (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Motion })
+
+  testCase "motion event (btn=33) has Motion phase with MiddleButton" <| fun () ->
+    AnsiParser.parseSgrMouse "<33;10;5M"
+    |> Expect.equal "middle drag"
+         (Some { Button = MiddleButton; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Motion })
+
+  testCase "motion event (btn=34) has Motion phase with RightButton" <| fun () ->
+    AnsiParser.parseSgrMouse "<34;10;5M"
+    |> Expect.equal "right drag"
+         (Some { Button = RightButton; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Motion })
 
   testCase "middle button" <| fun () ->
     AnsiParser.parseSgrMouse "<1;10;5M"
-    |> Expect.equal "middle" (Some { Button = MiddleButton; X = 9; Y = 4; Modifiers = Modifiers.None })
+    |> Expect.equal "middle" (Some { Button = MiddleButton; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Pressed })
 
   testCase "right button" <| fun () ->
     AnsiParser.parseSgrMouse "<2;10;5M"
-    |> Expect.equal "right" (Some { Button = RightButton; X = 9; Y = 4; Modifiers = Modifiers.None })
+    |> Expect.equal "right" (Some { Button = RightButton; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Pressed })
 
   testCase "scroll up (btn=64)" <| fun () ->
     AnsiParser.parseSgrMouse "<64;10;5M"
-    |> Expect.equal "scroll up" (Some { Button = ScrollUp; X = 9; Y = 4; Modifiers = Modifiers.None })
+    |> Expect.equal "scroll up" (Some { Button = ScrollUp; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Pressed })
 
   testCase "scroll down (btn=65)" <| fun () ->
     AnsiParser.parseSgrMouse "<65;10;5M"
-    |> Expect.equal "scroll down" (Some { Button = ScrollDown; X = 9; Y = 4; Modifiers = Modifiers.None })
+    |> Expect.equal "scroll down" (Some { Button = ScrollDown; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Pressed })
 
   testCase "shift modifier (btn=4)" <| fun () ->
     AnsiParser.parseSgrMouse "<4;10;5M"
-    |> Expect.equal "shift+left" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.Shift })
+    |> Expect.equal "shift+left" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.Shift; Phase = Pressed })
 
   testCase "alt modifier (btn=8)" <| fun () ->
     AnsiParser.parseSgrMouse "<8;10;5M"
-    |> Expect.equal "alt+left" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.Alt })
+    |> Expect.equal "alt+left" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.Alt; Phase = Pressed })
 
   testCase "ctrl modifier (btn=16)" <| fun () ->
     AnsiParser.parseSgrMouse "<16;10;5M"
-    |> Expect.equal "ctrl+left" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.Ctrl })
+    |> Expect.equal "ctrl+left" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.Ctrl; Phase = Pressed })
 
   testCase "shift+ctrl (btn=20)" <| fun () ->
     AnsiParser.parseSgrMouse "<20;10;5M"
-    |> Expect.equal "shift+ctrl+left" (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.Shift ||| Modifiers.Ctrl })
+    |> Expect.equal "shift+ctrl+left"
+         (Some { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.Shift ||| Modifiers.Ctrl; Phase = Pressed })
+
+  testCase "scroll up + shift (btn=68)" <| fun () ->
+    // 64 + 4 = 68: scroll flag + shift
+    AnsiParser.parseSgrMouse "<68;5;5M"
+    |> Option.map (fun e -> e.Button, e.Modifiers)
+    |> Expect.equal "scroll+shift" (Some (ScrollUp, Modifiers.Shift))
+
+  testCase "scroll down + ctrl (btn=81)" <| fun () ->
+    // 64 + 16 + 1 = 81: scroll flag + ctrl + direction-bit
+    AnsiParser.parseSgrMouse "<81;5;5M"
+    |> Option.map (fun e -> e.Button, e.Modifiers)
+    |> Expect.equal "scroll+ctrl" (Some (ScrollDown, Modifiers.Ctrl))
 
   testCase "minimum position (1,1) → (0,0)" <| fun () ->
     AnsiParser.parseSgrMouse "<0;1;1M"
-    |> Expect.equal "min pos" (Some { Button = LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None })
+    |> Option.map (fun e -> e.X, e.Y)
+    |> Expect.equal "min pos" (Some (0, 0))
 
   testCase "large coordinates" <| fun () ->
     AnsiParser.parseSgrMouse "<0;220;50M"
-    |> Expect.equal "large coords" (Some { Button = LeftButton; X = 219; Y = 49; Modifiers = Modifiers.None })
+    |> Option.map (fun e -> e.X, e.Y)
+    |> Expect.equal "large coords" (Some (219, 49))
 
   testCase "missing '<' returns None" <| fun () ->
     AnsiParser.parseSgrMouse "0;10;5M"
@@ -83,14 +120,30 @@ let parseSgrMouseTests = testList "AnsiParser.parseSgrMouse" [
     |> Option.map (fun e -> e.X, e.Y)
     |> Expect.equal "0-indexed" (Some (x1 - 1, y1 - 1))
 
-  testProperty "scroll wheel: btn&64 selects scroll, btn&1 picks up/down" <| fun (isDown: bool) (x: PositiveInt) (y: PositiveInt) ->
-    let btn = if isDown then 65 else 64
-    let x1 = (x.Get % 200) + 1
-    let y1 = (y.Get % 50) + 1
-    let expected = if isDown then ScrollDown else ScrollUp
-    AnsiParser.parseSgrMouse (sprintf "<%d;%d;%dM" btn x1 y1)
-    |> Option.map (fun e -> e.Button)
-    |> Expect.equal "scroll direction" (Some expected)
+  testProperty "scroll wheel: btn&64 selects scroll, btn&1 picks direction, modifiers independent" <|
+    fun (isDown: bool) (shift: bool) (ctrl: bool) (x: PositiveInt) (y: PositiveInt) ->
+      let dirBit = if isDown then 1 else 0
+      let modBits = (if shift then 4 else 0) ||| (if ctrl then 16 else 0)
+      let btn = 64 + dirBit + modBits
+      let x1 = (x.Get % 200) + 1
+      let y1 = (y.Get % 50) + 1
+      let expectedBtn = if isDown then ScrollDown else ScrollUp
+      let expectedMods =
+        (if shift then Modifiers.Shift else Modifiers.None) |||
+        (if ctrl  then Modifiers.Ctrl  else Modifiers.None)
+      match AnsiParser.parseSgrMouse (sprintf "<%d;%d;%dM" btn x1 y1) with
+      | None -> false  // parse failure = test failure
+      | Some e -> e.Button = expectedBtn && e.Modifiers = expectedMods
+
+  testProperty "motion bit (32) sets Phase=Motion, doesn't change button identity" <|
+    fun (btnBase: int) (x: PositiveInt) (y: PositiveInt) ->
+      // Force 0..2 using positive modulo (F# % can return negative for negative inputs)
+      let b = ((btnBase % 3) + 3) % 3
+      let plain  = sprintf "<%d;%d;%dM" b        ((x.Get % 200) + 1) ((y.Get % 50) + 1)
+      let motion = sprintf "<%d;%d;%dM" (b + 32) ((x.Get % 200) + 1) ((y.Get % 50) + 1)
+      match AnsiParser.parseSgrMouse plain, AnsiParser.parseSgrMouse motion with
+      | Some p, Some m -> p.Button = m.Button && p.Phase = Pressed && m.Phase = Motion
+      | _ -> false
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -128,7 +181,7 @@ let isCompleteEscSeqTests = testList "AnsiParser.isCompleteEscSeq" [
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AnsiParser.parseEscape
+// AnsiParser.parseEscape — including Alt+key and via-defaultValue path
 // ─────────────────────────────────────────────────────────────────────────────
 
 let parseEscapeTests = testList "AnsiParser.parseEscape" [
@@ -164,17 +217,55 @@ let parseEscapeTests = testList "AnsiParser.parseEscape" [
     AnsiParser.parseEscape "[17~" |> Expect.equal "F6"  (Some (KeyPressed(Key.F 6,  Modifiers.None)))
     AnsiParser.parseEscape "[24~" |> Expect.equal "F12" (Some (KeyPressed(Key.F 12, Modifiers.None)))
 
-  testCase "SGR mouse press in CSI body" <| fun () ->
-    AnsiParser.parseEscape "[<0;10;5M"
-    |> Expect.equal "mouse press" (Some (MouseInput { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.None }))
+  // ── Alt+key path: the P0 that was broken (ESC+'a' → bare Escape) ──────────
 
-  testCase "SGR mouse release in CSI body" <| fun () ->
+  testCase "Alt+a (single char after ESC) produces Alt modifier" <| fun () ->
+    AnsiParser.parseEscape "a"
+    |> Expect.equal "alt+a" (Some (KeyPressed(Key.Char 'a', Modifiers.Alt)))
+
+  testCase "Alt+b produces Alt modifier" <| fun () ->
+    AnsiParser.parseEscape "b"
+    |> Expect.equal "alt+b" (Some (KeyPressed(Key.Char 'b', Modifiers.Alt)))
+
+  testCase "Alt+f produces Alt modifier (readline forward-word)" <| fun () ->
+    AnsiParser.parseEscape "f"
+    |> Expect.equal "alt+f" (Some (KeyPressed(Key.Char 'f', Modifiers.Alt)))
+
+  testCase "Alt+key via defaultValue does NOT produce bare Escape" <| fun () ->
+    // This is the exact emitEscape→parseEscape→defaultValue path that was broken.
+    // parseEscape "a" must return Some, so defaultValue never fires.
+    let result =
+      AnsiParser.parseEscape "a"
+      |> Option.defaultValue (KeyPressed(Key.Escape, Modifiers.None))
+    result |> Expect.equal "no bare escape" (KeyPressed(Key.Char 'a', Modifiers.Alt))
+
+  testProperty "all printable ASCII chars produce Alt+char when single" <| fun (c: char) ->
+    let c = char ((int c % 94) + 33)  // printable ASCII 33-126
+    match AnsiParser.parseEscape (string c) with
+    | Some (KeyPressed(Key.Char ch, Modifiers.Alt)) -> ch = c
+    | _ -> false
+
+  // ── SGR mouse ─────────────────────────────────────────────────────────────
+
+  testCase "SGR mouse press (M) in CSI body — Phase=Pressed" <| fun () ->
+    AnsiParser.parseEscape "[<0;10;5M"
+    |> Expect.equal "mouse press"
+         (Some (MouseInput { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Pressed }))
+
+  testCase "SGR mouse release (m) in CSI body — Phase=Released" <| fun () ->
     AnsiParser.parseEscape "[<0;10;5m"
-    |> Expect.equal "mouse release" (Some (MouseInput { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.None }))
+    |> Expect.equal "mouse release"
+         (Some (MouseInput { Button = LeftButton; X = 9; Y = 4; Modifiers = Modifiers.None; Phase = Released }))
 
   testCase "SGR scroll up via parseEscape" <| fun () ->
     AnsiParser.parseEscape "[<64;1;1M"
-    |> Expect.equal "scroll up" (Some (MouseInput { Button = ScrollUp; X = 0; Y = 0; Modifiers = Modifiers.None }))
+    |> Option.map (function MouseInput e -> e.Button | _ -> ScrollDown)
+    |> Expect.equal "scroll up" (Some ScrollUp)
+
+  testCase "SGR drag (btn=32) via parseEscape — Phase=Motion" <| fun () ->
+    AnsiParser.parseEscape "[<32;5;5M"
+    |> Option.map (function MouseInput e -> e.Phase | _ -> Pressed)
+    |> Expect.equal "drag phase" (Some Motion)
 
   testCase "unknown sequence returns None" <| fun () ->
     AnsiParser.parseEscape "[Z" |> Expect.isNone "unknown [Z"
@@ -190,7 +281,7 @@ let parseEscapeTests = testList "AnsiParser.parseEscape" [
 let mouseDispatchTests = testList "Mouse dispatch" [
 
   testCase "MouseSub receives MouseInput from PollEvent" <| fun () ->
-    let mouseEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None }
+    let mouseEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Pressed }
     let events = [ MouseInput mouseEvent; KeyPressed(Key.Escape, Modifiers.None) ]
     let backend, _ = TestBackend.create 80 24 events
     let mutable received : MouseEvent list = []
@@ -211,7 +302,7 @@ let mouseDispatchTests = testList "Mouse dispatch" [
     |> Expect.equal "received events" [ mouseEvent ]
 
   testCase "ClickSub receives MouseInput with hit key from PollEvent" <| fun () ->
-    let mouseEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None }
+    let mouseEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Pressed }
     let events = [ MouseInput mouseEvent; KeyPressed(Key.Escape, Modifiers.None) ]
     let backend, _ = TestBackend.create 80 24 events
     let mutable received : (MouseEvent * string option) list = []
