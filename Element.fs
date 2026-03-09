@@ -28,11 +28,11 @@ type Transition =
   | Fade of duration: int<ms>
   | ColorMorph of duration: int<ms>
   | Wipe of direction: Direction * duration: int<ms>
-  | SlideIn of direction: Direction * duration: int<ms>
+  | SlideIn of direction: Direction * duration: int<ms>   // Not yet implemented — has no visual effect; use Fade, ColorMorph, Wipe, or Dissolve
   | Dissolve of duration: int<ms>
-  | Grow of duration: int<ms>
-  | Sequence of Transition list
-  | Custom of (float -> int -> int -> int)
+  | Grow of duration: int<ms>        // Not yet implemented — has no visual effect; use Fade, ColorMorph, Wipe, or Dissolve
+  | Sequence of Transition list      // Not yet implemented — has no visual effect; use individual Transition cases
+  | Custom of (float -> int -> int -> int)  // Not yet implemented — has no visual effect
 
 /// The core UI element type. All views are trees of Element values.
 [<NoEquality; NoComparison>]

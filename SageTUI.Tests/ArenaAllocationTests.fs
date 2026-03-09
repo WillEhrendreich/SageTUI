@@ -322,12 +322,12 @@ let arenaAllocationTests =
             //   findKeyedElements: Map<string,Element> (8 nodes × ~200B each) ≈ 1600B
             //   reconcile: 2× Map enumeration + list construction              ≈  800B
             //   keyAreas:  Map<string,Area> construction (8 nodes)             ≈ 1600B
-            // Threshold is 8192B (generous for debug JIT). Future work: replace
+            // Threshold is 6144B (~1.5× measured ~4.1KB). Future work: replace
             // Map<string,*> with pooled Dictionary to reach <256B/frame.
             // The 'staying' path previously added an extra Map.filter + Map.toList per frame.
-            (perFrame, 8192L)
+            (perFrame, 6144L)
             |> Expect.isLessThanOrEqual
-                (sprintf "Reconcile tier allocated %d B/frame for 8 keyed elements (threshold 8192 B). Check findKeyedElements, reconcile, and keyAreas for unexpected allocations." perFrame))
+                (sprintf "Reconcile tier allocated %d B/frame for 8 keyed elements (threshold 6144 B). Check findKeyedElements, reconcile, and keyAreas for unexpected allocations." perFrame))
 
         testCase "App.run keyAreas gate regression: prevKeyAreas updated for staying elements" <| fun () ->
             // Regression test for Sprint 24 bug: App.run had a gate that skipped keyAreas

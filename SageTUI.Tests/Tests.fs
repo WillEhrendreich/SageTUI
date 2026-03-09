@@ -2912,7 +2912,7 @@ let reconcileTests = testList "Reconcile" [
     let newKeys = Map.empty
     let (_, exiting) = Reconcile.reconcile oldKeys newKeys
     exiting.Length |> Expect.equal "1 exiting" 1
-  testCase "reconcile detects staying elements" <| fun () ->
+  testCase "reconcile: stable keys produce no entering/exiting" <| fun () ->
     let oldKeys = Map.ofList [ "k1", Empty ]
     let newKeys = Map.ofList [ "k1", Empty ]
     let (entering, exiting) = Reconcile.reconcile oldKeys newKeys
