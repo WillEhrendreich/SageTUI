@@ -21,6 +21,7 @@
     <Compile Include="RecordingTests.fs" />
     <Compile Include="TextEditorTests.fs" />
     <Compile Include="FuzzyFinderTests.fs" />
+    <Compile Include="ReplayAndShrinkTests.fs" />
     <Compile Include="ProcessHelpers.fs" />
     <Compile Include="Hex1bE2ETests.fs" />
     <Compile Include="TemplateSmokeTests.fs" />

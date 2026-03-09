@@ -453,3 +453,107 @@ module TuiExpect =
     if app.VirtualTime < expected then
       failwith (sprintf "Test '%s': expected VirtualTime >= %A but got %A" label expected app.VirtualTime)
 
+/// Session replay and minimal-reproduction shrinking for SageTUI programs.
+///
+/// replaySession replays a sequence of messages against a TestApp (already initialized),
+/// returning the final TestApp state.
+///
+/// shrinkReplay finds the minimal subsequence of messages that still causes a predicate
+/// to return true (i.e. the predicate represents a failing assertion). Uses a
+/// prefix-shrink pass followed by a ddmin-style subset reduction:
+///   1. Binary-search for the shortest failing prefix.
+///   2. Remove chunks of the prefix until no further reduction is possible.
+///
+/// sessionToLines / replayFromLines: serialize/deserialize a message list to/from
+/// string arrays (JSONL-style). Users provide serialize/deserialize functions —
+/// the library is serialization-format agnostic.
+///
+/// Example (session replay):
+///   let app = TestHarness.init 80 24 myProgram
+///   let result = Testing.replaySession recordedMsgs app
+///   result.Model |> Expect.equal "expected state" expectedModel
+///
+/// Example (shrinking):
+///   let minimal = Testing.shrinkReplay longMsgList app (fun a -> a.Model.Count > 100)
+///   // minimal = Some [msgThatCausesCount100]
+module Testing =
+
+  /// Replay a sequence of messages against an already-initialized TestApp,
+  /// processing each through Update in order. Stops early if a Quit command fires.
+  let replaySession (msgs: 'msg list) (app: TestApp<'model,'msg>) : TestApp<'model,'msg> =
+    TestHarness.sendMsgs msgs app
+
+  /// Find the minimal subsequence of messages that still causes `predicate` to return true.
+  ///
+  /// Returns None if `predicate` does not hold for the full `msgs` sequence.
+  /// Returns Some(minimalSubsequence) otherwise.
+  ///
+  /// Algorithm:
+  ///   Phase 1 — prefix shrink: binary-search for shortest failing prefix.
+  ///   Phase 2 — ddmin: iteratively remove half-sized chunks from the prefix until
+  ///             no further reduction is possible (O(n log n) predicate evaluations).
+  let shrinkReplay
+    (msgs: 'msg list)
+    (app: TestApp<'model,'msg>)
+    (predicate: TestApp<'model,'msg> -> bool)
+    : 'msg list option =
+    let arr = Array.ofList msgs
+    let isFailing (indices: int array) =
+      let subset = indices |> Array.map (fun i -> arr.[i]) |> Array.toList
+      let result = replaySession subset app
+      predicate result
+    let n = arr.Length
+    // Phase 1: binary search for shortest failing prefix
+    let prefixShrink (maxIdx: int) : int =
+      let rec bsearch lo hi =
+        if lo >= hi then lo
+        else
+          let mid = (lo + hi) / 2
+          match isFailing (Array.init (mid + 1) id) with
+          | true  -> bsearch lo mid
+          | false -> bsearch (mid + 1) hi
+      bsearch 0 maxIdx
+    // Phase 2: ddmin on index array — operates on indices to handle duplicate messages
+    let rec ddminIndices (indices: int array) (granularity: int) =
+      let m = indices.Length
+      if m <= 1 then indices
+      else
+        let chunkSize = max 1 (m / granularity)
+        let chunks =
+          [| for i in 0 .. (granularity - 1) do
+               let start = i * chunkSize
+               let len   = min chunkSize (m - start)
+               if len > 0 then yield indices.[start .. start + len - 1] |]
+        let tryRemove =
+          chunks |> Array.tryPick (fun chunk ->
+            let chunkSet = System.Collections.Generic.HashSet<int>(chunk)
+            let complement = indices |> Array.filter (fun idx -> not (chunkSet.Contains idx))
+            match isFailing complement with
+            | true  -> Some complement
+            | false -> None)
+        match tryRemove with
+        | Some reduced -> ddminIndices reduced 2
+        | None ->
+          match granularity >= m with
+          | true  -> indices
+          | false -> ddminIndices indices (min m (granularity * 2))
+    match n = 0 || not (isFailing (Array.init n id)) with
+    | true  -> None
+    | false ->
+      let prefixEnd = prefixShrink (n - 1)
+      let shortened  = Array.init (prefixEnd + 1) id
+      let minIndices = ddminIndices shortened 2
+      Some (minIndices |> Array.map (fun i -> arr.[i]) |> Array.toList)
+
+  /// Serialize a list of messages to an array of strings, one per message.
+  /// The `serialize` function converts a message to a string representation.
+  /// Use with replayFromLines to persist/restore sessions.
+  let sessionToLines (serialize: 'msg -> string) (msgs: 'msg list) : string array =
+    msgs |> List.map serialize |> Array.ofList
+
+  /// Deserialize an array of strings back to a list of messages.
+  /// Lines for which `deserialize` returns None are silently skipped.
+  /// Use with sessionToLines to persist/restore sessions.
+  let replayFromLines (deserialize: string -> 'msg option) (lines: string array) : 'msg list =
+    lines |> Array.choose deserialize |> Array.toList
+
