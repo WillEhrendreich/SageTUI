@@ -33,7 +33,8 @@ type Transition =
   | Dissolve of duration: int<ms>
   /// Not yet implemented — has no visual effect. Use <c>Fade</c>, <c>ColorMorph</c>, <c>Wipe</c>, or <c>Dissolve</c> instead.
   | Grow of duration: int<ms>
-  /// Not yet implemented — has no visual effect. Use individual <c>Transition</c> cases instead.
+  /// Not yet implemented — has no visual effect. To achieve sequential effects today,
+  /// use multiple <c>El.keyed</c> elements with staggered enter/exit transitions instead.
   | Sequence of Transition list
   /// Not yet implemented — has no visual effect.
   | Custom of (float -> int -> int -> int)
