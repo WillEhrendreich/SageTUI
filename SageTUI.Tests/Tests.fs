@@ -2995,10 +2995,10 @@ let textInputEditTests = testList "TextInput.edit" [
     m.Text |> Expect.equal "text" "ab"
     m.Cursor |> Expect.equal "cursor" 2
   testCase "backspace at start does nothing" <| fun () ->
-    let m = { Text = "abc"; Cursor = 0 } |> TextInput.handleKey Key.Backspace
+    let m = { Text = "abc"; Cursor = 0; SelectionAnchor = None } |> TextInput.handleKey Key.Backspace
     m.Text |> Expect.equal "text" "abc"
   testCase "delete removes char at cursor" <| fun () ->
-    let m = { Text = "abc"; Cursor = 1 } |> TextInput.handleKey Key.Delete
+    let m = { Text = "abc"; Cursor = 1; SelectionAnchor = None } |> TextInput.handleKey Key.Delete
     m.Text |> Expect.equal "text" "ac"
   testCase "delete at end does nothing" <| fun () ->
     let m = TextInput.ofString "abc" |> TextInput.handleKey Key.Delete
@@ -3010,10 +3010,10 @@ let textInputNavTests = testList "TextInput.nav" [
     (TextInput.ofString "abc" |> TextInput.handleKey Key.Left).Cursor
     |> Expect.equal "cursor" 2
   testCase "left at start stays" <| fun () ->
-    ({ Text = "abc"; Cursor = 0 } |> TextInput.handleKey Key.Left).Cursor
+    ({ Text = "abc"; Cursor = 0; SelectionAnchor = None } |> TextInput.handleKey Key.Left).Cursor
     |> Expect.equal "cursor" 0
   testCase "right moves cursor" <| fun () ->
-    ({ Text = "abc"; Cursor = 1 } |> TextInput.handleKey Key.Right).Cursor
+    ({ Text = "abc"; Cursor = 1; SelectionAnchor = None } |> TextInput.handleKey Key.Right).Cursor
     |> Expect.equal "cursor" 2
   testCase "right at end stays" <| fun () ->
     (TextInput.ofString "abc" |> TextInput.handleKey Key.Right).Cursor
@@ -3022,13 +3022,13 @@ let textInputNavTests = testList "TextInput.nav" [
     (TextInput.ofString "abc" |> TextInput.handleKey Key.Home).Cursor
     |> Expect.equal "cursor" 0
   testCase "end goes to end" <| fun () ->
-    ({ Text = "abc"; Cursor = 0 } |> TextInput.handleKey Key.End).Cursor
+    ({ Text = "abc"; Cursor = 0; SelectionAnchor = None } |> TextInput.handleKey Key.End).Cursor
     |> Expect.equal "cursor" 3
 ]
 
 let textInputInsertTests = testList "TextInput.insert" [
   testCase "insert in middle" <| fun () ->
-    let m = { Text = "ac"; Cursor = 1 } |> TextInput.handleKey (Key.Char 'b')
+    let m = { Text = "ac"; Cursor = 1; SelectionAnchor = None } |> TextInput.handleKey (Key.Char 'b')
     m.Text |> Expect.equal "text" "abc"
     m.Cursor |> Expect.equal "cursor" 2
 ]

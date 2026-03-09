@@ -1072,6 +1072,338 @@ let undoableCommitTests = testList "Undoable.commitIfChanged" [
     m'.Present.Value |> Expect.equal "present updated" 10
   }
 ]
+
+
+// ── VirtualList ───────────────────────────────────────────────────────────────
+
+let mkList n = VirtualList.ofArray [| 0 .. n - 1 |]
+
+let vlCfg10 = {
+  ViewportHeight = 5
+  SelectionColor = Color.Named(BaseColor.Blue, Normal)
+  RenderRow = fun (i: int) -> El.text (sprintf "item %d" i)
+}
+
+let virtualListTests = testList "VirtualList" [
+  test "ofArray empty list has no selection" {
+    let m = VirtualList.ofArray [||]
+    m.SelectedIndex |> Expect.equal "no selection" None
+    m.ScrollOffset  |> Expect.equal "offset 0" 0
+  }
+  test "ofArray non-empty selects index 0" {
+    let m = mkList 10
+    m.SelectedIndex |> Expect.equal "selects 0" (Some 0)
+    m.ScrollOffset  |> Expect.equal "offset 0" 0
+  }
+  test "ofList creates same as ofArray" {
+    let m1 = VirtualList.ofList [ 1; 2; 3 ]
+    let m2 = VirtualList.ofArray [| 1; 2; 3 |]
+    m1.SelectedIndex |> Expect.equal "same sel" m2.SelectedIndex
+    m1.ScrollOffset  |> Expect.equal "same off" m2.ScrollOffset
+  }
+  test "selectedItem returns current item" {
+    let m = mkList 10
+    VirtualList.selectedItem m |> Expect.equal "item 0" (Some 0)
+  }
+  test "selectedItem None for empty list" {
+    VirtualList.selectedItem (VirtualList.ofArray [||]) |> Expect.equal "none" None
+  }
+  test "selectNext advances selection" {
+    let m = mkList 10 |> VirtualList.selectNext 5
+    m.SelectedIndex |> Expect.equal "index 1" (Some 1)
+  }
+  test "selectNext does not go past last item" {
+    let m = VirtualList.ofArray [| 0 |] |> VirtualList.selectNext 5
+    m.SelectedIndex |> Expect.equal "stays at 0" (Some 0)
+  }
+  test "selectPrev does not go below 0" {
+    let m = mkList 10 |> VirtualList.selectPrev 5
+    m.SelectedIndex |> Expect.equal "stays at 0" (Some 0)
+  }
+  test "selectPrev from item 3 gives item 2" {
+    let m = VirtualList.ofArray [| 0 .. 9 |]
+    let m' = { m with SelectedIndex = Some 3 } |> VirtualList.selectPrev 5
+    m'.SelectedIndex |> Expect.equal "index 2" (Some 2)
+  }
+  test "selectFirst jumps to item 0" {
+    let m = VirtualList.ofArray [| 0 .. 9 |]
+    let m' = { m with SelectedIndex = Some 7 } |> VirtualList.selectFirst 5
+    m'.SelectedIndex |> Expect.equal "index 0" (Some 0)
+  }
+  test "selectLast jumps to last item" {
+    let m = mkList 10 |> VirtualList.selectLast 5
+    m.SelectedIndex |> Expect.equal "index 9" (Some 9)
+  }
+  test "ensureVisible scrolls down when selection below viewport" {
+    let m = mkList 20
+    let m' = { m with SelectedIndex = Some 10 } |> VirtualList.ensureVisible 5
+    m'.ScrollOffset |> Expect.equal "offset 6" 6
+  }
+  test "ensureVisible scrolls up when selection above viewport" {
+    let m = { (mkList 20) with ScrollOffset = 10; SelectedIndex = Some 3 }
+    let m' = VirtualList.ensureVisible 5 m
+    m'.ScrollOffset |> Expect.equal "offset 3" 3
+  }
+  test "pageDown advances by viewportHeight" {
+    let m = mkList 20
+    let m' = VirtualList.pageDown 5 m
+    m'.SelectedIndex |> Expect.equal "index 5" (Some 5)
+  }
+  test "pageDown clamps to last item" {
+    let m = VirtualList.ofArray [| 0 .. 9 |]
+    let m' = { m with SelectedIndex = Some 8 } |> VirtualList.pageDown 5
+    m'.SelectedIndex |> Expect.equal "index 9 clamped" (Some 9)
+  }
+  test "pageUp advances by viewportHeight" {
+    let m = VirtualList.ofArray [| 0 .. 9 |]
+    let m' = { m with SelectedIndex = Some 8 } |> VirtualList.pageUp 5
+    m'.SelectedIndex |> Expect.equal "index 3" (Some 3)
+  }
+  test "setItems clamps selection to new length" {
+    let m = { (mkList 20) with SelectedIndex = Some 15 }
+    let m' = VirtualList.setItems [| 0; 1; 2 |] m
+    m'.SelectedIndex |> Expect.equal "clamped to 2" (Some 2)
+    m'.Items.Length  |> Expect.equal "3 items" 3
+  }
+  test "setItems empty array yields no selection" {
+    let m = mkList 10
+    let m' = VirtualList.setItems [||] m
+    m'.SelectedIndex |> Expect.equal "none" None
+  }
+  test "view empty returns Empty" {
+    let m = VirtualList.ofArray [||]
+    match VirtualList.view vlCfg10 m with
+    | Empty -> ()
+    | other -> failwith (sprintf "expected Empty, got %A" other)
+  }
+  test "view renders only viewport rows" {
+    let m = mkList 20
+    match VirtualList.view vlCfg10 m with
+    | Column children -> children |> Expect.hasLength "5 rows" 5
+    | other -> failwith (sprintf "expected Column, got %A" other)
+  }
+  test "view renders correct window after scroll" {
+    let m = { (mkList 20) with ScrollOffset = 3; SelectedIndex = Some 5 }
+    match VirtualList.view vlCfg10 m with
+    | Column children ->
+      children |> Expect.hasLength "5 rows" 5
+      // First visible row should be item 3
+      match children[0] with
+      | Text(t, _) -> t |> Expect.equal "item 3" "item 3"
+      | other -> failwith (sprintf "expected Text, got %A" other)
+    | other -> failwith (sprintf "expected Column, got %A" other)
+  }
+  test "view selected row gets highlight style" {
+    let m = mkList 5
+    match VirtualList.view vlCfg10 m with
+    | Column children ->
+      // Row 0 is selected - should be Styled
+      match children[0] with
+      | Styled(s, _) ->
+        s.Bg |> Expect.equal "blue bg" (Some (Color.Named(BaseColor.Blue, Normal)))
+      | other -> failwith (sprintf "expected Styled, got %A" other)
+    | other -> failwith (sprintf "expected Column, got %A" other)
+  }
+  test "view non-selected rows are not highlighted" {
+    let m = mkList 5
+    match VirtualList.view vlCfg10 m with
+    | Column children ->
+      match children[1] with
+      | Text _ -> ()  // undecorated text is fine
+      | Styled(s, _) ->
+        // if styled, bg must not be the selection color
+        match s.Bg with
+        | Some c when c = Color.Named(BaseColor.Blue, Normal) ->
+          failwith "row 1 should not be selected"
+        | _ -> ()
+      | other -> failwith (sprintf "expected Text or Styled, got %A" other)
+    | other -> failwith (sprintf "expected Column, got %A" other)
+  }
+  test "view handles fewer items than viewport gracefully" {
+    let m = mkList 3
+    match VirtualList.view vlCfg10 m with
+    | Column children -> children |> Expect.hasLength "3 rows (< viewport)" 3
+    | other -> failwith (sprintf "expected Column, got %A" other)
+  }
+]
+
+
+// ── TextInput word movement and selection ─────────────────────────────────────
+
+let tiEmpty = TextInput.empty
+let tiWord  = TextInput.ofString "hello world foo"
+
+let ti text cursor = { Text = text; Cursor = cursor; SelectionAnchor = None }
+let tiSel text cursor anchor = { Text = text; Cursor = cursor; SelectionAnchor = Some anchor }
+
+let textInputWordSelTests = testList "TextInput word and selection" [
+  // ── wordLeftPos / wordRightPos ───────────────────────────────────────────
+  test "wordLeftPos from end of 'hello' lands at 0" {
+    TextInput.wordLeftPos 5 "hello" |> Expect.equal "pos 0" 0
+  }
+  test "wordLeftPos skips trailing spaces then word" {
+    TextInput.wordLeftPos 11 "hello world" |> Expect.equal "pos 6" 6
+  }
+  test "wordLeftPos at 0 stays at 0" {
+    TextInput.wordLeftPos 0 "hello" |> Expect.equal "pos 0" 0
+  }
+  test "wordRightPos from start of 'hello' lands at 5" {
+    TextInput.wordRightPos 0 "hello" |> Expect.equal "pos 5" 5
+  }
+  test "wordRightPos skips leading spaces then word" {
+    TextInput.wordRightPos 5 "hello world" |> Expect.equal "pos 11" 11
+  }
+  test "wordRightPos at end stays at end" {
+    TextInput.wordRightPos 5 "hello" |> Expect.equal "pos 5" 5
+  }
+  // ── wordLeft / wordRight ─────────────────────────────────────────────────
+  test "wordLeft moves cursor backward one word" {
+    (ti "hello world" 11 |> TextInput.wordLeft).Cursor |> Expect.equal "cursor 6" 6
+  }
+  test "wordLeft clears SelectionAnchor" {
+    (tiSel "hello world" 11 5 |> TextInput.wordLeft).SelectionAnchor |> Expect.equal "none" None
+  }
+  test "wordRight moves cursor forward one word" {
+    (ti "hello world" 5 |> TextInput.wordRight).Cursor |> Expect.equal "cursor 11" 11
+  }
+  // ── selectAll ────────────────────────────────────────────────────────────
+  test "selectAll sets anchor=0 cursor=end" {
+    let m = ti "hello" 2 |> TextInput.selectAll
+    m.SelectionAnchor |> Expect.equal "anchor 0" (Some 0)
+    m.Cursor          |> Expect.equal "cursor 5" 5
+  }
+  // ── selectLeft / selectRight ─────────────────────────────────────────────
+  test "selectRight extends selection rightward" {
+    let m = ti "abc" 0 |> TextInput.selectRight
+    m.Cursor          |> Expect.equal "cursor 1" 1
+    m.SelectionAnchor |> Expect.equal "anchor 0" (Some 0)
+  }
+  test "selectRight preserves existing anchor" {
+    let m = tiSel "abc" 1 0 |> TextInput.selectRight
+    m.Cursor          |> Expect.equal "cursor 2" 2
+    m.SelectionAnchor |> Expect.equal "anchor 0 preserved" (Some 0)
+  }
+  test "selectLeft extends selection leftward" {
+    let m = ti "abc" 3 |> TextInput.selectLeft
+    m.Cursor          |> Expect.equal "cursor 2" 2
+    m.SelectionAnchor |> Expect.equal "anchor 3" (Some 3)
+  }
+  // ── selectionRange ───────────────────────────────────────────────────────
+  test "selectionRange None when no anchor" {
+    TextInput.selectionRange (ti "abc" 2) |> Expect.equal "none" None
+  }
+  test "selectionRange Some when anchor differs from cursor" {
+    TextInput.selectionRange (tiSel "abc" 3 0) |> Expect.equal "0..3" (Some (0, 3))
+  }
+  test "selectionRange normalises reverse selection" {
+    TextInput.selectionRange (tiSel "abc" 0 3) |> Expect.equal "0..3" (Some (0, 3))
+  }
+  test "selectionRange None when anchor equals cursor" {
+    TextInput.selectionRange (tiSel "abc" 2 2) |> Expect.equal "none" None
+  }
+  // ── hasSelection ─────────────────────────────────────────────────────────
+  test "hasSelection false with no anchor" {
+    TextInput.hasSelection (ti "abc" 1) |> Expect.isFalse "no sel"
+  }
+  test "hasSelection true with anchor != cursor" {
+    TextInput.hasSelection (tiSel "abc" 3 0) |> Expect.isTrue "has sel"
+  }
+  // ── deleteSelection ──────────────────────────────────────────────────────
+  test "deleteSelection removes selected region" {
+    let m = tiSel "hello world" 5 0 |> TextInput.deleteSelection
+    m.Text   |> Expect.equal "text" " world"
+    m.Cursor |> Expect.equal "cursor 0" 0
+  }
+  test "deleteSelection no-op when no selection" {
+    let m = ti "hello" 3
+    TextInput.deleteSelection m |> Expect.equal "unchanged" m
+  }
+  // ── deleteWordLeft ───────────────────────────────────────────────────────
+  test "deleteWordLeft removes previous word" {
+    let m = ti "hello world" 11 |> TextInput.deleteWordLeft
+    m.Text   |> Expect.equal "text" "hello "
+    m.Cursor |> Expect.equal "cursor 6" 6
+  }
+  test "deleteWordLeft no-op at position 0" {
+    let m = ti "hello" 0
+    TextInput.deleteWordLeft m |> Expect.equal "unchanged" m
+  }
+  // ── handleKeyWithSelection ───────────────────────────────────────────────
+  test "handleKeyWithSelection Char replaces selection" {
+    let m = tiSel "hello" 5 0 |> TextInput.handleKeyWithSelection (Key.Char 'X')
+    m.Text   |> Expect.equal "text" "X"
+    m.Cursor |> Expect.equal "cursor 1" 1
+  }
+  test "handleKeyWithSelection Backspace deletes selection" {
+    let m = tiSel "hello" 5 0 |> TextInput.handleKeyWithSelection Key.Backspace
+    m.Text   |> Expect.equal "empty" ""
+    m.Cursor |> Expect.equal "cursor 0" 0
+  }
+  // ── handleEvent ──────────────────────────────────────────────────────────
+  test "handleEvent Ctrl+Left triggers wordLeft" {
+    let m = ti "hello world" 11
+    let m' = TextInput.handleEvent (KeyPressed(Key.Left, Modifiers.Ctrl)) m
+    m'.Cursor |> Expect.equal "cursor 6" 6
+  }
+  test "handleEvent Ctrl+Right triggers wordRight" {
+    let m = ti "hello world" 0
+    let m' = TextInput.handleEvent (KeyPressed(Key.Right, Modifiers.Ctrl)) m
+    m'.Cursor |> Expect.equal "cursor 5" 5
+  }
+  test "handleEvent Shift+Left extends selection" {
+    let m = ti "abc" 2
+    let m' = TextInput.handleEvent (KeyPressed(Key.Left, Modifiers.Shift)) m
+    m'.Cursor          |> Expect.equal "cursor 1" 1
+    m'.SelectionAnchor |> Expect.equal "anchor 2" (Some 2)
+  }
+  test "handleEvent Ctrl+A selects all" {
+    let m = ti "hello" 2
+    let m' = TextInput.handleEvent (KeyPressed(Key.Char 'a', Modifiers.Ctrl)) m
+    m'.SelectionAnchor |> Expect.equal "anchor 0" (Some 0)
+    m'.Cursor          |> Expect.equal "cursor 5" 5
+  }
+  test "handleEvent Ctrl+Backspace deletes previous word" {
+    let m = ti "hello world" 11
+    let m' = TextInput.handleEvent (KeyPressed(Key.Backspace, Modifiers.Ctrl)) m
+    m'.Text   |> Expect.equal "text" "hello "
+    m'.Cursor |> Expect.equal "cursor 6" 6
+  }
+  test "handleEvent plain key falls back to handleKeyWithSelection" {
+    let m = ti "abc" 1
+    let m' = TextInput.handleEvent (KeyPressed(Key.Char 'X', Modifiers.None)) m
+    m'.Text |> Expect.equal "text" "aXbc"
+  }
+  test "selectWordLeft extends selection by word" {
+    let m = ti "hello world" 11
+    let m' = TextInput.selectWordLeft m
+    m'.Cursor          |> Expect.equal "cursor 6" 6
+    m'.SelectionAnchor |> Expect.equal "anchor 11" (Some 11)
+  }
+  test "selectWordRight extends selection by word" {
+    let m = ti "hello world" 0
+    let m' = TextInput.selectWordRight m
+    m'.Cursor          |> Expect.equal "cursor 5" 5
+    m'.SelectionAnchor |> Expect.equal "anchor 0" (Some 0)
+  }
+  test "handleEvent Shift+Ctrl+Left extends selection by word" {
+    let m = ti "hello world" 11
+    let m' = TextInput.handleEvent (KeyPressed(Key.Left, Modifiers.Ctrl ||| Modifiers.Shift)) m
+    m'.Cursor          |> Expect.equal "cursor 6" 6
+    m'.SelectionAnchor |> Expect.equal "anchor 11" (Some 11)
+  }
+  test "handleEvent Shift+Home extends selection to start" {
+    let m = ti "hello" 3
+    let m' = TextInput.handleEvent (KeyPressed(Key.Home, Modifiers.Shift)) m
+    m'.Cursor          |> Expect.equal "cursor 0" 0
+    m'.SelectionAnchor |> Expect.equal "anchor 3" (Some 3)
+  }
+  test "handleEvent Shift+End extends selection to end" {
+    let m = ti "hello" 2
+    let m' = TextInput.handleEvent (KeyPressed(Key.End, Modifiers.Shift)) m
+    m'.Cursor          |> Expect.equal "cursor 5" 5
+    m'.SelectionAnchor |> Expect.equal "anchor 2" (Some 2)
+  }
+]
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -1095,4 +1427,6 @@ let allWidgetTests = testList "Widgets" [
   themeTests
   frameTimingsTests
   undoableCommitTests
+  virtualListTests
+  textInputWordSelTests
 ]

@@ -216,39 +216,39 @@ let replayRecordingTests = testList "Testing.replayRecording" [
 
 let textInputClampTests = testList "TextInput.clamp" [
   test "clamp keeps valid cursor unchanged" {
-    let m = { Text = "hello"; Cursor = 3 }
+    let m = { Text = "hello"; Cursor = 3 ; SelectionAnchor = None }
     let m' = TextInput.clamp m
     m'.Cursor |> Expect.equal "cursor unchanged" 3
   }
   test "clamp clamps cursor above text length to text length" {
-    let m = { Text = "hi"; Cursor = 99 }
+    let m = { Text = "hi"; Cursor = 99 ; SelectionAnchor = None }
     let m' = TextInput.clamp m
     m'.Cursor |> Expect.equal "clamped to 2" 2
   }
   test "clamp clamps negative cursor to 0" {
-    let m = { Text = "hi"; Cursor = -5 }
+    let m = { Text = "hi"; Cursor = -5 ; SelectionAnchor = None }
     let m' = TextInput.clamp m
     m'.Cursor |> Expect.equal "clamped to 0" 0
   }
   test "clamp handles empty text" {
-    let m = { Text = ""; Cursor = 5 }
+    let m = { Text = ""; Cursor = 5 ; SelectionAnchor = None }
     let m' = TextInput.clamp m
     m'.Cursor |> Expect.equal "clamped to 0 for empty" 0
   }
   test "setText preserves cursor within new text" {
-    let m = { Text = "hello world"; Cursor = 5 }
+    let m = { Text = "hello world"; Cursor = 5 ; SelectionAnchor = None }
     let m' = TextInput.setText "hi" m
     m'.Cursor |> Expect.equal "cursor clamped to 2" 2
     m'.Text   |> Expect.equal "text updated" "hi"
   }
   test "setText keeps cursor at original position if within new text" {
-    let m = { Text = "hi"; Cursor = 2 }
+    let m = { Text = "hi"; Cursor = 2 ; SelectionAnchor = None }
     let m' = TextInput.setText "hello world" m
     m'.Cursor |> Expect.equal "cursor stays at 2" 2
     m'.Text   |> Expect.equal "text updated" "hello world"
   }
   test "setText with cursor at 0 stays at 0" {
-    let m = { Text = "abc"; Cursor = 0 }
+    let m = { Text = "abc"; Cursor = 0 ; SelectionAnchor = None }
     let m' = TextInput.setText "xyz" m
     m'.Cursor |> Expect.equal "cursor stays at 0" 0
   }
