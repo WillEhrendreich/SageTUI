@@ -46,6 +46,7 @@
     <Compile Include="Detect.fs" />
     <Compile Include="Transition.fs" />
     <Compile Include="App.fs" />
+    <Compile Include="Recording.fs" />
     <Compile Include="Widgets.fs" />
     <Compile Include="Scroll.fs" />
     <Compile Include="Testing.fs" />

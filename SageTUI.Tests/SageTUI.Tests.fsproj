@@ -18,6 +18,7 @@
     <Compile Include="IntegrationTests.fs" />
     <Compile Include="SnapshotTests.fs" />
     <Compile Include="SampleShowcaseTests.fs" />
+    <Compile Include="RecordingTests.fs" />
     <Compile Include="ProcessHelpers.fs" />
     <Compile Include="Hex1bE2ETests.fs" />
     <Compile Include="TemplateSmokeTests.fs" />
