@@ -545,3 +545,228 @@ module App =
         View = fun () -> view ()
         Subscribe = fun _ -> [KeySub (fun (k, _) -> Some k)] }
     run program
+
+  /// Run a program inline below the current cursor position (no alt-screen).
+  ///
+  /// `height` lines are reserved below the cursor. The program renders into that
+  /// fixed-height strip. Unlike `App.run`, the terminal is NOT switched to
+  /// alternate-screen — existing content above the strip is preserved.
+  ///
+  /// `clearOnExit` (default true): when true, clears the reserved lines and moves
+  /// the cursor to the first reserved line on exit (useful for pickers/menus that
+  /// should leave no trace). When false, the final frame content remains visible
+  /// below the original cursor position (useful for commands that output a result).
+  ///
+  /// Transition effects are not applied in inline mode.
+  let runInlineWith
+    (config: AppConfig)
+    (height: int)
+    (clearOnExit: bool)
+    (backend: TerminalBackend)
+    (program: Program<'model, 'msg>) =
+
+    let termW, _ = backend.Size()
+    let mutable width = termW
+    let inlineHeight = max 1 height
+
+    // Record cursor row before reserving lines, then print blank lines to
+    // push the terminal content up and reserve the area.
+    let mutable startRow =
+      try Console.CursorTop
+      with _ -> 0
+    let reservedOutput = String.replicate inlineHeight "\n"
+    Console.Write(reservedOutput)
+    // After printing N newlines, cursor is at startRow+N. Recalculate:
+    // If the terminal didn't scroll, startRow stays; if it did scroll, adjust.
+    let endRow =
+      try Console.CursorTop
+      with _ -> startRow + inlineHeight
+    startRow <- max 0 (endRow - inlineHeight)
+
+    let mutable model, initCmd = program.Init()
+    let mutable frontBuf = Buffer.create width inlineHeight
+    let mutable backBuf = Buffer.create width inlineHeight
+    let arena = FrameArena.create config.ArenaNodes config.ArenaChars config.ArenaLayout
+    let mutable running = true
+    let mutable needsFullRedraw = true
+    let mutable exitCode = 0
+    let frameSw = System.Diagnostics.Stopwatch()
+
+    let msgChannel = ConcurrentQueue<'msg>()
+    let dispatch msg = msgChannel.Enqueue(msg)
+
+    let activeSubs = Dictionary<string, CancellationTokenSource>()
+
+    let rec interpretCmd (cmd: Cmd<'msg>) =
+      match cmd with
+      | NoCmd -> ()
+      | Batch cmds -> cmds |> List.iter interpretCmd
+      | OfAsync run ->
+        async {
+          try do! run dispatch
+          with ex -> eprintfn "OfAsync error: %s" ex.Message
+        } |> Async.Start
+      | OfCancellableAsync(id, run) ->
+        match activeSubs.TryGetValue(id) with
+        | true, cts -> cts.Cancel(); cts.Dispose(); activeSubs.Remove(id) |> ignore
+        | _ -> ()
+        let cts = new CancellationTokenSource()
+        activeSubs.[id] <- cts
+        Async.Start(async {
+          try do! run cts.Token dispatch
+          with :? OperationCanceledException -> ()
+        }, cts.Token)
+      | CancelSub id ->
+        match activeSubs.TryGetValue(id) with
+        | true, cts -> cts.Cancel(); cts.Dispose(); activeSubs.Remove(id) |> ignore
+        | _ -> ()
+      | Delay(ms, msg) ->
+        async {
+          do! Async.Sleep ms
+          dispatch msg
+        } |> Async.Start
+      | TerminalOutput s -> backend.Write s
+      | Quit code ->
+        for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
+        activeSubs.Clear()
+        exitCode <- code
+        running <- false
+
+    let reconcileSubs (currentSubs: Sub<'msg> list) =
+      let ids =
+        currentSubs
+        |> List.choose (function
+          | TimerSub(id, _, _) -> Some id
+          | CustomSub(id, _) -> Some id
+          | _ -> None)
+      let currentIds = ids |> Set.ofList
+      for KeyValue(id, cts) in activeSubs |> Seq.toList do
+        match Set.contains id currentIds with
+        | true -> ()
+        | false -> cts.Cancel(); cts.Dispose(); activeSubs.Remove(id) |> ignore
+      for sub in currentSubs do
+        match sub with
+        | TimerSub(id, interval, tick) ->
+          match activeSubs.ContainsKey(id) with
+          | true -> ()
+          | false ->
+            let cts = new CancellationTokenSource()
+            activeSubs.[id] <- cts
+            Async.Start(async {
+              while not cts.Token.IsCancellationRequested do
+                do! Async.Sleep (int interval.TotalMilliseconds)
+                dispatch (tick())
+            }, cts.Token)
+        | CustomSub(id, start) ->
+          match activeSubs.ContainsKey(id) with
+          | true -> ()
+          | false ->
+            let cts = new CancellationTokenSource()
+            activeSubs.[id] <- cts
+            Async.Start(start dispatch cts.Token, cts.Token)
+        | _ -> ()
+
+    let inline clearInlineArea () =
+      let sb = System.Text.StringBuilder()
+      for row in 0 .. inlineHeight - 1 do
+        sb.Append(Ansi.moveCursor (startRow + row) 0) |> ignore
+        sb.Append(Ansi.clearToEol) |> ignore
+      backend.Write(sb.ToString())
+
+    try
+      backend.EnterRawMode()
+      backend.Write(Ansi.hideCursor)
+      interpretCmd initCmd
+      let mutable subs = program.Subscribe model
+      reconcileSubs subs
+
+      while running do
+        let mutable msg = Unchecked.defaultof<'msg>
+        let mutable modelChanged = false
+        while msgChannel.TryDequeue(&msg) do
+          let newModel, cmd = program.Update msg model
+          model <- newModel
+          modelChanged <- true
+          interpretCmd cmd
+
+        match modelChanged with
+        | true ->
+          subs <- program.Subscribe model
+          reconcileSubs subs
+        | false -> ()
+
+        let shouldRender = modelChanged || needsFullRedraw
+
+        match shouldRender with
+        | false -> ()
+        | true ->
+          let elem = program.View model
+          FrameArena.reset arena
+          let rootHandle = Arena.lower arena elem
+
+          match needsFullRedraw with
+          | true ->
+            frontBuf <- Buffer.create width inlineHeight
+            backBuf <- Buffer.create width inlineHeight
+            clearInlineArea()
+            needsFullRedraw <- false
+          | false -> ()
+
+          Buffer.clear backBuf
+          let area = { X = 0; Y = 0; Width = width; Height = inlineHeight }
+          frameSw.Restart()
+          ArenaRender.renderRoot arena rootHandle area backBuf
+          let changes = Buffer.diff frontBuf backBuf
+          match changes.Count with
+          | 0 -> ()
+          | _ ->
+            let output = Presenter.presentAt startRow changes backBuf
+            backend.Write(output)
+            backend.Flush()
+            Array.blit backBuf.Cells 0 frontBuf.Cells 0 frontBuf.Cells.Length
+
+        // Process terminal events
+        let event = backend.PollEvent 16
+        match event with
+        | Some e ->
+          for sub in subs do
+            match sub, e with
+            | KeySub handler, KeyPressed(k, m) ->
+              handler (k, m) |> Option.iter dispatch
+            | ResizeSub handler, Resized(w, h) ->
+              width <- w
+              needsFullRedraw <- true
+              handler (w, h) |> Option.iter dispatch
+            | _ -> ()
+        | None -> Thread.Sleep 1
+
+      // Exit: restore terminal state
+      match clearOnExit with
+      | true ->
+        clearInlineArea()
+        backend.Write(Ansi.moveCursor startRow 0)
+      | false ->
+        backend.Write(Ansi.moveCursor (startRow + inlineHeight) 0)
+      backend.Write(Ansi.showCursor)
+      backend.Flush()
+      backend.LeaveRawMode()
+      match exitCode with
+      | 0 -> ()
+      | code -> System.Environment.Exit code
+    with ex ->
+      backend.Write(Ansi.showCursor)
+      backend.Flush()
+      backend.LeaveRawMode()
+      reraise()
+
+  /// Run a program inline below the current cursor (no alt-screen).
+  /// `height` terminal lines are reserved. Clears on exit. Auto-detects backend.
+  let runInline (height: int) (program: Program<'model, 'msg>) =
+    let backend = Backend.auto()
+    runInlineWith AppConfig.defaults height true backend program
+
+  /// Run inline with explicit exit behavior.
+  /// `clearOnExit = false` leaves the final frame content visible after exit.
+  let runInlinePersist (height: int) (program: Program<'model, 'msg>) =
+    let backend = Backend.auto()
+    runInlineWith AppConfig.defaults height false backend program

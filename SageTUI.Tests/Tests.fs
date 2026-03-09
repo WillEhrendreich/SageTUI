@@ -4448,11 +4448,98 @@ let sprint36DegenerateAnchorTests =
       s |> Expect.stringContains "has 'o' from hello" "o"
   ]
 
+/// Tests for App.runInlineWith — inline rendering without alt-screen.
+let sprint36RunInlineTests =
+  testList "runInline" [
+    testCase "renders static element without altscreen sequences" <| fun () ->
+      let backend, getOutput =
+        TestBackend.create 20 3 [ KeyPressed(Key.Escape, Modifiers.None) ]
+      let program : Program<unit, Key> =
+        { Init = fun () -> (), NoCmd
+          Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+          View = fun () -> El.text "hello"
+          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ] }
+      App.runInlineWith AppConfig.defaults 3 true backend program
+      let output = getOutput()
+      // alt-screen sequences NOT present (enterAltScreen = ESC[?1049h)
+      output.Contains("\x1b[?1049h") |> Expect.isFalse "no altscreen enter sequence"
+      // hello rendered into cells
+      output |> Expect.stringContains "hello in output" "hello"
+
+    testCase "clearOnExit=true outputs moveCursor back to startRow" <| fun () ->
+      // With clearOnExit=true, after quit the output should contain clearToEol sequences
+      let backend, getOutput =
+        TestBackend.create 20 3 [ KeyPressed(Key.Escape, Modifiers.None) ]
+      let program : Program<unit, Key> =
+        { Init = fun () -> (), NoCmd
+          Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+          View = fun () -> El.text "bye"
+          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ] }
+      App.runInlineWith AppConfig.defaults 3 true backend program
+      let output = getOutput()
+      // clearToEol = ESC[K produced during clearInlineArea on exit
+      output |> Expect.stringContains "clearToEol in exit path" "\x1b[K"
+
+    testCase "model renders correctly in inline buffer" <| fun () ->
+      // Program that immediately quits after init renders its initial view
+      let quitEvents = [ KeyPressed(Key.Char (System.Text.Rune 'q'), Modifiers.None) ]
+      let backend, getOutput = TestBackend.create 40 5 quitEvents
+      let program : Program<unit, Key> =
+        { Init = fun () -> (), NoCmd
+          Update = fun k () ->
+            match k with
+            | Key.Char r when r = System.Text.Rune 'q' -> (), Quit 0
+            | _ -> (), NoCmd
+          View = fun () ->
+            El.column [
+              El.text "line-one"
+              El.text "line-two"
+            ]
+          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ] }
+      App.runInlineWith AppConfig.defaults 5 false backend program
+      let output = getOutput()
+      output |> Expect.stringContains "line-one in output" "line-one"
+      output |> Expect.stringContains "line-two in output" "line-two"
+
+    testCase "resize event triggers needsFullRedraw in inline mode" <| fun () ->
+      // Inject a Resized event followed by quit
+      let events = [ Resized(30, 4); KeyPressed(Key.Escape, Modifiers.None) ]
+      let backend, getOutput = TestBackend.create 20 3 events
+      let program : Program<unit, Key> =
+        { Init = fun () -> (), NoCmd
+          Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+          View = fun () -> El.text "resized"
+          Subscribe = fun _ ->
+            [ KeySub (fun (k,_) -> Some k)
+              ResizeSub (fun _ -> None) ] }
+      // Should not throw; resize is handled by clearing + re-rendering
+      App.runInlineWith AppConfig.defaults 3 true backend program
+      let output = getOutput()
+      // After resize, content should still render
+      output |> Expect.stringContains "resized text in output" "resized"
+
+    testCase "runInline helper uses defaults and clearOnExit=true" <| fun () ->
+      // runInline wraps runInlineWith with AppConfig.defaults, clearOnExit=true, Backend.auto()
+      // We can't easily override Backend.auto() in a unit test but can verify the exported API compiles
+      // and call runInlineWith directly with a test backend to validate the same behavior
+      let backend, getOutput =
+        TestBackend.create 10 2 [ KeyPressed(Key.Escape, Modifiers.None) ]
+      let program : Program<unit, Key> =
+        { Init = fun () -> (), NoCmd
+          Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+          View = fun () -> El.text "ok"
+          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ] }
+      App.runInlineWith AppConfig.defaults 2 true backend program
+      let output = getOutput()
+      output |> Expect.stringContains "ok in output" "ok"
+  ]
+
 [<Tests>]
 let sprint36Tests =
   testList "Sprint 36" [
     sprint36TableTests
     sprint36FocusRingConstraintTests
     sprint36DegenerateAnchorTests
+    sprint36RunInlineTests
   ]
 

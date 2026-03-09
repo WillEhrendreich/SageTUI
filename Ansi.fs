@@ -9,6 +9,10 @@ module Ansi =
   let hideCursor = sprintf "%s?25l" esc
   let showCursor = sprintf "%s?25h" esc
   let clearScreen = sprintf "%s2J%sH" esc esc
+  /// Erase from current cursor position to end of line.
+  let clearToEol = sprintf "%sK" esc
+  /// Erase from current cursor position to end of display.
+  let clearToEod = sprintf "%sJ" esc
   let enterAltScreen = sprintf "%s?1049h" esc
   let leaveAltScreen = sprintf "%s?1049l" esc
   let enableMouseTracking = sprintf "%s?1000h%s?1006h" esc esc
@@ -97,6 +101,45 @@ module Presenter =
       sb.Append(rune.ToString()) |> ignore
       lastCol <- x + (RuneWidth.getColumnWidth rune) - 1
       lastRow <- y
+
+    sb.ToString()
+
+  /// Like present, but offsets all row cursor positions by `rowOffset`.
+  /// Use for inline (non-alt-screen) rendering where the frame starts below
+  /// the current cursor position rather than at row 0.
+  let presentAt (rowOffset: int) (changes: ResizeArray<int>) (buf: Buffer) =
+    let sb = StringBuilder()
+    let mutable lastTerminalRow = -1
+    let mutable lastCol = -1
+    let mutable lastFg = 0
+    let mutable lastBg = 0
+    let mutable lastAttrs = 0us
+
+    for idx in changes do
+      let x = idx % buf.Width
+      let y = idx / buf.Width
+      let termRow = y + rowOffset
+      let cell = buf.Cells.[idx]
+
+      match termRow <> lastTerminalRow || x <> lastCol + 1 with
+      | true -> sb.Append(Ansi.moveCursor termRow x) |> ignore
+      | false -> ()
+
+      match cell.Fg <> lastFg || cell.Bg <> lastBg || cell.Attrs <> lastAttrs with
+      | true ->
+        sb.Append(Ansi.resetStyle) |> ignore
+        sb.Append(Ansi.fgColorPacked cell.Fg) |> ignore
+        sb.Append(Ansi.bgColorPacked cell.Bg) |> ignore
+        sb.Append(Ansi.textAttrsPacked cell.Attrs) |> ignore
+        lastFg <- cell.Fg
+        lastBg <- cell.Bg
+        lastAttrs <- cell.Attrs
+      | false -> ()
+
+      let rune = System.Text.Rune(cell.Rune)
+      sb.Append(rune.ToString()) |> ignore
+      lastCol <- x + (RuneWidth.getColumnWidth rune) - 1
+      lastTerminalRow <- termRow
 
     sb.ToString()
 
