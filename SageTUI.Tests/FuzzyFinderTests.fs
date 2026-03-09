@@ -185,6 +185,24 @@ let widgetTests = testList "FuzzyFinder.widget" [
     let m = FuzzyFinder.init id [| "x" |] |> FuzzyFinder.update (FFQueryChanged "hello")
     FuzzyFinder.query m |> Expect.equal "query text" "hello"
   }
+  test "Candidates field is cached from init and reused" {
+    let calls = System.Collections.Generic.List<string>()
+    let toString (s: string) = calls.Add(s); s
+    let items = [| "apple"; "banana"; "cherry" |]
+    let m = FuzzyFinder.init toString items
+    let callCountAfterInit = calls.Count
+    // Querying should NOT call toString again (uses cached Candidates)
+    let m' = m |> FuzzyFinder.update (FFQueryChanged "a")
+               |> FuzzyFinder.update (FFQueryChanged "ap")
+               |> FuzzyFinder.update (FFQueryChanged "app")
+    calls.Count |> Expect.equal "toString only called at init" callCountAfterInit
+    m'.Candidates |> Expect.equal "candidates unchanged" m.Candidates
+  }
+  test "FFSetItems refreshes Candidates cache" {
+    let m = FuzzyFinder.init id [| "old" |]
+    let m' = FuzzyFinder.update (FFSetItems [| "new1"; "new2" |]) m
+    m'.Candidates |> Expect.equal "candidates updated" [| "new1"; "new2" |]
+  }
   test "view returns Column" {
     let m = FuzzyFinder.init id [| "alpha"; "beta"; "gamma" |]
     let el = FuzzyFinder.view true 5 m

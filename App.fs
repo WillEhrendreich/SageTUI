@@ -297,7 +297,7 @@ module App =
               PresentMs = presentMs
               TotalMs = frameSw.Elapsed.TotalMilliseconds
               ChangedCells = changes.Count }
-          for sub in program.Subscribe model do
+          for sub in subs do
             match sub with
             | FrameTimingsSub toMsg -> dispatch (toMsg timings)
             | _ -> ()

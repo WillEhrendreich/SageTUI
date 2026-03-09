@@ -122,6 +122,14 @@ type TextInputModel = {
   SelectionAnchor: int option
 }
 
+/// Shared character-classification helper for word-movement in text widgets.
+[<AutoOpen>]
+module private TextWidgetHelpers =
+  /// Returns true for letters, digits, and underscore — the word-character set
+  /// shared by TextInput and TextEditor word-movement logic.
+  let inline isWordChar (text: string) (i: int) : bool =
+    text.[i] = '_' || System.Char.IsLetterOrDigit(text, i)
+
 module TextInput =
   /// Empty input with cursor at position 0.
   let empty = { Text = ""; Cursor = 0; SelectionAnchor = None }
@@ -177,8 +185,7 @@ module TextInput =
   /// Returns true if the character at index `i` in `text` is a word character.
   /// Word characters: letters, digits, and underscore.
   /// Uses the two-arg overload of Char.IsLetterOrDigit to handle surrogate pairs.
-  let private isWordChar (text: string) (i: int) : bool =
-    text.[i] = '_' || System.Char.IsLetterOrDigit(text, i)
+  // isWordChar is defined in TextWidgetHelpers (AutoOpen) above.
 
   /// Find the cursor position after jumping one word to the left (Ctrl+Left).
   let wordLeftPos (pos: int) (text: string) : int =
@@ -497,8 +504,14 @@ module ProgressBar =
         let emptyEl =
           El.text (System.String(config.EmptyChar, empty)) |> El.fg ec
         El.row [ filledEl; emptyEl ]
-      | Some fc, None -> El.text bar |> El.fg fc
-      | None, Some ec -> El.text bar |> El.fg ec
+      | Some fc, None ->
+        let filledEl = El.text (System.String(config.FilledChar, filled)) |> El.fg fc
+        let emptyEl  = El.text (System.String(config.EmptyChar, empty))
+        El.row [ filledEl; emptyEl ]
+      | None, Some ec ->
+        let filledEl = El.text (System.String(config.FilledChar, filled))
+        let emptyEl  = El.text (System.String(config.EmptyChar, empty)) |> El.fg ec
+        El.row [ filledEl; emptyEl ]
       | None, None -> El.text bar
     match config.ShowLabel with
     | true ->
@@ -762,14 +775,17 @@ type VirtualTableConfig<'a> = {
   SelectionColor: Color
   /// Border style character for the header separator.
   SeparatorChar: char
+  /// Show a proportional scrollbar on the right side of the data area. Default: false.
+  ShowScrollbar: bool
 }
 
 module VirtualTable =
-  /// Default config: Blue selection, standard horizontal separator.
+  /// Default config: Blue selection, standard horizontal separator, no scrollbar.
   let create (columns: TableColumn<'a> list) : VirtualTableConfig<'a> =
     { Columns = columns
       SelectionColor = Color.Named(BaseColor.Blue, Intensity.Normal)
-      SeparatorChar = '─' }
+      SeparatorChar = '─'
+      ShowScrollbar = false }
 
   /// Render a virtualised table: fixed header + separator + windowed data rows.
   /// The model's ViewportHeight controls how many data rows are rendered.
@@ -787,7 +803,7 @@ module VirtualTable =
       |> El.row
     let listCfg : VirtualListConfig<'a> = {
       SelectionColor = config.SelectionColor
-      ShowScrollbar = false
+      ShowScrollbar = config.ShowScrollbar
       RenderRow = fun selected row ->
         let cols =
           config.Columns
@@ -1205,7 +1221,11 @@ type TextFormStatus =
   | TFEditing
   | TFSubmitting
   | TFSubmitted
+  /// Whole-form failure with an optional error message.
   | TFSubmitFailed of string
+  /// Field-level errors returned from the server, keyed by field ID.
+  /// The view renders each error beneath the matching field.
+  | TFFieldErrors of Map<string, string>
 
 /// The full TextForm model: an ordered list of field states and focus/status bookkeeping.
 type TextFormModel = {
@@ -1221,6 +1241,9 @@ type TextFormMsg =
   | TFTabPrev
   | TFSubmit
   | TFSubmitResult of Result<unit, string>
+  /// Set server-side per-field errors (field ID → error message).
+  /// Transitions status to TFFieldErrors and resumes editing.
+  | TFSetFieldErrors of Map<string, string>
   | TFReset
 
 module TextForm =
@@ -1295,6 +1318,9 @@ module TextForm =
     | TFSubmitResult (Error e) ->
         { m with Status = TFSubmitFailed e }, false
 
+    | TFSetFieldErrors errors ->
+        { m with Status = TFFieldErrors errors }, false
+
     | _ when m.Status = TFSubmitting || m.Status = TFSubmitted ->
         m, false
 
@@ -1341,7 +1367,13 @@ module TextForm =
       | TFSubmitting     -> El.text " Submitting…"  |> El.fg (Named(Yellow, Bright)) |> Some
       | TFSubmitted      -> El.text " ✓ Submitted"   |> El.fg (Named(Green, Bright))  |> Some
       | TFSubmitFailed e -> El.text (sprintf " ✗ %s" e) |> El.fg (Named(Red, Bright)) |> Some
-      | TFEditing        -> None
+      | TFEditing | TFFieldErrors _ -> None
+
+    // Per-field server errors (from TFFieldErrors status) keyed by field ID.
+    let serverFieldErrors =
+      match m.Status with
+      | TFFieldErrors errs -> errs
+      | _ -> Map.empty
 
     let fieldRows =
       m.Rows |> List.mapi (fun i r ->
@@ -1361,13 +1393,16 @@ module TextForm =
           let _ = text  // placeholder shown via TextInput.view
           TextInput.view isFocused r.Input
         let fieldRow = El.row [ indicator; labelEl; inputEl |> El.fill ]
-        let errorEl =
+        let indent = String.replicate (labelWidth + 3) " "
+        let validationError =
           match r.Error with
           | None -> []
-          | Some msg ->
-              let indent = String.replicate (labelWidth + 3) " "
-              [ El.text (indent + "⚠ " + msg) |> El.fg (Named(Red, Normal)) ]
-        fieldRow :: errorEl)
+          | Some msg -> [ El.text (indent + "⚠ " + msg) |> El.fg (Named(Red, Normal)) ]
+        let serverError =
+          match serverFieldErrors |> Map.tryFind r.Field.Id with
+          | None     -> []
+          | Some msg -> [ El.text (indent + "⚠ " + msg) |> El.fg (Named(Red, Bright)) ]
+        fieldRow :: validationError @ serverError)
       |> List.concat
 
     let allRows =
@@ -1481,8 +1516,7 @@ module TextEditor =
            yield! m.Lines.[r2+1..] |]
       replaceLines newLines r1 c1 m
 
-  let private isWordChar (text: string) (i: int) =
-    text.[i] = '_' || System.Char.IsLetterOrDigit(text, i)
+  // isWordChar is defined in TextWidgetHelpers (AutoOpen) above.
 
   let private prevWordBoundary (line: string) (col: int) =
     let mutable i = col - 1
@@ -1587,24 +1621,29 @@ module TextEditor =
       if m'.Col = line.Length && m'.Row < m'.Lines.Length - 1 then setPos (m'.Row + 1) 0 m'
       else setPos m'.Row (nextWordBoundary line m'.Col) m'
     | TESelectLeft ->
-      let newCol = max 0 (m'.Col - 1)
-      // Intentionally clamped at line start (no cross-line selection).
-      // If there's no movement, don't create a degenerate anchor.
-      match newCol = m'.Col with
-      | true -> m'
-      | false ->
+      // At Col=0: extend selection to end of previous line (cross-line selection).
+      // At document start (Row=0, Col=0): no movement, no anchor created.
+      match m'.Col, m'.Row with
+      | 0, 0 -> m'  // document start — no degenerate anchor
+      | 0, _ ->
         let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
-        { m' with Col = newCol; SelectionAnchor = Some anchor }
+        let prevRow = m'.Row - 1
+        { m' with Row = prevRow; Col = m'.Lines.[prevRow].Length; SelectionAnchor = Some anchor }
+      | _ ->
+        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+        { m' with Col = m'.Col - 1; SelectionAnchor = Some anchor }
     | TESelectRight ->
       let line = currentLine m'
-      let newCol = min line.Length (m'.Col + 1)
-      // Intentionally clamped at line end (no cross-line selection).
-      // If there's no movement, don't create a degenerate anchor.
-      match newCol = m'.Col with
-      | true -> m'
-      | false ->
+      // At end-of-line: extend selection to start of next line (cross-line selection).
+      // At document end: no movement, no anchor created.
+      match m'.Col = line.Length, m'.Row = m'.Lines.Length - 1 with
+      | true, true  -> m'  // document end — no degenerate anchor
+      | true, false ->
         let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
-        { m' with Col = newCol; SelectionAnchor = Some anchor }
+        { m' with Row = m'.Row + 1; Col = 0; SelectionAnchor = Some anchor }
+      | false, _ ->
+        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+        { m' with Col = m'.Col + 1; SelectionAnchor = Some anchor }
     | TESelectUp ->
       let newRow = max 0 (m'.Row - 1)
       let newCol = clampCol m'.Lines.[newRow] m'.Col
@@ -1674,13 +1713,13 @@ module TextEditor =
     { m with ScrollTop = top }
 
   /// Wrap a TextEditorModel in an UndoableModel for undo/redo support.
+  /// History is capped at `maxHistoryDepth` entries (default 200) when using `updateWithUndo`.
   let withUndo (m: TextEditorModel) : UndoableModel<TextEditorModel> = Undoable.init m
 
-  /// Update an UndoableModel<TextEditorModel> with a TextEditorMsg.
-  /// Text-modifying messages (Insert, Delete, Backspace, Newline, Paste, Cut, SetContent)
-  /// are committed to the undo stack. TEUndo and TERedo navigate the history.
-  /// Selection and cursor messages update Present without touching the stack.
-  let updateWithUndo (msg: TextEditorMsg) (um: UndoableModel<TextEditorModel>) : UndoableModel<TextEditorModel> =
+  /// Update an UndoableModel<TextEditorModel> with a custom history depth cap.
+  /// Text-modifying messages commit to the undo stack and cap history at `maxHistoryDepth`.
+  /// TEUndo/TERedo navigate the history. Cursor/selection messages update Present only.
+  let updateWithUndoDepth (maxHistoryDepth: int) (msg: TextEditorMsg) (um: UndoableModel<TextEditorModel>) : UndoableModel<TextEditorModel> =
     match msg with
     | TEUndo -> Undoable.undo um
     | TERedo -> Undoable.redo um
@@ -1692,8 +1731,17 @@ module TextEditor =
         | TEPaste _ | TESetContent _ | TECut -> true
         | _ -> false
       match isTextModifying with
-      | true  -> Undoable.commit newPresent um
+      | true  -> um |> Undoable.commit newPresent |> Undoable.truncate maxHistoryDepth
       | false -> { um with Present = newPresent }
+
+  /// Update an UndoableModel<TextEditorModel> with a TextEditorMsg.
+  /// Text-modifying messages commit to the undo stack (history capped at 200 entries).
+  /// TEUndo and TERedo navigate the history.
+  /// Selection and cursor messages update Present without touching the stack.
+  /// Note: prefer `updateWithUndo` over the plain `update` when undo support is desired.
+  /// For a custom depth cap use `updateWithUndoDepth`.
+  let updateWithUndo (msg: TextEditorMsg) (um: UndoableModel<TextEditorModel>) : UndoableModel<TextEditorModel> =
+    updateWithUndoDepth 200 msg um
 
   /// Render the editor into an Element.
   /// `focused` controls cursor visibility; `height` is the number of visible rows.
@@ -1777,6 +1825,8 @@ type FuzzyFinderMsg<'item> =
 /// Model for the FuzzyFinder widget.
 type FuzzyFinderModel<'item> = {
   Items       : 'item array
+  /// Cached string representation of each item — computed once in `init`, invalidated on `FFSetItems`.
+  Candidates  : string array
   /// Function to get the string to match against for each item.
   ToString    : 'item -> string
   /// The query input model (supports cursor, selection, word movement).
@@ -1859,7 +1909,7 @@ module FuzzyFinder =
   let init (toString: 'item -> string) (items: 'item array) : FuzzyFinderModel<'item> =
     let candidates = items |> Array.map toString
     let results = matchAll "" candidates |> Array.mapi (fun i m -> { m with Score = float -i })
-    { Items = items; ToString = toString; QueryInput = TextInput.empty; Results = results; SelectedIdx = 0 }
+    { Items = items; Candidates = candidates; ToString = toString; QueryInput = TextInput.empty; Results = results; SelectedIdx = 0 }
 
   /// Get the current query text.
   let query (m: FuzzyFinderModel<'item>) : string = m.QueryInput.Text
@@ -1876,8 +1926,7 @@ module FuzzyFinder =
       | false -> None
 
   let private requery (queryInput: TextInputModel) (m: FuzzyFinderModel<'item>) =
-    let candidates = m.Items |> Array.map m.ToString
-    let results = matchAll queryInput.Text candidates
+    let results = matchAll queryInput.Text m.Candidates
     { m with QueryInput = queryInput; Results = results; SelectedIdx = 0 }
 
   /// Update the FuzzyFinder model.
@@ -1894,7 +1943,8 @@ module FuzzyFinder =
     | FFMoveDown       -> { m with SelectedIdx = min (m.Results.Length - 1) (m.SelectedIdx + 1) }
     | FFSelect | FFCancel -> m  // caller handles side effects
     | FFSetItems items ->
-      let m' = { m with Items = items }
+      let candidates = items |> Array.map m.ToString
+      let m' = { m with Items = items; Candidates = candidates }
       requery m'.QueryInput m'
 
   /// Create a Cmd that runs a fuzzy search asynchronously on a thread pool thread.

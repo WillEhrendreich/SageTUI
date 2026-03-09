@@ -67,6 +67,7 @@ module Cmd =
   /// Run a Task and dispatch the result as a message.
   /// If the task throws, the exception is logged to stderr and ignored — the app
   /// continues running. For controlled error handling use <see cref="ofTaskResult"/>.
+  [<System.Obsolete("Prefer Cmd.ofTaskResult for controlled error handling. Cmd.ofTask silently swallows exceptions to stderr.")>]
   let ofTask (task: unit -> Threading.Tasks.Task<'a>) (toMsg: 'a -> 'msg) : Cmd<'msg> =
     OfAsync(fun dispatch ->
       async {
@@ -316,10 +317,9 @@ module Undoable =
     | false -> commit newPresent m
 
   /// Truncate the undo history to at most `maxDepth` entries. Oldest entries are discarded.
+  /// O(maxDepth) — does not traverse the full history list.
   let truncate (maxDepth: int) (m: UndoableModel<'model>) : UndoableModel<'model> =
-    match m.Past.Length > maxDepth with
-    | true -> { m with Past = m.Past |> List.truncate maxDepth }
-    | false -> m
+    { m with Past = m.Past |> List.truncate maxDepth }
 
 /// The Elm Architecture program definition. Init/Update/View/Subscribe.
 type Program<'model, 'msg> = {
@@ -372,15 +372,17 @@ module Program =
   /// intermediate (model, cmd) states. The initial model comes from Init.
   /// Useful for unit-testing update logic without spinning up a terminal.
   ///
-  /// The first element of the returned list is `(initModel, initCmd)` from `program.Init()`.
-  /// Subsequent elements are the results of applying each message in order.
+  /// Simulate running a list of messages through a program's Update function.
+  /// Returns one `(model, cmd)` pair per message, in order.
+  /// The first element is the state **after the first message** — the initial
+  /// `(initModel, initCmd)` from `program.Init()` is not included.
+  /// Use `List.last` to get the final model after all messages.
   ///
   /// Example:
   /// ```fsharp
   /// let states = Program.simulate [Increment; Increment; Decrement] myProgram
   /// let finalModel = states |> List.last |> fst
-  /// // Check the initial command (e.g., to verify Init fires a load command):
-  /// let initState = states |> List.head
+  /// // states.[0] is the state after Increment (not the initial state)
   /// ```
   let simulate (msgs: 'msg list) (program: Program<'model, 'msg>) : ('model * Cmd<'msg>) list =
     let initModel, initCmd = program.Init()

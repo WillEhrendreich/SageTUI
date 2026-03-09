@@ -265,14 +265,15 @@ let selectionTests = testList "TextEditor.Selection" [
     m'.SelectionAnchor |> Expect.equal "anchor at (0,0)" (Some (0, 0))
   }
   // ── boundary / degenerate-anchor tests ───────────────────────────────────
-  test "TESelectLeft at Col=0 does not change model (no degenerate anchor)" {
-    let m = mk "hello"  // cursor at Col=0
+  test "TESelectLeft at document start (Row=0 Col=0) does not create anchor" {
+    let m = mk "hello"  // cursor at Row=0, Col=0 — document start
     let m' = TextEditor.update TESelectLeft m
     m'.Col |> Expect.equal "col unchanged" 0
+    m'.Row |> Expect.equal "row unchanged" 0
     m'.SelectionAnchor |> Expect.equal "no anchor created" None
   }
-  test "TESelectRight at end-of-line does not change model (no degenerate anchor)" {
-    let m = { mk "hello" with Col = 5 }  // cursor at end
+  test "TESelectRight at single-line document end does not create anchor" {
+    let m = { mk "hello" with Col = 5 }  // cursor at end of single line (= document end)
     let m' = TextEditor.update TESelectRight m
     m'.Col |> Expect.equal "col unchanged" 5
     m'.SelectionAnchor |> Expect.equal "no anchor created" None
@@ -302,6 +303,35 @@ let selectionTests = testList "TextEditor.Selection" [
     let m' = m |> TextEditor.update TESelectAll |> TextEditor.update (TEInsertChar 'X')
     m'.Lines |> Expect.hasLength "one line" 1
     m'.Lines.[0] |> Expect.equal "replaced" "X"
+  }
+  // ── cross-line selection ────────────────────────────────────────────────────
+  test "TESelectLeft at Col=0 extends selection to end of previous line" {
+    let m = { mk "abc\ndef" with Row = 1; Col = 0 }
+    let m' = TextEditor.update TESelectLeft m
+    m'.Row |> Expect.equal "moved to row 0" 0
+    m'.Col |> Expect.equal "col at end of 'abc'" 3
+    m'.SelectionAnchor |> Expect.equal "anchor at (1,0)" (Some (1, 0))
+  }
+  test "TESelectRight at end-of-line extends selection to start of next line" {
+    let m = { mk "abc\ndef" with Row = 0; Col = 3 }
+    let m' = TextEditor.update TESelectRight m
+    m'.Row |> Expect.equal "moved to row 1" 1
+    m'.Col |> Expect.equal "col at 0" 0
+    m'.SelectionAnchor |> Expect.equal "anchor at (0,3)" (Some (0, 3))
+  }
+  test "TESelectLeft at first line Col=0 stays put (document start)" {
+    let m = mk "hello"  // cursor at row=0, col=0
+    let m' = TextEditor.update TESelectLeft m
+    m'.Row |> Expect.equal "row unchanged" 0
+    m'.Col |> Expect.equal "col unchanged" 0
+    m'.SelectionAnchor |> Expect.equal "no anchor at doc start" None
+  }
+  test "TESelectRight at last line end stays put (document end)" {
+    let m = { mk "abc\ndef" with Row = 1; Col = 3 }  // at 'f' end
+    let m' = TextEditor.update TESelectRight m
+    m'.Row |> Expect.equal "row unchanged" 1
+    m'.Col |> Expect.equal "col unchanged" 3
+    m'.SelectionAnchor |> Expect.equal "no anchor at doc end" None
   }
 ]
 

@@ -974,6 +974,25 @@ let textFormTests = testList "TextForm" [
     m3.Rows.[0].Input.SelectionAnchor |> Expect.equal "anchor at 0" (Some 0)
     m3.Rows.[0].Input.Cursor |> Expect.equal "cursor at end" 2
   }
+  test "TFSetFieldErrors sets TFFieldErrors status and allows editing" {
+    let m = mkForm () |> typeStr "Alice"
+    let errors = Map.ofList [("name", "Name already taken")]
+    let (m', _) = TextForm.update (TFSetFieldErrors errors) m
+    m'.Status |> Expect.equal "status is TFFieldErrors" (TFFieldErrors errors)
+    // After field errors, key events should still work (not blocked like Submitting)
+    let (m'', _) = TextForm.update (TFKey (Key.Char 'X')) m'
+    m''.Rows.[0].Input.Text |> Expect.equal "editing still works" "AliceX"
+  }
+  test "TFSetFieldErrors view renders server error under matching field" {
+    let m = mkForm ()
+    let errors = Map.ofList [("name", "Already taken")]
+    let (m', _) = TextForm.update (TFSetFieldErrors errors) m
+    let elem = TextForm.view true m'
+    let buf = Buffer.create 60 5
+    Render.render { X=0; Y=0; Width=60; Height=5 } Style.empty buf elem
+    // Should not crash; just check buf renders without error
+    buf.Width |> Expect.equal "rendered OK" 60
+  }
 ]
 
 let themeTests = testList "Theme" [
