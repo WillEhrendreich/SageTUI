@@ -216,6 +216,7 @@ module App =
           match oldElem with
           | Keyed(_, _, exitTransition, _) ->
             let snapshot = Array.copy frontBuf.Cells
+            let area = prevKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ())
             activeTransitions <-
               { Key = key
                 Transition = exitTransition
@@ -223,7 +224,11 @@ module App =
                 DurationMs = TransitionDuration.get exitTransition
                 Easing = Ease.cubicInOut
                 SnapshotBefore = snapshot
-                Area = prevKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ()) }
+                Area = area
+                DissolveOrder =
+                  match exitTransition with
+                  | Dissolve _ -> Some (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (area.Width * area.Height))
+                  | _ -> None }
               :: activeTransitions
           | _ -> ()
 
@@ -246,11 +251,12 @@ module App =
         frameSw.Restart()
         ArenaRender.renderRoot arena rootHandle area backBuf
         let renderMs = frameSw.Elapsed.TotalMilliseconds
-        // Build keyed-area map only when transitions are actually active.
-        // For apps without El.keyed elements or with no pending/active transitions,
-        // this avoids allocating a Map<string, Area> (AVL tree) per frame.
+        // Rebuild keyed-area map when any keyed elements are present.
+        // Guarding on HitMap.Count > 0 skips the Map allocation entirely for apps
+        // without El.keyed elements. prevKeyAreas for apps that have keyed elements
+        // but no HitMap entries would be stale — so we don't gate on transition state.
         let currentKeyAreas =
-          match arena.HitMap.Count > 0 && (not (List.isEmpty entering) || not (List.isEmpty exiting) || not (List.isEmpty activeTransitions)) with
+          match arena.HitMap.Count > 0 with
           | true -> ArenaRender.keyAreas arena
           | false -> prevKeyAreas
 
@@ -258,6 +264,7 @@ module App =
         for (key, newElem) in entering do
           match newElem with
           | Keyed(_, enterTransition, _, _) ->
+            let transArea = currentKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ())
             activeTransitions <-
               { Key = key
                 Transition = enterTransition
@@ -265,7 +272,11 @@ module App =
                 DurationMs = TransitionDuration.get enterTransition
                 Easing = Ease.cubicInOut
                 SnapshotBefore = Array.create (width * height) PackedCell.empty
-                Area = currentKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ()) }
+                Area = transArea
+                DissolveOrder =
+                  match enterTransition with
+                  | Dissolve _ -> Some (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (transArea.Width * transArea.Height))
+                  | _ -> None }
               :: activeTransitions
           | _ -> ()
 
@@ -280,7 +291,11 @@ module App =
           | Wipe(dir, _) ->
             TransitionFx.applyWipe t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
           | Dissolve _ ->
-            let order = TransitionFx.fisherYatesShuffle (at.Key.GetHashCode()) (at.Area.Width * at.Area.Height)
+            // DissolveOrder is always Some for Dissolve — computed once at transition start.
+            let order =
+              match at.DissolveOrder with
+              | Some o -> o
+              | None -> TransitionFx.fisherYatesShuffle (at.Key.GetHashCode()) (at.Area.Width * at.Area.Height)
             TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
           | _ -> ())
 

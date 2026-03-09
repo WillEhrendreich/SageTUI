@@ -8,6 +8,10 @@ type ActiveTransition = {
   Easing: Easing
   SnapshotBefore: PackedCell array
   Area: Area
+  /// Pre-computed shuffle order for Dissolve transitions — computed once when the
+  /// transition starts to avoid allocating a fresh int array every frame.
+  /// None for all other transition kinds.
+  DissolveOrder: int array option
 }
 
 module ActiveTransition =

@@ -2940,27 +2940,27 @@ let activeTransitionTests = testList "ActiveTransition" [
   testCase "progress at start = 0" <| fun () ->
     let at = { Key = "k"; Transition = ColorMorph 200<ms>; StartMs = 1000L
                DurationMs = 200; Easing = Ease.linear
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
     ActiveTransition.progress 1000L at |> Expect.equal "start" 0.0
   testCase "progress at end = 1" <| fun () ->
     let at = { Key = "k"; Transition = ColorMorph 200<ms>; StartMs = 1000L
                DurationMs = 200; Easing = Ease.linear
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
     ActiveTransition.progress 1200L at |> Expect.equal "end" 1.0
   testCase "isDone at end" <| fun () ->
     let at = { Key = "k"; Transition = Fade 200<ms>; StartMs = 1000L
                DurationMs = 200; Easing = Ease.linear
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
     ActiveTransition.isDone 1200L at |> Expect.isTrue "done"
   testCase "not done before end" <| fun () ->
     let at = { Key = "k"; Transition = Fade 200<ms>; StartMs = 1000L
                DurationMs = 200; Easing = Ease.linear
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
     ActiveTransition.isDone 1100L at |> Expect.isFalse "not done"
   testCase "easing applied to progress" <| fun () ->
     let at = { Key = "k"; Transition = ColorMorph 200<ms>; StartMs = 0L
                DurationMs = 200; Easing = Ease.quadOut
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 } }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
     ActiveTransition.progress 100L at |> Expect.equal "quadOut at 0.5" 0.75
 ]
 
@@ -3653,3 +3653,4 @@ let allTests = testList "All" [
     ]
   ]
 ]
+

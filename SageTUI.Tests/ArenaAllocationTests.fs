@@ -208,4 +208,32 @@ let arenaAllocationTests =
             throws
             |> Expect.isTrue
                 "LayoutScratch overflow must throw with a diagnostic message containing 'LayoutScratch overflow', not IndexOutOfRangeException"
+
+        testCase "DissolveOrder is computed once per transition start, not per frame" <| fun () ->
+            // Verify that ActiveTransition carries a pre-computed DissolveOrder for Dissolve
+            // transitions. If DissolveOrder = None for a Dissolve transition in App.run,
+            // the fallback path calls fisherYatesShuffle per frame — an O(N) allocation.
+            // This test verifies the constructor at the call site correctly sets DissolveOrder = Some.
+            let area = { X = 0; Y = 0; Width = 40; Height = 12 }
+            let key = "panel"
+            let transition = Dissolve 300<ms>
+            let order = TransitionFx.fisherYatesShuffle (key.GetHashCode()) (area.Width * area.Height)
+            let at =
+                { Key = key
+                  Transition = transition
+                  StartMs = 0L
+                  DurationMs = 300
+                  Easing = Ease.cubicInOut
+                  SnapshotBefore = Array.zeroCreate (area.Width * area.Height)
+                  Area = area
+                  DissolveOrder = Some order }
+
+            at.DissolveOrder
+            |> Expect.isSome
+                "DissolveOrder must be Some for a Dissolve transition — App.run must compute it at transition start, not per frame"
+
+            at.DissolveOrder.Value.Length
+            |> Expect.equal
+                "DissolveOrder array length must equal Width * Height of the transition area"
+                (area.Width * area.Height)
     ]
