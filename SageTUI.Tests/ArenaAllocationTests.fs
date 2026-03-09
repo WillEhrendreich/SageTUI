@@ -277,7 +277,7 @@ let arenaAllocationTests =
             |> Expect.isLessThanOrEqual
                 (sprintf "Dissolve per-frame apply allocated %d bytes (expected < 64). DissolveOrder must be pre-computed and passed as a cached array, not re-allocated per frame." perFrame)
 
-        testSequenced (testCase "reconcile tier allocates < 2KB per frame in steady state (8 keyed elements)" <| fun () ->
+        testSequenced (testCase "reconcile tier allocates < 6KB per frame in steady state (8 keyed elements)" <| fun () ->
             // Panel: measures the full reconcile path — findKeyedElements + reconcile + keyAreas —
             // for a tree with 8 keyed elements in steady state (same tree both frames).
             // Before Sprint 26, 'staying' in reconcile added an extra Map.filter + Map.toList per frame.

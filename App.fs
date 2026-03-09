@@ -302,8 +302,12 @@ module App =
               TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
             | NoPayload ->
               failwith (sprintf "Key '%s': Dissolve transition has NoPayload — DissolvePayload must be set at construction site" at.Key)
-          // TODO: SlideIn, Grow, Sequence, Custom not yet implemented — no visual effect
-          | _ -> ())
+          // SlideIn, Grow, Sequence, Custom: not yet implemented — no visual effect.
+          // Explicit arms (not | _ ->) so the compiler warns when a new Transition case is added.
+          | SlideIn _ -> ()
+          | Grow _ -> ()
+          | Sequence _ -> ()
+          | Custom _ -> ())
 
         // Remove completed transitions
         activeTransitions <- activeTransitions |> List.filter (fun at -> not (ActiveTransition.isDone nowMs at))
