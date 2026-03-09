@@ -50,6 +50,10 @@ type Element =
   | Canvas of CanvasConfig
   | Aligned of HAlign * VAlign * Element
   | Gapped of int * Element
+  /// Responsive layout breakpoints. Each tuple is (minWidth, element).
+  /// The last breakpoint whose minWidth ≤ available width is selected.
+  /// Breakpoints are evaluated from first to last; use ascending order.
+  | Responsive of (int * Element) list
 
 /// Element constructors and combinators. All functions return Element values.
 module El =
@@ -241,8 +245,20 @@ module El =
     |> List.map (styledText style)
     |> column
 
+  /// Responsive layout breakpoints. Provide a list of `(minWidth, element)` pairs in
+  /// ascending order; the last pair whose `minWidth ≤ availableWidth` is rendered.
+  /// This is the TUI equivalent of CSS media queries.
+  ///
+  /// Example:
+  ///   El.responsive [
+  ///     (0,  El.column [ El.text "Compact" ])
+  ///     (60, El.row [ El.text "Normal" ])
+  ///     (120, El.row [ El.text "Wide"; sidePanel ])
+  ///   ]
+  let responsive (breakpoints: (int * Element) list) : Element =
+    Responsive breakpoints
+
   /// Memoize a view function: returns cached Element when input equals the previous input.
-  /// Uses structural equality (EqualityComparer<'a>.Default) so value types and F# records
   /// are compared correctly. Declare at module level to persist the cache across renders.
   /// Use at module level: `let lazyCounter = El.lazy' Counter.view`
   let lazy' (viewFn: 'a -> Element) : ('a -> Element) =
@@ -321,6 +337,8 @@ module El =
         label (sprintf "Align:%A,%A" h v) (Aligned(h, v, dbg (depth + 1) child))
       | Gapped(g, child) ->
         label (sprintf "Gap%d" g) (Gapped(g, dbg (depth + 1) child))
+      | Responsive breakpoints ->
+        label "Resp" (Responsive(breakpoints |> List.map (fun (minW, child) -> (minW, dbg (depth + 1) child))))
     dbg 0 elem
 
 /// Computation expression builders for declarative, imperative-style layout construction.

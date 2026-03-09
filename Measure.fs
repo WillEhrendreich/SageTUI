@@ -35,6 +35,8 @@ module Measure =
     | Canvas _ -> 0
     | Aligned(_, _, child) -> measureWidth child
     | Gapped(_, child) -> measureWidth child
+    | Responsive breakpoints ->
+      breakpoints |> List.tryHead |> Option.map (snd >> measureWidth) |> Option.defaultValue 0
 
   let rec measureHeight (elem: Element) : int =
     match elem with
@@ -64,6 +66,8 @@ module Measure =
     | Canvas _ -> 0
     | Aligned(_, _, child) -> measureHeight child
     | Gapped(_, child) -> measureHeight child
+    | Responsive breakpoints ->
+      breakpoints |> List.tryHead |> Option.map (snd >> measureHeight) |> Option.defaultValue 0
 
   /// Measure content sizes for children in a Row context (width dimension).
   let childWidths (children: Element list) : int list =

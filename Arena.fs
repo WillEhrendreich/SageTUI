@@ -224,6 +224,29 @@ module Arena =
       let (NodeHandle ci) = lower arena child
       arena.Nodes.[idx] <- mkNode 12uy 0UL 0us 0uy (int16 gap) ci -1 0 0
       h
+    | Responsive breakpoints ->
+      // Kind 13: each child in linked list is a "breakpoint wrapper" node (Kind 14)
+      // where ConstraintVal = minWidth and FirstChild = the actual element node.
+      let h = FrameArena.allocNode arena
+      let (NodeHandle idx) = h
+      let fc =
+        match breakpoints with
+        | [] -> -1
+        | _ ->
+          let wrappers =
+            breakpoints |> List.map (fun (minW, child) ->
+              let wh = FrameArena.allocNode arena
+              let (NodeHandle wi) = wh
+              let (NodeHandle ci) = lower arena child
+              arena.Nodes.[wi] <- mkNode 14uy 0UL 0us 0uy (int16 minW) ci -1 0 0
+              wi)
+          // Link wrappers as siblings
+          let first = wrappers.[0]
+          wrappers |> List.pairwise |> List.iter (fun (a, b) ->
+            arena.Nodes.[a] <- { arena.Nodes.[a] with NextSibling = b })
+          first
+      arena.Nodes.[idx] <- mkNode 13uy 0UL 0us 0uy 0s fc -1 0 0
+      h
 
   and lowerChildren (arena: FrameArena) (children: Element list) : int =
     match children with

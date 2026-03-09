@@ -105,3 +105,16 @@ module Render =
             render (Layout.intersectArea area childArea) inheritedStyle buf c) areas unwrapped
         | other ->
           render area inheritedStyle buf other
+
+      | Responsive breakpoints ->
+        let selected =
+          breakpoints
+          |> List.filter (fun (minW, _) -> area.Width >= minW)
+          |> List.tryLast
+          |> Option.map snd
+        match selected with
+        | Some child -> render area inheritedStyle buf child
+        | None ->
+          match List.tryHead breakpoints with
+          | Some (_, child) -> render area inheritedStyle buf child
+          | None -> ()

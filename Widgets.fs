@@ -964,3 +964,455 @@ module TextForm =
       | None -> fieldRows
 
     El.column allRows
+
+// ─── TextEditor ────────────────────────────────────────────────────────────
+
+/// A multi-line text editor model using a string array.
+/// Suitable for note-taking, config editing, and multi-line inputs in a TUI.
+type TextEditorModel = {
+  Lines           : string array
+  Row             : int
+  Col             : int
+  /// Optional selection anchor (row, col). None = no selection.
+  SelectionAnchor : (int * int) option
+  /// Index of the first visible line (for scrolling).
+  ScrollTop       : int
+  /// Optional maximum number of lines (None = unlimited).
+  MaxLines        : int option
+}
+
+type TextEditorMsg =
+  | TEInsertChar    of char
+  | TENewline
+  | TEBackspace
+  | TEDelete
+  | TEMoveLeft
+  | TEMoveRight
+  | TEMoveUp
+  | TEMoveDown
+  | TEMoveLineStart
+  | TEMoveLineEnd
+  | TEMoveDocStart
+  | TEMoveDocEnd
+  | TEWordJumpLeft
+  | TEWordJumpRight
+  | TESelectLeft    | TESelectRight
+  | TESelectAll
+  | TECut
+  | TECopy
+  | TEPaste of string
+  | TESetContent of string
+
+module TextEditor =
+  let private clampCol (line: string) col = max 0 (min col line.Length)
+
+  /// Create a new TextEditorModel with the given initial content.
+  let init (initialContent: string) : TextEditorModel =
+    let lines =
+      match initialContent with
+      | "" -> [| "" |]
+      | s  -> s.Split('\n')
+    { Lines = lines; Row = 0; Col = 0; SelectionAnchor = None; ScrollTop = 0; MaxLines = None }
+
+  /// Get the full text content as a single string.
+  let content (m: TextEditorModel) : string =
+    m.Lines |> String.concat "\n"
+
+  /// Set the maximum number of lines.
+  let withMaxLines (n: int) (m: TextEditorModel) =
+    { m with MaxLines = Some n }
+
+  let private currentLine (m: TextEditorModel) = m.Lines.[m.Row]
+
+  let private setPos row col (m: TextEditorModel) =
+    let r = max 0 (min row (m.Lines.Length - 1))
+    let c = clampCol m.Lines.[r] col
+    { m with Row = r; Col = c; SelectionAnchor = None }
+
+  let private replaceLines (lines: string array) row col (m: TextEditorModel) =
+    let lines' = if lines.Length = 0 then [| "" |] else lines
+    let r = max 0 (min row (lines'.Length - 1))
+    let c = clampCol lines'.[r] col
+    { m with Lines = lines'; Row = r; Col = c; SelectionAnchor = None }
+
+  /// Returns the selected text as a string, or None if no selection.
+  let selectedText (m: TextEditorModel) : string option =
+    match m.SelectionAnchor with
+    | None -> None
+    | Some (ar, ac) ->
+      let (r1, c1, r2, c2) =
+        if (ar, ac) <= (m.Row, m.Col) then (ar, ac, m.Row, m.Col)
+        else (m.Row, m.Col, ar, ac)
+      if r1 = r2 then Some m.Lines.[r1].[c1..c2-1]
+      else
+        let first  = m.Lines.[r1].[c1..]
+        let middle = m.Lines.[r1+1..r2-1]
+        let last   = m.Lines.[r2].[..c2-1]
+        Some (String.concat "\n" [| yield first; yield! middle; yield last |])
+
+  /// Delete the selected region and return the new model.
+  let private deleteSelection (m: TextEditorModel) : TextEditorModel =
+    match m.SelectionAnchor with
+    | None -> m
+    | Some (ar, ac) ->
+      let (r1, c1, r2, c2) =
+        if (ar, ac) <= (m.Row, m.Col) then (ar, ac, m.Row, m.Col)
+        else (m.Row, m.Col, ar, ac)
+      let firstPart = m.Lines.[r1].[..c1-1]
+      let lastPart  = m.Lines.[r2].[c2..]
+      let newLines =
+        [| yield! m.Lines.[..r1-1]
+           yield firstPart + lastPart
+           yield! m.Lines.[r2+1..] |]
+      replaceLines newLines r1 c1 m
+
+  let private isWordChar (c: char) = System.Char.IsLetterOrDigit c || c = '_'
+
+  let private prevWordBoundary (line: string) (col: int) =
+    let mutable i = col - 1
+    while i > 0 && not (isWordChar line.[i-1]) do i <- i - 1
+    while i > 0 && isWordChar line.[i-1]      do i <- i - 1
+    i
+
+  let private nextWordBoundary (line: string) (col: int) =
+    let mutable i = col
+    while i < line.Length && not (isWordChar line.[i]) do i <- i + 1
+    while i < line.Length && isWordChar line.[i]       do i <- i + 1
+    i
+
+  /// Update the model with a TextEditorMsg.
+  let update (msg: TextEditorMsg) (m: TextEditorModel) : TextEditorModel =
+    let m' =
+      match m.SelectionAnchor with
+      | Some _ when (match msg with TECut | TEDelete | TEBackspace | TEInsertChar _ | TENewline | TEPaste _ -> true | _ -> false) ->
+        deleteSelection m
+      | _ -> m
+    match msg with
+    | TEInsertChar c ->
+      let line = m'.Lines.[m'.Row]
+      let newLine = line.[..m'.Col-1] + string c + line.[m'.Col..]
+      let newLines = m'.Lines |> Array.mapi (fun i l -> if i = m'.Row then newLine else l)
+      replaceLines newLines m'.Row (m'.Col + 1) m'
+    | TENewline ->
+      match m'.MaxLines with
+      | Some n when m'.Lines.Length >= n -> m'
+      | _ ->
+        let line = m'.Lines.[m'.Row]
+        let before = line.[..m'.Col-1]
+        let after  = line.[m'.Col..]
+        let newLines =
+          [| yield! m'.Lines.[..m'.Row-1]
+             yield before
+             yield after
+             yield! m'.Lines.[m'.Row+1..] |]
+        replaceLines newLines (m'.Row + 1) 0 m'
+    | TEBackspace ->
+      match m'.SelectionAnchor with
+      | Some _ -> m'  // already deleted in m' above
+      | None ->
+        match m'.Col, m'.Row with
+        | 0, 0 -> m'
+        | 0, r ->
+          let prev    = m'.Lines.[r-1]
+          let curr    = m'.Lines.[r]
+          let merged  = prev + curr
+          let newLines =
+            [| yield! m'.Lines.[..r-2]
+               yield merged
+               yield! m'.Lines.[r+1..] |]
+          replaceLines newLines (r-1) prev.Length m'
+        | col, r ->
+          let line    = m'.Lines.[r]
+          let newLine = line.[..col-2] + line.[col..]
+          let newLines = m'.Lines |> Array.mapi (fun i l -> if i = r then newLine else l)
+          replaceLines newLines r (col - 1) m'
+    | TEDelete ->
+      match m'.SelectionAnchor with
+      | Some _ -> m'
+      | None ->
+        let line = m'.Lines.[m'.Row]
+        if m'.Col = line.Length then
+          if m'.Row = m'.Lines.Length - 1 then m'
+          else
+            let next = m'.Lines.[m'.Row + 1]
+            let merged = line + next
+            let newLines =
+              [| yield! m'.Lines.[..m'.Row-1]
+                 yield merged
+                 yield! m'.Lines.[m'.Row+2..] |]
+            replaceLines newLines m'.Row m'.Col m'
+        else
+          let newLine = line.[..m'.Col-1] + line.[m'.Col+1..]
+          let newLines = m'.Lines |> Array.mapi (fun i l -> if i = m'.Row then newLine else l)
+          replaceLines newLines m'.Row m'.Col m'
+    | TEMoveLeft ->
+      match m'.Col with
+      | 0 when m'.Row > 0 -> setPos (m'.Row - 1) m'.Lines.[m'.Row - 1].Length m'
+      | _ -> setPos m'.Row (m'.Col - 1) m'
+    | TEMoveRight ->
+      let line = currentLine m'
+      if m'.Col = line.Length then
+        if m'.Row < m'.Lines.Length - 1 then setPos (m'.Row + 1) 0 m'
+        else m'
+      else setPos m'.Row (m'.Col + 1) m'
+    | TEMoveUp   -> setPos (m'.Row - 1) m'.Col m'
+    | TEMoveDown -> setPos (m'.Row + 1) m'.Col m'
+    | TEMoveLineStart -> setPos m'.Row 0 m'
+    | TEMoveLineEnd   -> setPos m'.Row (currentLine m').Length m'
+    | TEMoveDocStart  -> setPos 0 0 m'
+    | TEMoveDocEnd    ->
+      let lastRow = m'.Lines.Length - 1
+      setPos lastRow m'.Lines.[lastRow].Length m'
+    | TEWordJumpLeft  ->
+      if m'.Col = 0 && m'.Row > 0 then setPos (m'.Row - 1) m'.Lines.[m'.Row - 1].Length m'
+      else setPos m'.Row (prevWordBoundary m'.Lines.[m'.Row] m'.Col) m'
+    | TEWordJumpRight ->
+      let line = currentLine m'
+      if m'.Col = line.Length && m'.Row < m'.Lines.Length - 1 then setPos (m'.Row + 1) 0 m'
+      else setPos m'.Row (nextWordBoundary line m'.Col) m'
+    | TESelectLeft ->
+      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+      let newCol = max 0 (m'.Col - 1)
+      { m' with Col = newCol; SelectionAnchor = Some anchor }
+    | TESelectRight ->
+      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+      let line = currentLine m'
+      let newCol = min line.Length (m'.Col + 1)
+      { m' with Col = newCol; SelectionAnchor = Some anchor }
+    | TESelectAll ->
+      let lastRow = m'.Lines.Length - 1
+      { m' with Row = lastRow; Col = m'.Lines.[lastRow].Length; SelectionAnchor = Some (0, 0) }
+    | TECopy  -> m'  // caller reads selectedText m
+    | TECut   -> m'  // selection already deleted above
+    | TEPaste text ->
+      let toInsert = text.Split('\n')
+      match toInsert with
+      | [| single |] ->
+        let line = m'.Lines.[m'.Row]
+        let newLine = line.[..m'.Col-1] + single + line.[m'.Col..]
+        let newLines = m'.Lines |> Array.mapi (fun i l -> if i = m'.Row then newLine else l)
+        replaceLines newLines m'.Row (m'.Col + single.Length) m'
+      | parts ->
+        let firstPart = m'.Lines.[m'.Row].[..m'.Col-1] + parts.[0]
+        let lastPart  = parts.[parts.Length-1] + m'.Lines.[m'.Row].[m'.Col..]
+        let newLines =
+          [| yield! m'.Lines.[..m'.Row-1]
+             yield firstPart
+             yield! parts.[1..parts.Length-2]
+             yield lastPart
+             yield! m'.Lines.[m'.Row+1..] |]
+        replaceLines newLines (m'.Row + parts.Length - 1) parts.[parts.Length-1].Length m'
+    | TESetContent s ->
+      let lines = match s with "" -> [| "" |] | _ -> s.Split('\n')
+      { m' with Lines = lines; Row = 0; Col = 0; SelectionAnchor = None; ScrollTop = 0 }
+
+  /// Adjust ScrollTop so that Row is visible in a viewport of `height` rows.
+  let scrollIntoView (height: int) (m: TextEditorModel) : TextEditorModel =
+    let top =
+      if m.Row < m.ScrollTop then m.Row
+      elif m.Row >= m.ScrollTop + height then m.Row - height + 1
+      else m.ScrollTop
+    { m with ScrollTop = top }
+
+  /// Render the editor into an Element.
+  /// `focused` controls cursor visibility; `height` is the number of visible rows.
+  let view (focused: bool) (height: int) (m: TextEditorModel) : Element =
+    let m' = scrollIntoView height m
+    let visibleLines = m'.Lines.[m'.ScrollTop .. min (m'.ScrollTop + height - 1) (m'.Lines.Length - 1)]
+    let rows =
+      visibleLines |> Array.mapi (fun vi line ->
+        let absRow = m'.ScrollTop + vi
+        let isCursorRow = focused && absRow = m'.Row
+        match isCursorRow with
+        | false -> El.text (if line = "" then " " else line)
+        | true ->
+          // Split line into before-cursor, cursor-char, after-cursor
+          let col = m'.Col
+          let before = if col > 0 then line.[..col-1] else ""
+          let cursorChar = if col < line.Length then string line.[col] else " "
+          let after  = if col < line.Length - 1 then line.[col+1..] else ""
+          El.row [
+            if before <> "" then El.text before
+            El.text cursorChar |> El.reverse
+            if after  <> "" then El.text after
+          ])
+      |> Array.toList
+    El.column rows
+
+// ─── FuzzyFinder ────────────────────────────────────────────────────────────
+
+/// A single fuzzy match result.
+type FuzzyMatch = {
+  /// The matched candidate string.
+  Candidate      : string
+  /// Relevance score (higher = better match).
+  Score          : float
+  /// Zero-based indices of matched characters in Candidate (for highlighting).
+  MatchPositions : int array
+}
+
+/// Message type for the FuzzyFinder widget.
+type FuzzyFinderMsg<'item> =
+  | FFQueryChanged of string
+  | FFMoveUp
+  | FFMoveDown
+  | FFSelect
+  | FFCancel
+  | FFSetItems of 'item array
+
+/// Model for the FuzzyFinder widget.
+type FuzzyFinderModel<'item> = {
+  Items       : 'item array
+  /// Function to get the string to match against for each item.
+  ToString    : 'item -> string
+  Query       : string
+  Results     : FuzzyMatch array
+  SelectedIdx : int
+}
+
+module FuzzyFinder =
+
+  // ── Scoring ──────────────────────────────────────────────────────────────
+
+  /// Score `query` against `candidate`.
+  /// Returns Some (score, positions) if it matches, None otherwise.
+  let scoreMatch (query: string) (candidate: string) : (float * int array) option =
+    if query.Length = 0 then Some (0.0, [||])
+    else
+      let cLower = candidate.ToLowerInvariant()
+      let qLower = query.ToLowerInvariant()
+      // Forward-pass subsequence check
+      let positions = Array.create query.Length -1
+      let mutable qi = 0
+      let mutable ci = 0
+      while qi < query.Length && ci < candidate.Length do
+        match cLower.[ci] = qLower.[qi] with
+        | true  -> positions.[qi] <- ci; qi <- qi + 1; ci <- ci + 1
+        | false -> ci <- ci + 1
+      match qi = query.Length with
+      | false -> None
+      | true ->
+        // Compute score with bonuses
+        let mutable score = 0.0
+        // Base: length penalty
+        score <- score - float candidate.Length * 0.01
+        // Bonus: prefix match
+        if positions.[0] = 0 then score <- score + 5.0
+        // Bonus: consecutive run lengths
+        let mutable run = 1
+        let mutable maxRun = 1
+        for k in 1 .. positions.Length - 1 do
+          match positions.[k] = positions.[k-1] + 1 with
+          | true  -> run <- run + 1; if run > maxRun then maxRun <- run
+          | false -> run <- 1
+        score <- score + float maxRun * 2.0
+        // Bonus: word boundary matches (match after space, -, _, ., /)
+        let boundaryChars = System.Collections.Generic.HashSet<char>([' '; '-'; '_'; '.'; '/'])
+        for pos in positions do
+          if pos > 0 && boundaryChars.Contains(candidate.[pos-1]) then score <- score + 1.5
+          elif pos = 0 then score <- score + 1.0
+        Some (score, positions)
+
+  /// Sort matches: higher score first, then shorter candidate length.
+  let sortMatches (matches: FuzzyMatch array) : FuzzyMatch array =
+    matches |> Array.sortWith (fun a b ->
+      let sc = compare b.Score a.Score
+      match sc with 0 -> compare a.Candidate.Length b.Candidate.Length | _ -> sc)
+
+  /// Run the scoring pass over all candidates synchronously.
+  let matchAll (query: string) (candidates: string array) : FuzzyMatch array =
+    candidates
+    |> Array.choose (fun c ->
+      match scoreMatch query c with
+      | None -> None
+      | Some (score, positions) -> Some { Candidate = c; Score = score; MatchPositions = positions })
+    |> sortMatches
+
+  // ── Widget API ────────────────────────────────────────────────────────────
+
+  /// Initialize the FuzzyFinder with an item array and a toString function.
+  let init (toString: 'item -> string) (items: 'item array) : FuzzyFinderModel<'item> =
+    let candidates = items |> Array.map toString
+    let results = matchAll "" candidates |> Array.mapi (fun i m -> { m with Score = float -i })
+    { Items = items; ToString = toString; Query = ""; Results = results; SelectedIdx = 0 }
+
+  /// Get the currently selected item, if any.
+  let selectedItem (m: FuzzyFinderModel<'item>) : 'item option =
+    match m.Results.Length, m.SelectedIdx with
+    | 0, _ -> None
+    | _, i  ->
+      let candidate = m.Results.[i].Candidate
+      m.Items |> Array.tryFind (fun item -> m.ToString item = candidate)
+
+  let private requery (query: string) (m: FuzzyFinderModel<'item>) =
+    let candidates = m.Items |> Array.map m.ToString
+    let results = matchAll query candidates
+    { m with Query = query; Results = results; SelectedIdx = 0 }
+
+  /// Update the FuzzyFinder model.
+  let update (msg: FuzzyFinderMsg<'item>) (m: FuzzyFinderModel<'item>) : FuzzyFinderModel<'item> =
+    match msg with
+    | FFQueryChanged q -> requery q m
+    | FFMoveUp         -> { m with SelectedIdx = max 0 (m.SelectedIdx - 1) }
+    | FFMoveDown       -> { m with SelectedIdx = min (m.Results.Length - 1) (m.SelectedIdx + 1) }
+    | FFSelect | FFCancel -> m  // caller handles side effects
+    | FFSetItems items ->
+      let m' = { m with Items = items }
+      requery m.Query m'
+
+  /// Create a Cmd that runs a fuzzy search asynchronously.
+  /// Wraps result in `toMsg` so it can be dispatched to your TEA program.
+  let searchAsync
+      (query    : string)
+      (items    : 'item array)
+      (toString : 'item -> string)
+      (toMsg    : FuzzyMatch array -> 'msg)
+      : Cmd<'msg> =
+    Cmd.ofAsync (fun dispatch -> async {
+      do! Async.Sleep 0  // yield to scheduler
+      let candidates = items |> Array.map toString
+      let results = matchAll query candidates
+      dispatch (toMsg results)
+    })
+
+  /// Render the FuzzyFinder prompt + result list.
+  /// `focused` drives cursor display on the query input.
+  /// `height` is the number of result rows to show.
+  let view (focused: bool) (height: int) (m: FuzzyFinderModel<'item>) : Element =
+    let promptInput =
+      let cursor = match focused with true -> "█" | false -> ""
+      El.text ("> " + m.Query + cursor)
+    let resultRows =
+      m.Results
+      |> Array.truncate height
+      |> Array.mapi (fun i r ->
+        let isSelected = i = m.SelectedIdx && focused
+        let prefix = if isSelected then "▶ " else "  "
+        let prefixEl =
+          match isSelected with
+          | true  -> El.text prefix |> El.fg (Color.Named(Cyan, Bright))
+          | false -> El.text prefix
+        // Build highlighted candidate text by splitting on match positions
+        let posSet = System.Collections.Generic.HashSet<int>(r.MatchPositions)
+        let chars = r.Candidate.ToCharArray()
+        // Group consecutive segments: matched vs unmatched
+        let segments =
+          chars
+          |> Array.mapi (fun i ch -> (i, ch, posSet.Contains i))
+          |> Array.fold (fun (acc: (bool * string) list) (_, ch, isMatch) ->
+            match acc with
+            | (m, s) :: rest when m = isMatch -> (m, s + string ch) :: rest
+            | _ -> (isMatch, string ch) :: acc) []
+          |> List.rev
+        let segElems =
+          segments |> List.map (fun (isMatch, s) ->
+            match isMatch, isSelected with
+            | true, _      -> El.text s |> El.fg (Color.Named(Yellow, Bright)) |> El.bold
+            | false, true  -> El.text s |> El.fg (Color.Named(Cyan, Normal))
+            | false, false -> El.text s)
+        El.row (prefixEl :: segElems))
+      |> Array.toList
+    let countEl =
+      El.text (sprintf " %d/%d" m.Results.Length (m.Items.Length))
+      |> El.fg (Color.Named(White, Normal))
+    El.column (promptInput :: resultRows @ [countEl])

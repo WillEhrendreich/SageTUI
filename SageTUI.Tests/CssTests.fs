@@ -21,6 +21,8 @@ let rec countLeaves (el: Element) =
   | Element.Keyed (_, _, _, c)
   | Element.Aligned (_, _, c) | Element.Gapped (_, c) -> countLeaves c
   | Element.Canvas _ -> 1
+  | Element.Responsive bps ->
+    bps |> List.tryHead |> Option.map (snd >> countLeaves) |> Option.defaultValue 0
 
 let isRow el = match el with Element.Row _ -> true | _ -> false
 let isCol el = match el with Element.Column _ -> true | _ -> false

@@ -116,6 +116,14 @@ module HtmlRender =
       Elem.div
         [ Attr.style (sprintf "gap:%dch" gap) ]
         [ render child ]
+    | Responsive breakpoints ->
+      // In HTML, render all breakpoints with container queries via CSS classes;
+      // simple fallback: render the first breakpoint
+      let child =
+        breakpoints |> List.tryHead |> Option.map snd |> Option.defaultValue Element.Empty
+      Elem.div
+        [ Attr.style "display:contents" ]
+        [ render child ]
 
   /// Render Element to HTML string
   let renderToString (el: Element) : string =
