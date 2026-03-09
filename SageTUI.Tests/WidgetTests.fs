@@ -974,14 +974,29 @@ let textFormTests = testList "TextForm" [
     m3.Rows.[0].Input.SelectionAnchor |> Expect.equal "anchor at 0" (Some 0)
     m3.Rows.[0].Input.Cursor |> Expect.equal "cursor at end" 2
   }
-  test "TFSetFieldErrors sets TFFieldErrors status and allows editing" {
-    let m = mkForm () |> typeStr "Alice"
-    let errors = Map.ofList [("name", "Name already taken")]
+  test "TFSetFieldErrors clears row-level client errors preventing dual messages" {
+    // Simulate a flow where a field had a client validation error, then TFSetFieldErrors arrives.
+    // The row-level client error must be cleared so the field doesn't show both messages.
+    let m = mkForm ()
+    // Trigger client-side validation error by submitting empty form
+    let (m1, _) = TextForm.update TFSubmit m
+    // m1 should have client errors on rows
+    let hasClientErrors = m1.Rows |> List.exists (fun r -> r.Error.IsSome)
+    hasClientErrors |> Expect.isTrue "form has client errors after failed submit"
+    // Now set server field errors (simulating server response after a successful submit attempt)
+    let (m2, _) = TextForm.update (TFSetFieldErrors (Map.ofList [("name", "Server: name taken")])) m1
+    // All row-level client errors must be cleared
+    m2.Rows |> List.forall (fun r -> r.Error.IsNone) |> Expect.isTrue "row errors cleared after TFSetFieldErrors"
+    m2.Status |> Expect.equal "status is TFFieldErrors" (TFFieldErrors (Map.ofList [("name", "Server: name taken")]))
+  }
+  test "TFSetFieldErrors allows editing after server errors" {
+    let m = mkForm ()
+    let errors = Map.ofList [("name", "Already taken")]
     let (m', _) = TextForm.update (TFSetFieldErrors errors) m
     m'.Status |> Expect.equal "status is TFFieldErrors" (TFFieldErrors errors)
     // After field errors, key events should still work (not blocked like Submitting)
     let (m'', _) = TextForm.update (TFKey (Key.Char 'X')) m'
-    m''.Rows.[0].Input.Text |> Expect.equal "editing still works" "AliceX"
+    m''.Rows.[0].Input.Text |> Expect.equal "editing still works" "X"
   }
   test "TFSetFieldErrors view renders server error under matching field" {
     let m = mkForm ()

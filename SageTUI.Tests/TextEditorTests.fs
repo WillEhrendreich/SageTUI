@@ -333,6 +333,25 @@ let selectionTests = testList "TextEditor.Selection" [
     m'.Col |> Expect.equal "col unchanged" 3
     m'.SelectionAnchor |> Expect.equal "no anchor at doc end" None
   }
+  test "TESelectWordLeft at document start (Row=0 Col=0) does not create anchor" {
+    let m = mk "hello world"  // cursor at Row=0, Col=0
+    let m' = TextEditor.update TESelectWordLeft m
+    m'.Row |> Expect.equal "row unchanged" 0
+    m'.Col |> Expect.equal "col unchanged" 0
+    m'.SelectionAnchor |> Expect.equal "no anchor at doc start" None
+  }
+  test "TESelectWordRight at document end does not create anchor" {
+    let m = { mk "hello world" with Col = 11 }  // at end of "hello world"
+    let m' = TextEditor.update TESelectWordRight m
+    m'.Col |> Expect.equal "col unchanged" 11
+    m'.SelectionAnchor |> Expect.equal "no anchor at doc end" None
+  }
+  test "TESelectWordLeft normal word selection sets anchor correctly" {
+    let m = { mk "hello world" with Col = 11 }  // cursor at end
+    let m' = TextEditor.update TESelectWordLeft m
+    m'.SelectionAnchor |> Expect.equal "anchor at original position" (Some (0, 11))
+    m'.Col |> Expect.equal "jumped to start of 'world'" 6
+  }
 ]
 
 // ── paste ────────────────────────────────────────────────────────────────────
@@ -429,6 +448,22 @@ let undoTests = testList "TextEditor.Undo" [
     let um'' = TextEditor.updateWithUndo TEUndo um'
     um''.Present.Lines |> Expect.hasLength "one line restored" 1
     um''.Present.Lines.[0] |> Expect.equal "restored" "ab"
+  }
+  test "updateWithUndo idempotent: identical content does not grow history" {
+    // TEBackspace at Col=0 produces identical text — commitIfChanged should NOT push
+    let um = TextEditor.withUndo (mk "hello")  // Col=0, nothing to delete
+    let um' = TextEditor.updateWithUndo TEBackspace um
+    um' |> Undoable.canUndo |> Expect.isFalse "no-op does not create undo entry"
+    um'.Present.Lines.[0] |> Expect.equal "unchanged" "hello"
+  }
+  test "updateWithUndoDepth caps history at given depth" {
+    let um = TextEditor.withUndo (mk "")
+    let um' =
+      [1..10]
+      |> List.fold (fun acc _ ->
+          TextEditor.updateWithUndoDepth 3 (TEInsertChar 'x') acc) um
+    // With depth=3, at most 3 entries in Past
+    um'.Past |> List.length |> Expect.equal "history capped at 3" 3
   }
 ]
 

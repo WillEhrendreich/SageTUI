@@ -493,9 +493,6 @@ module ProgressBar =
     let pct = config.Percent |> max 0.0 |> min 1.0
     let filled = int (float config.Width * pct)
     let empty = config.Width - filled
-    let bar =
-      System.String(config.FilledChar, filled) +
-      System.String(config.EmptyChar, empty)
     let barEl =
       match config.FilledColor, config.EmptyColor with
       | Some fc, Some ec ->
@@ -512,7 +509,8 @@ module ProgressBar =
         let filledEl = El.text (System.String(config.FilledChar, filled))
         let emptyEl  = El.text (System.String(config.EmptyChar, empty)) |> El.fg ec
         El.row [ filledEl; emptyEl ]
-      | None, None -> El.text bar
+      | None, None ->
+        El.text (System.String(config.FilledChar, filled) + System.String(config.EmptyChar, empty))
     match config.ShowLabel with
     | true ->
       let label = sprintf " %d%%" (int (pct * 100.0))
@@ -1319,7 +1317,11 @@ module TextForm =
         { m with Status = TFSubmitFailed e }, false
 
     | TFSetFieldErrors errors ->
-        { m with Status = TFFieldErrors errors }, false
+        // Clear all row-level client errors when server errors arrive — the form passed
+        // client-side validation before submitting, so client errors are now stale.
+        // This prevents dual error messages (client + server) on the same field after blur.
+        let clearedRows = m.Rows |> List.map (fun r -> { r with Error = None })
+        { m with Status = TFFieldErrors errors; Rows = clearedRows }, false
 
     | _ when m.Status = TFSubmitting || m.Status = TFSubmitted ->
         m, false
@@ -1474,6 +1476,11 @@ module TextEditor =
 
   let private currentLine (m: TextEditorModel) = m.Lines.[m.Row]
 
+  /// Return the current SelectionAnchor if one exists, otherwise the cursor position.
+  /// Used by all select operations to preserve an existing anchor while extending.
+  let private anchorOrHere (m: TextEditorModel) =
+    match m.SelectionAnchor with Some a -> a | None -> (m.Row, m.Col)
+
   let private setPos row col (m: TextEditorModel) =
     let r = max 0 (min row (m.Lines.Length - 1))
     let c = clampCol m.Lines.[r] col
@@ -1522,7 +1529,7 @@ module TextEditor =
     let mutable i = col - 1
     while i > 0 && not (isWordChar line (i-1)) do i <- i - 1
     while i > 0 && isWordChar line (i-1)      do i <- i - 1
-    i
+    max 0 i
 
   let private nextWordBoundary (line: string) (col: int) =
     let mutable i = col
@@ -1626,12 +1633,10 @@ module TextEditor =
       match m'.Col, m'.Row with
       | 0, 0 -> m'  // document start — no degenerate anchor
       | 0, _ ->
-        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
         let prevRow = m'.Row - 1
-        { m' with Row = prevRow; Col = m'.Lines.[prevRow].Length; SelectionAnchor = Some anchor }
+        { m' with Row = prevRow; Col = m'.Lines.[prevRow].Length; SelectionAnchor = Some (anchorOrHere m') }
       | _ ->
-        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
-        { m' with Col = m'.Col - 1; SelectionAnchor = Some anchor }
+        { m' with Col = m'.Col - 1; SelectionAnchor = Some (anchorOrHere m') }
     | TESelectRight ->
       let line = currentLine m'
       // At end-of-line: extend selection to start of next line (cross-line selection).
@@ -1639,42 +1644,40 @@ module TextEditor =
       match m'.Col = line.Length, m'.Row = m'.Lines.Length - 1 with
       | true, true  -> m'  // document end — no degenerate anchor
       | true, false ->
-        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
-        { m' with Row = m'.Row + 1; Col = 0; SelectionAnchor = Some anchor }
+        { m' with Row = m'.Row + 1; Col = 0; SelectionAnchor = Some (anchorOrHere m') }
       | false, _ ->
-        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
-        { m' with Col = m'.Col + 1; SelectionAnchor = Some anchor }
+        { m' with Col = m'.Col + 1; SelectionAnchor = Some (anchorOrHere m') }
     | TESelectUp ->
       let newRow = max 0 (m'.Row - 1)
       let newCol = clampCol m'.Lines.[newRow] m'.Col
       match (newRow, newCol) = (m'.Row, m'.Col) with
-      | true -> m'
-      | false ->
-        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
-        { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
+      | true  -> m'
+      | false -> { m' with Row = newRow; Col = newCol; SelectionAnchor = Some (anchorOrHere m') }
     | TESelectDown ->
       let newRow = min (m'.Lines.Length - 1) (m'.Row + 1)
       let newCol = clampCol m'.Lines.[newRow] m'.Col
       match (newRow, newCol) = (m'.Row, m'.Col) with
-      | true -> m'
-      | false ->
-        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
-        { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
+      | true  -> m'
+      | false -> { m' with Row = newRow; Col = newCol; SelectionAnchor = Some (anchorOrHere m') }
     | TESelectWordLeft ->
-      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
       let newRow, newCol =
         match m'.Col with
         | 0 when m'.Row > 0 -> m'.Row - 1, m'.Lines.[m'.Row - 1].Length
         | _ -> m'.Row, prevWordBoundary m'.Lines.[m'.Row] m'.Col
-      { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
+      // No movement at document start → no degenerate anchor
+      match (newRow, newCol) = (m'.Row, m'.Col) with
+      | true  -> m'
+      | false -> { m' with Row = newRow; Col = newCol; SelectionAnchor = Some (anchorOrHere m') }
     | TESelectWordRight ->
-      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
       let line = m'.Lines.[m'.Row]
       let newRow, newCol =
         match m'.Col = line.Length with
         | true when m'.Row < m'.Lines.Length - 1 -> m'.Row + 1, 0
         | _ -> m'.Row, nextWordBoundary line m'.Col
-      { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
+      // No movement at document end → no degenerate anchor
+      match (newRow, newCol) = (m'.Row, m'.Col) with
+      | true  -> m'
+      | false -> { m' with Row = newRow; Col = newCol; SelectionAnchor = Some (anchorOrHere m') }
     | TESelectAll ->
       let lastRow = m'.Lines.Length - 1
       { m' with Row = lastRow; Col = m'.Lines.[lastRow].Length; SelectionAnchor = Some (0, 0) }
@@ -1716,6 +1719,19 @@ module TextEditor =
   /// History is capped at `maxHistoryDepth` entries (default 200) when using `updateWithUndo`.
   let withUndo (m: TextEditorModel) : UndoableModel<TextEditorModel> = Undoable.init m
 
+  /// Exhaustive categorization of which TextEditorMsg cases mutate text content.
+  /// No wildcard — the compiler enforces that new cases are explicitly categorized.
+  let private textModifies (msg: TextEditorMsg) =
+    match msg with
+    | TEInsertChar _ | TENewline | TEBackspace | TEDelete
+    | TEPaste _      | TESetContent _ | TECut -> true
+    | TEMoveLeft | TEMoveRight | TEMoveUp | TEMoveDown
+    | TEMoveLineStart | TEMoveLineEnd | TEMoveDocStart | TEMoveDocEnd
+    | TEWordJumpLeft  | TEWordJumpRight
+    | TESelectLeft | TESelectRight | TESelectUp | TESelectDown
+    | TESelectWordLeft | TESelectWordRight | TESelectAll
+    | TEUndo | TERedo | TECopy -> false
+
   /// Update an UndoableModel<TextEditorModel> with a custom history depth cap.
   /// Text-modifying messages commit to the undo stack and cap history at `maxHistoryDepth`.
   /// TEUndo/TERedo navigate the history. Cursor/selection messages update Present only.
@@ -1725,13 +1741,8 @@ module TextEditor =
     | TERedo -> Undoable.redo um
     | _ ->
       let newPresent = update msg um.Present
-      let isTextModifying =
-        match msg with
-        | TEInsertChar _ | TENewline | TEBackspace | TEDelete
-        | TEPaste _ | TESetContent _ | TECut -> true
-        | _ -> false
-      match isTextModifying with
-      | true  -> um |> Undoable.commit newPresent |> Undoable.truncate maxHistoryDepth
+      match textModifies msg with
+      | true  -> um |> Undoable.commitIfChanged newPresent |> Undoable.truncate maxHistoryDepth
       | false -> { um with Present = newPresent }
 
   /// Update an UndoableModel<TextEditorModel> with a TextEditorMsg.
