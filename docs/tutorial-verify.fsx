@@ -143,15 +143,44 @@ let _borderedCheck   : Element = Theme.bordered   theme (El.text "content")
 
 let _barConfig = ProgressBar.withTheme Theme.dracula { ProgressBar.defaults with Percent = 0.7 }
 
+// ── Section 7: Command patterns ───────────────────────────────────────────────
+
+type DataMsg = DataLoaded of string | LoadFailed of exn
+
 let _cmdNone      : Cmd<ContactMsg> = Cmd.none
 let _cmdQuit      : Cmd<ContactMsg> = Cmd.quit
 let _cmdBatch     : Cmd<ContactMsg> = Cmd.batch [ Cmd.none; Cmd.none ]
 let _cmdOfMsg     : Cmd<ContactMsg> = Cmd.ofMsg Quit
+let _cmdDelay     : Cmd<ContactMsg> = Cmd.delay 500 Quit
+
+// ofTaskResult — preferred async pattern (handles success + failure)
+let _cmdTaskResult : Cmd<DataMsg> =
+    Cmd.ofTaskResult
+        (fun () -> System.Threading.Tasks.Task.FromResult("data"))
+        DataLoaded
+        LoadFailed
+
+// ofAsync — fire-and-forget async
+let _cmdAsync : Cmd<DataMsg> =
+    Cmd.ofAsync (fun dispatch ->
+        async {
+            dispatch (DataLoaded "result")
+        })
+
+// ofCancellableAsync — long-running with cancellation support
+let _cmdCancellable : Cmd<DataMsg> =
+    Cmd.ofCancellableAsync "my-fetch" (fun _ct dispatch ->
+        async {
+            dispatch (DataLoaded "result")
+        })
 
 // ── Section 8: Subscription patterns ─────────────────────────────────────────
 
-let _subKeyBind  : Sub<ContactMsg> = Keys.bind [ Key.Char 'q', Quit; Key.Escape, Quit ]
-let _subKeySub   : Sub<ContactMsg> = Sub.KeySub(fun (k, mods) -> Some (KeyPressed(k, mods)))
-let _subTimerSub : Sub<CounterMsg> = Sub.TimerSub("tick", System.TimeSpan.FromMilliseconds(1000.0), fun () -> Increment)
+type AppMsg2 = Key of Key * Modifiers | Tick | Resize of int * int | Quit2
+
+let _subKeyBind  : Sub<ContactMsg>  = Keys.bind [ Key.Char 'q', Quit; Key.Escape, Quit ]
+let _subKeySub   : Sub<AppMsg2>     = Sub.KeySub(fun (k, mods) -> Some (AppMsg2.Key(k, mods)))
+let _subTimerSub : Sub<AppMsg2>     = Sub.TimerSub("tick", System.TimeSpan.FromMilliseconds(1000.0), fun () -> Tick)
+let _subResizeSub: Sub<AppMsg2>     = Sub.ResizeSub(fun (w, h) -> Resize(w, h))  // no Some — returns 'msg directly
 
 printfn "✓ Tutorial examples compiled successfully"

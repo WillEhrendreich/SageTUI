@@ -309,27 +309,55 @@ Cmd.delay 500 MyMsg         // dispatch MyMsg after 500 ms
 Cmd.map MsgWrapper innerCmd // wrap a child component's Cmd
 ```
 
-For async effects:
+For async effects, prefer `Cmd.ofTaskResult` which handles both success and failure:
 
 ```fsharp
-Cmd.ofTask (fun () -> task {
-    let! data = fetchDataAsync ()
-    return DataLoaded data
-})
+Cmd.ofTaskResult
+    (fun () -> task { return! fetchDataAsync () })
+    DataLoaded          // called with result on success
+    LoadFailed          // called with exn on failure
+```
+
+For fire-and-forget or self-contained async work:
+
+```fsharp
+Cmd.ofAsync (fun dispatch ->
+    async {
+        let! data = fetchDataAsync ()
+        dispatch (DataLoaded data)
+    })
+```
+
+For cancellable long-running work (use `Cmd.cancel "id"` to stop):
+
+```fsharp
+Cmd.ofCancellableAsync "my-fetch" (fun _ct dispatch ->
+    async {
+        let! data = fetchDataAsync ()
+        dispatch (DataLoaded data)
+    })
 ```
 
 ---
 
 ## 8. Subscriptions
 
-Subscriptions are active input sources. Return them from `Subscribe`:
+Subscriptions are active input sources. Return them from `Subscribe`.
+Each `Sub` variant has a different handler signature:
+
+| Sub variant | Handler type | Notes |
+|---|---|---|
+| `KeySub f` | `Key * Modifiers -> 'msg option` | Return `None` to ignore a key |
+| `TimerSub(id, interval, f)` | `unit -> 'msg` | Fires every `interval` |
+| `ResizeSub f` | `int * int -> 'msg` | Always produces a message |
+| `CustomSub(id, f)` | `('msg -> unit) -> CancellationToken -> Async<unit>` | Full control |
 
 ```fsharp
 Subscribe = fun model ->
-    [ Keys.bind [ Key.Char 'q', Quit ]          // specific key bindings
-      Sub.KeySub(fun (k, mods) -> Some (Key(k,mods))) // all keypresses
+    [ Keys.bind [ Key.Char 'q', Quit ]              // specific key bindings
+      Sub.KeySub(fun (k, mods) -> Some (Key(k,mods))) // all keypresses; return None to ignore
       Sub.TimerSub("tick", TimeSpan.FromMilliseconds(1000.), fun () -> Tick) // every 1000 ms
-      Sub.ResizeSub(fun (w, h) -> Some (Resize(w, h))) ] // terminal resize
+      Sub.ResizeSub(fun (w, h) -> Resize(w, h)) ]   // terminal resize (always fires)
 ```
 
 `Sub.KeySub` fires on every keypress and maps it to an optional message.
