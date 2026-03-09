@@ -47,7 +47,7 @@ let progressBarTests = testList "ProgressBar" [
     | Text(t, _) -> t |> Expect.stringContains "all filled" "██████████"
     | _ -> ()
   }
-  test "colored bar produces Row" {
+  test "colored bar produces Constrained Row" {
     let config =
       { ProgressBar.defaults with
           Percent = 0.5; Width = 10; ShowLabel = false
@@ -55,8 +55,9 @@ let progressBarTests = testList "ProgressBar" [
           EmptyColor = Some (Color.Named(BaseColor.Red, Intensity.Normal)) }
     let elem = ProgressBar.view config
     match elem with
-    | Row _ -> ()
-    | _ -> failtest "expected Row for colored bar"
+    | Constrained(Fixed 10, Row _) -> ()
+    | Row _ -> failtest "colored bar should be Constrained(Fixed width, Row) to prevent gap injection"
+    | _ -> failwithf "expected Constrained Row for colored bar, got: %A" elem
   }
 ]
 
@@ -770,20 +771,20 @@ let formTests = testList "Form" [
       (fun focused (model: TestFormModel) ->
         let el = El.text (sprintf "Name: %s" model.Name)
         match focused with true -> el |> El.bold | false -> el)
-      (fun _key (_model: TestFormModel) -> None)
+      (fun _event (_model: TestFormModel) -> None)
 
   let ageField =
     Form.field "age"
       (fun focused (model: TestFormModel) ->
         let el = El.text (sprintf "Age: %d" model.Age)
         match focused with true -> el |> El.bold | false -> el)
-      (fun _key (_model: TestFormModel) -> None)
+      (fun _event (_model: TestFormModel) -> None)
 
   let activeField =
     Form.field "active"
       (fun focused (model: TestFormModel) ->
         Checkbox.view "Active" focused model.Active)
-      (fun _key (_model: TestFormModel) -> None)
+      (fun _event (_model: TestFormModel) -> None)
 
   let fields = [nameField; ageField; activeField]
   let model = { Name = "Alice"; Age = 30; Active = true }
@@ -824,9 +825,18 @@ let formTests = testList "Form" [
     next |> Expect.equal "wraps to name" "name"
   }
 
-  test "handleKey routes to focused field" {
-    let result = Form.handleKey fields "name" Key.Enter model
+  test "handleEvent routes to focused field" {
+    let result = Form.handleEvent fields "name" (KeyPressed(Key.Enter, Modifiers.None)) model
     result |> Expect.isNone "no handler for enter on name"
+  }
+
+  test "handleEvent with modifier: Ctrl+A dispatches if handler uses it" {
+    let ctrlAField =
+      Form.field "search"
+        (fun _ _ -> El.empty)
+        (fun evt _ -> match evt with KeyPressed(Key.Char 'a', m) when m = Modifiers.Ctrl -> Some () | _ -> None)
+    let result = Form.handleEvent [ctrlAField] "search" (KeyPressed(Key.Char 'a', Modifiers.Ctrl)) ()
+    result |> Expect.isSome "Ctrl+A handled"
   }
 ]
 
@@ -1656,6 +1666,90 @@ let virtualTableTests = testList "VirtualTable" [
     | other -> failwith (sprintf "unexpected top level: %A" other)
   }
 ]
+
+// ── SplitPane tests ───────────────────────────────────────────────────────────
+
+let splitPaneTests = testList "SplitPane" [
+  test "horizontal split renders as Row with two children" {
+    let left  = El.text "LEFT"
+    let right = El.text "RIGHT"
+    let m = SplitPane.init SplitHorizontal 50 left right
+    match SplitPane.view m with
+    | Row [_; _] -> ()
+    | Row children -> failwithf "expected exactly 2 children, got %d" children.Length
+    | other -> failwithf "expected Row, got %A" other
+  }
+  test "vertical split renders as Column with two children" {
+    let top    = El.text "TOP"
+    let bottom = El.text "BOTTOM"
+    let m = SplitPane.init SplitVertical 30 top bottom
+    match SplitPane.view m with
+    | Column [_; _] -> ()
+    | Column children -> failwithf "expected exactly 2 children, got %d" children.Length
+    | other -> failwithf "expected Column, got %A" other
+  }
+  test "horizontal split respects Ratio constraints" {
+    let m = SplitPane.init SplitHorizontal 40 (El.text "A") (El.text "B")
+    match SplitPane.view m with
+    | Row [Constrained(Ratio(40, 100), _); Constrained(Ratio(60, 100), _)] -> ()
+    | Row [Constrained(c1, _); Constrained(c2, _)] ->
+      failwithf "expected Ratio(40,100)/Ratio(60,100), got %A / %A" c1 c2
+    | other -> failwithf "unexpected structure: %A" other
+  }
+  test "vertical split respects Ratio constraints" {
+    let m = SplitPane.init SplitVertical 25 (El.text "TOP") (El.text "BOT")
+    match SplitPane.view m with
+    | Column [Constrained(Ratio(25, 100), _); Constrained(Ratio(75, 100), _)] -> ()
+    | Column [Constrained(c1, _); Constrained(c2, _)] ->
+      failwithf "expected Ratio(25,100)/Ratio(75,100), got %A / %A" c1 c2
+    | other -> failwithf "unexpected structure: %A" other
+  }
+  test "SplitPane.resize clamps to [1, 99]" {
+    let m = SplitPane.init SplitHorizontal 50 (El.text "A") (El.text "B")
+    let tooHigh = SplitPane.resize 150 m
+    tooHigh.SplitPercent |> Expect.equal "clamped to 99" 99
+    let tooLow = SplitPane.resize (-10) m
+    tooLow.SplitPercent |> Expect.equal "clamped to 1" 1
+    let mid = SplitPane.resize 70 m
+    mid.SplitPercent |> Expect.equal "mid stays 70" 70
+  }
+  test "SplitPane.grow/shrink increment by step" {
+    let m = SplitPane.init SplitHorizontal 50 (El.text "A") (El.text "B")
+    let grown = SplitPane.grow 5 m
+    grown.SplitPercent |> Expect.equal "grew to 55" 55
+    let shrunk = SplitPane.shrink 5 m
+    shrunk.SplitPercent |> Expect.equal "shrunk to 45" 45
+  }
+  test "SplitPane.grow clamps at 99" {
+    let m = SplitPane.init SplitHorizontal 95 (El.text "A") (El.text "B")
+    let grown = SplitPane.grow 10 m
+    grown.SplitPercent |> Expect.equal "clamped to 99" 99
+  }
+  test "SplitPane.shrink clamps at 1" {
+    let m = SplitPane.init SplitHorizontal 5 (El.text "A") (El.text "B")
+    let shrunk = SplitPane.shrink 10 m
+    shrunk.SplitPercent |> Expect.equal "clamped to 1" 1
+  }
+  test "SplitPane.setFirst/setSecond update children" {
+    let m = SplitPane.init SplitHorizontal 50 (El.text "A") (El.text "B")
+    let m2 = m |> SplitPane.setFirst (El.text "NEW-A")
+    match m2.First with
+    | Text("NEW-A", _) -> ()
+    | other -> failwithf "expected Text NEW-A, got %A" other
+    let m3 = m |> SplitPane.setSecond (El.text "NEW-B")
+    match m3.Second with
+    | Text("NEW-B", _) -> ()
+    | other -> failwithf "expected Text NEW-B, got %A" other
+  }
+  test "SplitPane view uses First/Second elements" {
+    let m = SplitPane.init SplitHorizontal 50 (El.text "hello") (El.text "world")
+    match SplitPane.view m with
+    | Row [Constrained(_, first); Constrained(_, second)] ->
+      match first  with Text("hello", _) -> () | x -> failwithf "first unexpected: %A" x
+      match second with Text("world", _) -> () | x -> failwithf "second unexpected: %A" x
+    | other -> failwithf "unexpected: %A" other
+  }
+]
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -1683,4 +1777,5 @@ let allWidgetTests = testList "Widgets" [
   virtualListTests
   textInputWordSelTests
   virtualTableTests
+  splitPaneTests
 ]

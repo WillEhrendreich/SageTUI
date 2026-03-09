@@ -558,6 +558,58 @@ let viewTests = testList "TextEditor.view" [
   }
 ]
 
+// ── property-based tests ──────────────────────────────────────────────────────
+
+let propertyTests = testList "TextEditor.Properties" [
+  testProperty "TESelectLeft: Col is always >= 0 after any select" <| fun (content: string) (col: int) ->
+    let content = if content = null || content = "" then "x" else content.Replace('\n', ' ')
+    let col = abs col % (content.Length + 1)
+    let m = { mk content with Col = col }
+    let m' = TextEditor.update TESelectLeft m
+    m'.Col >= 0
+
+  testProperty "TESelectRight: Col never exceeds line length" <| fun (content: string) (col: int) ->
+    let content = if content = null || content = "" then "x" else content.Replace('\n', ' ')
+    let col = abs col % (content.Length + 1)
+    let m = { mk content with Col = col }
+    let m' = TextEditor.update TESelectRight m
+    m'.Col <= m'.Lines.[m'.Row].Length
+
+  testProperty "TESelectWordLeft: Col is always >= 0" <| fun (content: string) (col: int) ->
+    let content = if content = null || content = "" then "hello world" else content.Replace('\n', ' ')
+    let col = abs col % (content.Length + 1)
+    let m = { mk content with Col = col }
+    let m' = TextEditor.update TESelectWordLeft m
+    m'.Col >= 0
+
+  testProperty "TESelectWordRight: Col never exceeds line length" <| fun (content: string) (col: int) ->
+    let content = if content = null || content = "" then "hello world" else content.Replace('\n', ' ')
+    let col = abs col % (content.Length + 1)
+    let m = { mk content with Col = col }
+    let m' = TextEditor.update TESelectWordRight m
+    m'.Col <= m'.Lines.[m'.Row].Length
+
+  testProperty "TESelectLeft at doc start (Row=0,Col=0) never creates anchor" <| fun (content: string) ->
+    let content = if content = null || content = "" then "x" else content.Replace('\n', ' ')
+    let m = mk content  // always starts at Row=0, Col=0
+    let m' = TextEditor.update TESelectLeft m
+    m'.SelectionAnchor = None
+
+  testProperty "TESelectRight at doc end never creates anchor" <| fun (content: string) ->
+    let content = if content = null || content = "" then "x" else content.Replace('\n', ' ')
+    let m = { mk content with Col = content.Length }
+    let m' = TextEditor.update TESelectRight m
+    m'.SelectionAnchor = None
+
+  testProperty "updateWithUndo: undo after no-op has no history" <| fun () ->
+    // TEMoveLeft/Right/Up/Down never create undo entries
+    let um = TextEditor.withUndo (mk "hello")
+    let um' = um |> TextEditor.updateWithUndo TEMoveRight
+                 |> TextEditor.updateWithUndo TEMoveLeft
+                 |> TextEditor.updateWithUndo TESelectAll
+    not (Undoable.canUndo um')
+]
+
 [<Tests>]
 let allTextEditorTests = testList "TextEditor" [
   initTests
@@ -572,5 +624,6 @@ let allTextEditorTests = testList "TextEditor" [
   scrollTests
   undoTests
   viewTests
+  propertyTests
 ]
 

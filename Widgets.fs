@@ -493,24 +493,24 @@ module ProgressBar =
     let pct = config.Percent |> max 0.0 |> min 1.0
     let filled = int (float config.Width * pct)
     let empty = config.Width - filled
+    // Apply an optional fg color — identity when None.
+    let inline withFg colorOpt el = colorOpt |> Option.fold (fun e c -> El.fg c e) el
     let barEl =
-      match config.FilledColor, config.EmptyColor with
-      | Some fc, Some ec ->
-        let filledEl =
-          El.text (System.String(config.FilledChar, filled)) |> El.fg fc
-        let emptyEl =
-          El.text (System.String(config.EmptyChar, empty)) |> El.fg ec
-        El.row [ filledEl; emptyEl ]
-      | Some fc, None ->
-        let filledEl = El.text (System.String(config.FilledChar, filled)) |> El.fg fc
-        let emptyEl  = El.text (System.String(config.EmptyChar, empty))
-        El.row [ filledEl; emptyEl ]
-      | None, Some ec ->
-        let filledEl = El.text (System.String(config.FilledChar, filled))
-        let emptyEl  = El.text (System.String(config.EmptyChar, empty)) |> El.fg ec
-        El.row [ filledEl; emptyEl ]
-      | None, None ->
-        El.text (System.String(config.FilledChar, filled) + System.String(config.EmptyChar, empty))
+      match filled, empty with
+      | 0, _ -> El.text (System.String(config.EmptyChar,  empty))  |> withFg config.EmptyColor
+      | _, 0 -> El.text (System.String(config.FilledChar, filled)) |> withFg config.FilledColor
+      | _ ->
+        match config.FilledColor, config.EmptyColor with
+        | None, None ->
+          // No colors: single text element flex-distributes naturally, matching blank-cell overflow.
+          El.text (System.String(config.FilledChar, filled) + System.String(config.EmptyChar, empty))
+        | _ ->
+          // Colored segments: pin width so flex distribution doesn't inject gaps between segments.
+          El.width config.Width <|
+            El.row [
+              El.text (System.String(config.FilledChar, filled)) |> withFg config.FilledColor
+              El.text (System.String(config.EmptyChar,  empty))  |> withFg config.EmptyColor
+            ]
     match config.ShowLabel with
     | true ->
       let label = sprintf " %d%%" (int (pct * 100.0))
@@ -1158,20 +1158,27 @@ module TreeView =
     |> El.column
 
 /// A single field descriptor for the Form widget.
-/// Binds a string key, a view function, and a key-handler function.
+/// Binds a string key, a view function, and a terminal-event handler.
 type FormField<'model, 'msg> = {
   /// Unique key used for focus routing.
   Key: string
   /// Render the field — receives `focused: bool` and the current model.
   View: bool -> 'model -> Element
-  /// Handle a keypress while this field is focused. Return Some msg to dispatch, None to ignore.
-  HandleKey: Key -> 'model -> 'msg option
+  /// Handle a terminal event while this field is focused. Return Some msg to dispatch, None to ignore.
+  HandleEvent: TerminalEvent -> 'model -> 'msg option
 }
 
 module Form =
-  /// Create a `FormField` from a key, view function, and key handler.
-  let field (key: string) (view: bool -> 'model -> Element) (handleKey: Key -> 'model -> 'msg option) : FormField<'model, 'msg> =
-    { Key = key; View = view; HandleKey = handleKey }
+  /// Create a `FormField` from a key, view function, and terminal event handler.
+  /// Use this to support modifier keys (Ctrl, Shift) inside form fields.
+  let field (key: string) (view: bool -> 'model -> Element) (handleEvent: TerminalEvent -> 'model -> 'msg option) : FormField<'model, 'msg> =
+    { Key = key; View = view; HandleEvent = handleEvent }
+
+  /// Create a `FormField` that only handles plain keypresses (no modifiers).
+  /// Wraps the key-only handler into a TerminalEvent handler.
+  [<System.Obsolete("Use Form.field with a TerminalEvent handler to support modifier keys (Ctrl, Shift, etc.).")>]
+  let fieldFromKey (key: string) (view: bool -> 'model -> Element) (handleKey: Key -> 'model -> 'msg option) : FormField<'model, 'msg> =
+    { Key = key; View = view; HandleEvent = fun evt model -> match evt with KeyPressed(k, _) -> handleKey k model | _ -> None }
 
   /// Render all fields as a column, passing `focused = true` to the field whose key matches `focusedKey`.
   let view (fields: FormField<'model, 'msg> list) (focusedKey: string) (model: 'model) : Element =
@@ -1179,11 +1186,17 @@ module Form =
     |> List.map (fun f -> f.View (f.Key = focusedKey) model)
     |> El.column
 
-  /// Dispatch a keypress to the currently focused field. Returns None if no field handles the key.
-  let handleKey (fields: FormField<'model, 'msg> list) (focusedKey: string) (key: Key) (model: 'model) : 'msg option =
+  /// Dispatch a terminal event to the currently focused field. Returns None if no field handles it.
+  let handleEvent (fields: FormField<'model, 'msg> list) (focusedKey: string) (event: TerminalEvent) (model: 'model) : 'msg option =
     fields
     |> List.tryFind (fun f -> f.Key = focusedKey)
-    |> Option.bind (fun f -> f.HandleKey key model)
+    |> Option.bind (fun f -> f.HandleEvent event model)
+
+  /// Dispatch a plain keypress to the currently focused field. Returns None if no field handles the key.
+  /// Prefer `Form.handleEvent` to support modifier keys.
+  [<System.Obsolete("Use Form.handleEvent to support modifier keys (Ctrl, Shift, etc.).")>]
+  let handleKey (fields: FormField<'model, 'msg> list) (focusedKey: string) (key: Key) (model: 'model) : 'msg option =
+    handleEvent fields focusedKey (KeyPressed(key, Modifiers.None)) model
 
   /// Extract all field keys in order. Pass to `Focus.tabOrder` for Tab navigation.
   let keys (fields: FormField<'model, 'msg> list) : string list =
@@ -1290,18 +1303,41 @@ module TextForm =
       | true  -> runValidation { r with Touched = true })
 
   /// Apply an update function to the currently focused field, running validation if the field is touched.
+  /// In TFFieldErrors state, editing a field also clears that field's server error (user is fixing it).
   let private applyToFocused (updateInput: TextInputModel -> TextInputModel) (m: TextFormModel) =
     let idx = m.FocusIndex
+    let serverErrors =
+      match m.Status with
+      | TFFieldErrors errs -> errs
+      | _ -> Map.empty
     let rows =
       m.Rows |> List.mapi (fun i r ->
         match i = idx with
         | false -> r
         | true  ->
           let updated = { r with Input = updateInput r.Input }
+          // Clear the server error for this field when the user starts editing it
+          let clearedServerErrors = serverErrors |> Map.remove r.Field.Id
+          let newStatus =
+            match m.Status with
+            | TFFieldErrors _ when clearedServerErrors.IsEmpty -> TFEditing
+            | TFFieldErrors _ -> TFFieldErrors clearedServerErrors
+            | s -> s
+          let _ = newStatus  // computed but Status is on model, not row — handled below
           match r.Touched with
           | true  -> runValidation updated
           | false -> updated)
-    { m with Rows = rows }
+    // If in TFFieldErrors, remove the focused field's server error from status
+    let newStatus =
+      match m.Status with
+      | TFFieldErrors errs ->
+        let focusedFieldId = m.Rows.[idx].Field.Id
+        let remaining = errs |> Map.remove focusedFieldId
+        match remaining.IsEmpty with
+        | true  -> TFEditing
+        | false -> TFFieldErrors remaining
+      | s -> s
+    { m with Rows = rows; Status = newStatus }
 
   /// Update the form. Returns `(newModel, submitRequested)`.
   /// When `submitRequested = true`, fire your submit `Cmd` and then dispatch `TFSubmitResult`.
@@ -1958,8 +1994,24 @@ module FuzzyFinder =
       let m' = { m with Items = items; Candidates = candidates }
       requery m'.QueryInput m'
 
+  /// Create a Cmd that runs a fuzzy search asynchronously using the model's cached Candidates.
+  /// This is the preferred async search entry point — it uses the model's cached string array
+  /// and avoids re-running toString on every search call.
+  let searchAsyncFromModel
+      (query    : string)
+      (m        : FuzzyFinderModel<'item>)
+      (toMsg    : FuzzyMatch array -> 'msg)
+      : Cmd<'msg> =
+    let candidates = m.Candidates  // capture before async
+    Cmd.ofAsync (fun dispatch -> async {
+      do! Async.SwitchToThreadPool()
+      let results = matchAll query candidates
+      dispatch (toMsg results)
+    })
+
   /// Create a Cmd that runs a fuzzy search asynchronously on a thread pool thread.
   /// Wraps result in `toMsg` so it can be dispatched to your TEA program.
+  /// Prefer `searchAsyncFromModel` to avoid re-running toString on every call.
   let searchAsync
       (query    : string)
       (items    : 'item array)
@@ -2014,3 +2066,58 @@ module FuzzyFinder =
       El.text (sprintf " %d/%d" m.Results.Length (m.Items.Length))
       |> El.fg (Color.Named(White, Normal))
     El.column (promptInput :: resultRows @ [countEl])
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SplitPane
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Orientation of a SplitPane divider.
+type SplitOrientation = SplitHorizontal | SplitVertical
+
+/// Mutable state for a SplitPane — holds orientation, ratio, and child elements.
+type SplitPaneModel = {
+  Orientation: SplitOrientation
+  /// Percentage (1–99) allocated to the first pane. Second pane gets the remainder.
+  SplitPercent: int
+  First: Element
+  Second: Element
+}
+
+module SplitPane =
+  /// Create a SplitPane model with the given orientation and initial split percent.
+  let init (orientation: SplitOrientation) (splitPercent: int) (first: Element) (second: Element) : SplitPaneModel =
+    { Orientation  = orientation
+      SplitPercent = splitPercent |> max 1 |> min 99
+      First        = first
+      Second       = second }
+
+  /// Resize the first pane to `pct` percent (clamped to [1, 99]).
+  let resize (pct: int) (m: SplitPaneModel) : SplitPaneModel =
+    { m with SplitPercent = pct |> max 1 |> min 99 }
+
+  /// Grow the first pane by `step` percentage points (clamped at 99).
+  let grow (step: int) (m: SplitPaneModel) : SplitPaneModel =
+    resize (m.SplitPercent + step) m
+
+  /// Shrink the first pane by `step` percentage points (clamped at 1).
+  let shrink (step: int) (m: SplitPaneModel) : SplitPaneModel =
+    resize (m.SplitPercent - step) m
+
+  /// Replace the first (primary) child element.
+  let setFirst (elem: Element) (m: SplitPaneModel) : SplitPaneModel =
+    { m with First = elem }
+
+  /// Replace the second (secondary) child element.
+  let setSecond (elem: Element) (m: SplitPaneModel) : SplitPaneModel =
+    { m with Second = elem }
+
+  /// Render the SplitPane as a Row (horizontal) or Column (vertical).
+  /// Each child is wrapped in a Ratio constraint so layout splits proportionally.
+  let view (m: SplitPaneModel) : Element =
+    let pct    = m.SplitPercent
+    let remain = 100 - pct
+    let firstEl  = Constrained(Ratio(pct,    100), m.First)
+    let secondEl = Constrained(Ratio(remain, 100), m.Second)
+    match m.Orientation with
+    | SplitHorizontal -> Row    [firstEl; secondEl]
+    | SplitVertical   -> Column [firstEl; secondEl]
