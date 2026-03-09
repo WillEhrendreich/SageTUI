@@ -212,6 +212,17 @@ module App =
         let (entering, exiting) = Reconcile.reconcile prevKeyedElements newKeyed
 
         // Capture snapshots for exiting elements and start exit transitions
+        // hasDissolve: true if the transition (possibly nested in Sequence) contains a Dissolve.
+        // When true, DissolvePayload is pre-computed once here to avoid per-frame allocation.
+        let rec hasDissolve trans =
+          match trans with
+          | Dissolve _ -> true
+          | Sequence ts -> ts |> List.exists hasDissolve
+          | _ -> false
+        let computePayload (key: string) (transition: Transition) (area: Area) =
+          match hasDissolve transition with
+          | true  -> DissolvePayload (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (area.Width * area.Height))
+          | false -> NoPayload
         for (key, oldElem) in exiting do
           match oldElem with
           | Keyed(_, _, exitTransition, _) ->
@@ -225,10 +236,7 @@ module App =
                 Easing = Ease.cubicInOut
                 SnapshotBefore = snapshot
                 Area = area
-                Payload =
-                  match exitTransition with
-                  | Dissolve _ -> DissolvePayload (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (area.Width * area.Height))
-                  | _ -> NoPayload }
+                Payload = computePayload key exitTransition area }
               :: activeTransitions
           | _ -> ()
 
@@ -276,10 +284,7 @@ module App =
                 Easing = Ease.cubicInOut
                 SnapshotBefore = Array.create (width * height) PackedCell.empty
                 Area = transArea
-                Payload =
-                  match enterTransition with
-                  | Dissolve _ -> DissolvePayload (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (transArea.Width * transArea.Height))
-                  | _ -> NoPayload }
+                Payload = computePayload key enterTransition transArea }
               :: activeTransitions
           | _ -> ()
 
@@ -294,16 +299,13 @@ module App =
           | Wipe(dir, _) ->
             TransitionFx.applyWipe t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
           | Dissolve _ ->
-            // Payload is always DissolvePayload for top-level Dissolve — computed once at transition
-            // start to avoid per-frame allocation. For Dissolve nested inside Sequence, at.Payload is
-            // NoPayload (the parent is Sequence); generate a seeded shuffle inline rather than failing.
+            // DissolvePayload pre-computed at transition start (via computePayload).
+            // Also covers Dissolve nested inside Sequence — computePayload recurses via hasDissolve.
             match at.Payload with
             | DissolvePayload order ->
               TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
             | NoPayload ->
-              let seed = at.Area.Y * 1000 + at.Area.Width
-              let order = TransitionFx.fisherYatesShuffle seed (at.Area.Width * at.Area.Height)
-              TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+              failwithf "Dissolve transition '%s' has NoPayload — shuffle order must be pre-computed at transition start" at.Key
           | SlideIn(dir, _) ->
             TransitionFx.applySlideIn t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
           | Grow _ ->
@@ -311,7 +313,7 @@ module App =
           | Sequence ts ->
             // Play sub-transitions in order, sharing the original snapshot.
             // For pixel-perfect chaining, use multiple El.keyed elements with staggered transitions.
-            let totalMs = TransitionFx.applySequenceDuration ts
+            let totalMs = TransitionDuration.get (Sequence ts)
             match totalMs with
             | 0 -> ()
             | _ ->

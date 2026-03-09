@@ -177,11 +177,14 @@ module TransitionFx =
         | false -> ()
 
   /// Grow: new content expands outward from the center using Chebyshev distance.
-  /// At t=0 a single cell at the center shows the new content; at t=1 the full area is revealed.
+  /// At t=0 only the center is visible; at t=1 the full area is revealed.
+  /// For even-dimensioned areas no cell is at distance 0, so at t=0 the whole area shows snapshot.
+  /// For odd-dimensioned areas the single center cell has distance 0 and IS revealed at t=0.
   let applyGrow (t: float) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
     let cx = float width  * 0.5
     let cy = float height * 0.5
-    // maxRadius covers the farthest corner from center
+    // maxR = max(cx,cy) + 0.5: guarantees the farthest corner is covered at t=1.
+    // The farthest corner's Chebyshev dist from the float center = max(cx-0.5, cy-0.5) < max(cx,cy)+0.5.
     let maxR = max cx cy + 0.5
     let r = maxR * t
     for row in 0 .. height - 1 do
@@ -198,21 +201,6 @@ module TransitionFx =
             | false -> snapshot.[idx]
           buf.Cells.[(offset + row) * buf.Width + col] <- cell
         | false -> ()
-
-  /// Sequence: plays each sub-transition in order, using the same original snapshot.
-  /// This is an approximation — sub-transitions share the original "before" snapshot rather
-  /// than chaining from each other's output. For pixel-perfect chaining use multiple El.keyed
-  /// elements with staggered enter/exit transitions instead.
-  /// Called from App.fs applyTransition (a recursive dispatcher) to keep the
-  /// Dissolve-payload and cross-sub-dispatch logic colocated with App state.
-  let applySequenceDuration (ts: Transition list) =
-    let rec getDurMs sub =
-      match sub with
-      | Fade d | ColorMorph d | Dissolve d | Grow d -> int d
-      | Wipe(_, d) | SlideIn(_, d) -> int d
-      | Sequence inner -> inner |> List.sumBy getDurMs
-      | Custom _ -> 200
-    ts |> List.sumBy getDurMs
 
 module TransitionDuration =
   let rec get (t: Transition) =
