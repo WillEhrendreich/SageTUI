@@ -763,6 +763,23 @@ let subPrefixTests = testList "Sprint 33: Sub.prefix" [
     | PasteSub _ -> ()
     | _ -> failwith "expected PasteSub unchanged"
 
+  testCase "Sub.prefixAll prefixes all ID-bearing subs in a list" <| fun () ->
+    let subs = [
+      TimerSub("refresh", System.TimeSpan.FromSeconds 1.0, fun () -> ())
+      CustomSub("worker", fun _ _ -> async { () })
+      KeySub(fun _ -> None)
+    ]
+    let prefixed = Sub.prefixAll "sidebar" subs
+    match prefixed with
+    | [ TimerSub(id1, _, _); CustomSub(id2, _); KeySub _ ] ->
+      id1 |> Expect.equal "timer prefixed" "sidebar/refresh"
+      id2 |> Expect.equal "custom prefixed" "sidebar/worker"
+    | _ -> failwith "expected 3 subs with correct types"
+
+  testCase "Sub.prefixAll on empty list returns empty list" <| fun () ->
+    Sub.prefixAll "ns" []
+    |> Expect.isEmpty "empty in, empty out"
+
 ]
 
 [<Tests>]

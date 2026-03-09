@@ -259,7 +259,7 @@ let keyBindings =
 
 let subscribe _model =
   [ TimerSub("tick", TimeSpan.FromMilliseconds(250.0), fun () -> Tick)
-    ResizeSub (fun (w, h) -> Resized(w, h))
+    ResizeSub (fun (w, h) -> Some (Resized(w, h)))
     keyBindings ]
 
 let program : Program<Model, Msg> =

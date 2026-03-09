@@ -328,7 +328,7 @@ let subscribe _model =
     | true  -> TimeSpan.FromMilliseconds(300.0)   // slower in demo — each frame readable
     | false -> TimeSpan.FromMilliseconds(100.0)
   [ TimerSub("tick", tickInterval, fun () -> Tick)
-    ResizeSub (fun (w, h) -> Resized (w, h))
+    ResizeSub (fun (w, h) -> Some (Resized (w, h)))
     keyBindings ]
 
 let program : Program<Model, Msg> =

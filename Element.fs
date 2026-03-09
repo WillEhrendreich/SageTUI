@@ -43,8 +43,12 @@ type Transition =
   /// with staggered enter/exit transitions instead.
   /// </remarks>
   | Sequence of Transition list
-  /// Not yet implemented — has no visual effect.
-  | Custom of (float -> int -> int -> int)
+  /// User-supplied cell-level transition. The apply function receives the interpolation
+  /// progress (0.0–1.0), the cell column and row within the transition area, the
+  /// snapshot cell (before state), and the current rendered cell (after state), and
+  /// returns the blended cell to write. This enables effects that none of the
+  /// built-in transitions can express (e.g. radial reveals, checkerboard, noise).
+  | Custom of duration: int<ms> * apply: (float -> int -> int -> PackedCell -> PackedCell -> PackedCell)
 
 /// The core UI element type. All views are trees of Element values.
 [<NoEquality; NoComparison>]

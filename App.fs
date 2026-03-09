@@ -336,10 +336,8 @@ module App =
                     remaining <- remaining - dur
                     subIdx <- subIdx + 1
                 | true -> ()
-          | Custom _ ->
-            // Custom carries a user-supplied function; a future API will expose it as a
-            // cell-level callback (t, col, row) -> PackedCell. No-op for now.
-            ()
+          | Custom(_, f) ->
+            TransitionFx.applyCustom t f at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
 
         activeTransitions |> List.iter (fun at ->
           let t = ActiveTransition.progress nowMs at
@@ -406,7 +404,7 @@ module App =
             | PasteSub handler, Pasted text ->
               handler text |> Option.iter dispatch
             | ResizeSub handler, Resized(w, h) ->
-              handler (w, h) |> dispatch
+              handler (w, h) |> Option.iter dispatch
             | _ -> ()
 
         match backend.PollEvent 16 with

@@ -361,7 +361,7 @@ Each `Sub` variant has a different handler signature:
 |---|---|---|
 | `KeySub f` | `Key * Modifiers -> 'msg option` | Return `None` to ignore a key |
 | `TimerSub(id, interval, f)` | `unit -> 'msg` | Fires every `interval` |
-| `ResizeSub f` | `int * int -> 'msg` | Always produces a message |
+| `ResizeSub f` | `int * int -> 'msg option` | Return `None` to ignore a resize |
 | `CustomSub(id, f)` | `('msg -> unit) -> CancellationToken -> Async<unit>` | Full control |
 
 ```fsharp
@@ -369,7 +369,7 @@ Subscribe = fun model ->
     [ Keys.bind [ Key.Char 'q', Quit ]              // specific key bindings
       Sub.KeySub(fun (k, mods) -> Some (Key(k,mods))) // all keypresses; return None to ignore
       Sub.TimerSub("tick", TimeSpan.FromMilliseconds(1000.), fun () -> Tick) // every 1000 ms
-      Sub.ResizeSub(fun (w, h) -> Resize(w, h)) ]   // terminal resize (always fires)
+      Sub.ResizeSub(fun (w, h) -> Some (Resize(w, h))) ]   // terminal resize (return None to ignore
 ```
 
 `Sub.KeySub` fires on every keypress and maps it to an optional message.

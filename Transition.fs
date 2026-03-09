@@ -202,13 +202,24 @@ module TransitionFx =
           buf.Cells.[(offset + row) * buf.Width + col] <- cell
         | false -> ()
 
+  /// Applies a user-supplied cell-level transition function.
+  /// The function receives (t, col, row, beforeCell, afterCell) and returns the blended cell.
+  let applyCustom (t: float) (f: float -> int -> int -> PackedCell -> PackedCell -> PackedCell) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
+    for row in 0 .. height - 1 do
+      for col in 0 .. width - 1 do
+        let idx = row * width + col
+        match idx < snapshot.Length && idx < current.Length with
+        | true ->
+          buf.Cells.[(offset + row) * buf.Width + col] <- f t col row snapshot.[idx] current.[idx]
+        | false -> ()
+
 module TransitionDuration =
   let rec get (t: Transition) =
     match t with
     | Fade d | ColorMorph d | Dissolve d | Grow d -> int d
     | Wipe(_, d) | SlideIn(_, d) -> int d
+    | Custom(d, _) -> int d
     | Sequence ts -> ts |> List.sumBy get  // Duration is pre-computed for when Sequence is implemented; returns 0 for empty list
-    | Custom _ -> 200
 
 module Reconcile =
   let findKeyedElements (el: Element) : Map<string, Element> =

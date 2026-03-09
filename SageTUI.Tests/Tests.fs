@@ -2003,10 +2003,10 @@ let subTests = testList "Sub" [
     | _ -> failwith "expected TimerSub"
 
   testCase "ResizeSub transforms dimensions" <| fun () ->
-    let sub = ResizeSub(fun (w, h) -> sprintf "%dx%d" w h)
+    let sub = ResizeSub(fun (w, h) -> Some (sprintf "%dx%d" w h))
     match sub with
     | ResizeSub handler ->
-      handler (80, 24) |> Expect.equal "size" "80x24"
+      handler (80, 24) |> Expect.equal "size" (Some "80x24")
     | _ -> failwith "expected ResizeSub"
 ]
 
@@ -2449,11 +2449,11 @@ let cmdExtendedTests = testList "Cmd extended" [
     | _ -> failwith "expected TimerSub"
 
   testCase "Sub.map transforms ResizeSub" <| fun () ->
-    let inner : Sub<string> = ResizeSub(fun (w, h) -> sprintf "%dx%d" w h)
+    let inner : Sub<string> = ResizeSub(fun (w, h) -> Some (sprintf "%dx%d" w h))
     let outer : Sub<int> = Sub.map (fun (s: string) -> s.Length) inner
     match outer with
     | ResizeSub handler ->
-      handler(80, 24) |> Expect.equal "resize mapped" 5
+      handler(80, 24) |> Expect.equal "resize mapped" (Some 5)
     | _ -> failwith "expected ResizeSub"
 ]
 
@@ -2651,7 +2651,7 @@ let eventDispatchTests = testList "Event dispatch" [
         | s -> (s, Cmd.none)
       View = fun model -> El.text model
       Subscribe = fun _ -> [
-        ResizeSub (fun (w, h) -> sprintf "%dx%d" w h)
+        ResizeSub (fun (w, h) -> Some (sprintf "%dx%d" w h))
         KeySub (fun (key, _) ->
           match key with
           | KeyChar 'q' -> Some "quit"
@@ -3183,9 +3183,60 @@ let transitionDurationTests= testList "TransitionDuration.get" [
       (Sequence [ Fade 100<ms>; Sequence [ Wipe(Direction.Down, 200<ms>); Dissolve 300<ms> ] ])
     |> Expect.equal "600ms" 600
 
-  testCase "Custom defaults to 200" <| fun () ->
-    TransitionDuration.get (Custom (fun _ a _ -> a))
-    |> Expect.equal "200" 200
+  testCase "Custom duration from constructor" <| fun () ->
+    TransitionDuration.get (Custom(250<ms>, fun t c r b a -> a))
+    |> Expect.equal "250" 250
+]
+
+let transitionFxCustomTests = testList "TransitionFx.applyCustom" [
+  let mkCell (ch: char) = { PackedCell.empty with Rune = int ch }
+  let snap = Array.init 4 (fun _ -> mkCell 'A')
+  let curr = Array.init 4 (fun _ -> mkCell 'B')
+
+  testCase "identity on before: t=0 produces snapshot cells" <| fun () ->
+    let buf = Buffer.create 2 2
+    TransitionFx.applyCustom 0.0 (fun _t _c _r b _a -> b) snap curr 0 2 2 buf
+    buf.Cells |> Array.forall (fun c -> c.Rune = int 'A')
+    |> Expect.isTrue "all cells should be 'A'"
+
+  testCase "identity on after: t=1 produces current cells" <| fun () ->
+    let buf = Buffer.create 2 2
+    TransitionFx.applyCustom 1.0 (fun _t _c _r _b a -> a) snap curr 0 2 2 buf
+    buf.Cells |> Array.forall (fun c -> c.Rune = int 'B')
+    |> Expect.isTrue "all cells should be 'B'"
+
+  testCase "progress value is passed through correctly" <| fun () ->
+    let buf = Buffer.create 2 2
+    let captured = System.Collections.Generic.List<float>()
+    TransitionFx.applyCustom 0.75 (fun t _c _r _b a -> captured.Add(t); a) snap curr 0 2 2 buf
+    captured |> Seq.forall (fun t -> t = 0.75)
+    |> Expect.isTrue "all calls should see t=0.75"
+
+  testCase "col and row are visited in row-major order" <| fun () ->
+    let buf = Buffer.create 2 2
+    let coords = System.Collections.Generic.List<int * int>()
+    TransitionFx.applyCustom 0.5 (fun _t c r _b a -> coords.Add((c, r)); a) snap curr 0 2 2 buf
+    coords |> Seq.toList
+    |> Expect.equal "row-major coords" [(0,0);(1,0);(0,1);(1,1)]
+
+  testCase "Custom transition in applyTransition applies fn" <| fun () ->
+    // Build a 2x2 buffer, run the fn that always returns snapshot cell
+    let buf = Buffer.create 2 2
+    Array.blit curr 0 buf.Cells 0 4
+    let at = {
+      Key = "test"
+      Transition = Custom(200<ms>, fun _t _c _r b _a -> b)
+      StartMs   = 0L
+      DurationMs = 200
+      Easing     = Ease.linear
+      SnapshotBefore = snap
+      Area = { X = 0; Y = 0; Width = 2; Height = 2 }
+      Payload = NoPayload
+    }
+    let t = ActiveTransition.progress 100L at  // t ≈ 0.5
+    TransitionFx.applyCustom t (fun _t _c _r b _a -> b) at.SnapshotBefore buf.Cells at.Area.Y at.Area.Width at.Area.Height buf
+    buf.Cells |> Array.forall (fun c -> c.Rune = int 'A')
+    |> Expect.isTrue "custom fn should write 'A' snapshot cells"
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3626,6 +3677,7 @@ let allTests = testList "All" [
     slideInTests
     growTests
     transitionDurationTests
+    transitionFxCustomTests
   ]
   testList "Phase 10" [
     textInputBasicTests

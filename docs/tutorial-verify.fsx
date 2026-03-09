@@ -184,6 +184,6 @@ type AppMsg2 = Key of Key * Modifiers | Tick | Resize of int * int | Quit2
 let _subKeyBind  : Sub<ContactMsg>  = Keys.bind [ Key.Char (Text.Rune 'q'), Quit; Key.Escape, Quit ]
 let _subKeySub   : Sub<AppMsg2>     = Sub.KeySub(fun (k, mods) -> Some (AppMsg2.Key(k, mods)))
 let _subTimerSub : Sub<AppMsg2>     = Sub.TimerSub("tick", System.TimeSpan.FromMilliseconds(1000.0), fun () -> Tick)
-let _subResizeSub: Sub<AppMsg2>     = Sub.ResizeSub(fun (w, h) -> Resize(w, h))  // no Some — returns 'msg directly
+let _subResizeSub: Sub<AppMsg2>     = Sub.ResizeSub(fun (w, h) -> Some (Resize(w, h)))
 
 printfn "✓ Tutorial examples compiled successfully"

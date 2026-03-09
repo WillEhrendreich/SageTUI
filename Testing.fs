@@ -236,7 +236,10 @@ module TestHarness =
     let msgs =
       [ for sub in app.Program.Subscribe app.Model do
           match sub with
-          | ResizeSub handler -> yield handler (width, height)
+          | ResizeSub handler ->
+            match handler (width, height) with
+            | Some msg -> yield msg
+            | None     -> ()
           | _ -> () ]
     let app' = applyMsgs app.VirtualTime app msgs
     { app' with Width = width; Height = height }

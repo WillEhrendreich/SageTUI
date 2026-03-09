@@ -444,8 +444,17 @@ module Backend =
         //   ?1004h — OS-level focus in/out events (ESC [ I / ESC [ O)
         //   ?2004h — bracketed paste mode (ESC [ 200~ ... ESC [ 201~)
         Console.Write("\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1004h\x1b[?2004h")
+        // Kitty keyboard protocol: push enhanced mode (flags=1: disambiguate escape codes)
+        // Only negotiate with terminals that support it (Kitty, WezTerm, Ghostty, foot, etc.)
+        match profile.Input >= InputCapability.KittyKeyboard with
+        | true -> Console.Write("\x1b[>1u")
+        | false -> ()
         Console.Out.Flush()
       LeaveRawMode = fun () ->
+        // Kitty keyboard protocol: pop enhanced mode before disabling other features
+        match profile.Input >= InputCapability.KittyKeyboard with
+        | true -> Console.Write("\x1b[<u")
+        | false -> ()
         Console.Write("\x1b[?2004l\x1b[?1004l\x1b[?1006l\x1b[?1002l\x1b[?1000l")
         Console.Out.Flush()
         RawMode.leave savedModes

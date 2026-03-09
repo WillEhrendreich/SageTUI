@@ -176,7 +176,7 @@ type Sub<'msg> =
   | PasteSub of (string -> 'msg option)
   | FocusSub of (FocusDirection -> 'msg option)
   | TimerSub of id: string * interval: TimeSpan * tick: (unit -> 'msg)
-  | ResizeSub of (int * int -> 'msg)
+  | ResizeSub of (int * int -> 'msg option)
   | CustomSub of id: string * start: (('msg -> unit) -> CancellationToken -> Async<unit>)
   /// Delivers a FrameTimings record to the given message after each rendered frame.
   | FrameTimingsSub of (FrameTimings -> 'msg)
@@ -235,7 +235,7 @@ module Sub =
     | PasteSub handler -> PasteSub(fun text -> handler text |> Option.map f)
     | FocusSub handler -> FocusSub(fun input -> handler input |> Option.map f)
     | TimerSub(id, interval, tick) -> TimerSub(id, interval, tick >> f)
-    | ResizeSub handler -> ResizeSub(fun input -> handler input |> f)
+    | ResizeSub handler -> ResizeSub(fun input -> handler input |> Option.map f)
     | CustomSub(id, start) ->
       CustomSub(id, fun dispatch ct -> start (f >> dispatch) ct)
     | FrameTimingsSub toMsg -> FrameTimingsSub(toMsg >> f)
@@ -248,7 +248,7 @@ module Sub =
   ///   Sub.frameTimings GotTimings
   let frameTimings (toMsg: FrameTimings -> 'msg) : Sub<'msg> = FrameTimingsSub toMsg
 
-  /// Prepend a namespace prefix to all identifier-bearing subscriptions.
+  /// Prepend a namespace prefix to an identifier-bearing subscription.
   /// TimerSub and CustomSub carry string IDs used for reconciliation; two components
   /// that both register a TimerSub with id "refresh" would silently collide without
   /// namespacing. Use `Sub.prefix "componentName"` to avoid that.
@@ -256,16 +256,29 @@ module Sub =
   /// Subs without IDs (KeySub, MouseSub, ClickSub, DragSub, etc.) are returned unchanged.
   ///
   /// Example:
-  ///   let subs = Sub.prefix "sidebar" [
-  ///     TimerSub("refresh", TimeSpan.FromSeconds 1.0, fun () -> Tick)
-  ///     CustomSub("worker", ...)
-  ///   ]
-  ///   // → ids become "sidebar/refresh" and "sidebar/worker"
+  ///   Sub.prefix "sidebar" (TimerSub("refresh", ...))
+  ///   // → TimerSub("sidebar/refresh", ...)
+  ///
+  /// To prefix a whole list at once, use `Sub.prefixAll`.
   let prefix (ns: string) (sub: Sub<'msg>) : Sub<'msg> =
     match sub with
     | TimerSub(id, interval, tick) -> TimerSub(ns + "/" + id, interval, tick)
     | CustomSub(id, start)         -> CustomSub(ns + "/" + id, start)
     | other                        -> other
+
+  /// Prepend a namespace prefix to all identifier-bearing subscriptions in a list.
+  /// Equivalent to `List.map (Sub.prefix ns) subs`.
+  ///
+  /// Subs without IDs (KeySub, MouseSub, etc.) are returned unchanged.
+  ///
+  /// Example:
+  ///   let subs = Sub.prefixAll "sidebar" [
+  ///     TimerSub("refresh", TimeSpan.FromSeconds 1.0, fun () -> Tick)
+  ///     CustomSub("worker", ...)
+  ///   ]
+  ///   // → ids become "sidebar/refresh" and "sidebar/worker"
+  let prefixAll (ns: string) (subs: Sub<'msg> list) : Sub<'msg> list =
+    List.map (prefix ns) subs
 
   /// Subscribe to an `IObservable<'msg>`. Dispatches each emitted value as a message.
   /// The subscription is automatically cancelled when the app leaves the state that
@@ -292,15 +305,17 @@ module Sub =
     CustomSub(id, fun dispatch ct ->
       async {
         let enumerator = stream.GetAsyncEnumerator(ct)
+        let mutable running = true
         try
-          let mutable running = true
           while running && not ct.IsCancellationRequested do
             let! hasMore = enumerator.MoveNextAsync().AsTask() |> Async.AwaitTask
             match hasMore && not ct.IsCancellationRequested with
             | true -> dispatch enumerator.Current
             | false -> running <- false
         finally
-          enumerator.DisposeAsync().AsTask() |> Async.AwaitTask |> Async.RunSynchronously
+          // Use IgnoreResult to avoid Async.RunSynchronously, which can deadlock
+          // on .NET thread-pool schedulers that aggressively inline tasks.
+          enumerator.DisposeAsync().AsTask() |> Async.AwaitTask |> Async.StartImmediate
       })
 
 /// Generic undo/redo wrapper for any model type.

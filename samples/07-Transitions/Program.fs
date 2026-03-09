@@ -427,7 +427,7 @@ let keyBindings =
 
 let subscribe model =
   [ keyBindings
-    ResizeSub (fun (w, h) -> Resized(w, h))
+    ResizeSub (fun (w, h) -> Some (Resized(w, h)))
     TimerSub("anim-tick", TimeSpan.FromMilliseconds(200.0), fun () -> AnimTick)
     match model.AutoCycle with
     | true -> TimerSub("auto", TimeSpan.FromSeconds(2.0), fun () -> AutoTick)
