@@ -1235,9 +1235,11 @@ module TreeView =
 type FieldId = FieldId of string
 
 module FieldId =
-  /// Construct a `FieldId` from a raw string. Raises ArgumentNullException for null input.
+  /// Construct a `FieldId` from a raw string.
+  /// Raises <see cref="System.ArgumentException"/> (via <c>invalidArg</c>) for null input.
+  /// Prefer this over the raw <c>FieldId</c> constructor when the value originates from external input.
   let create (s: string) =
-    if s = null then invalidArg (nameof s) "FieldId cannot wrap null"
+    if isNull s then invalidArg (nameof s) "FieldId cannot wrap null"
     FieldId s
   /// Extract the raw string value from a `FieldId`.
   let value (FieldId s) = s

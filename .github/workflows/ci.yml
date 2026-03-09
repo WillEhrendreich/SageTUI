@@ -55,6 +55,7 @@ jobs:
   benchmark-regression:
     runs-on: ubuntu-latest
     needs: [build-and-test]
+    permissions: {}  # explicitly read-only; write access lives only in benchmark-push-baseline
 
     steps:
       - uses: actions/checkout@v4

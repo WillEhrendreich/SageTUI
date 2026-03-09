@@ -761,7 +761,14 @@ let undoLawTests =
     // Formally: content(undo(undo(edit(edit(x))))) = content(x)
     // This verifies that the history stack is LIFO-correct across multiple entries,
     // not just for the trivial single-step case.
-    testPropertyWithConfig config "Law6: undo(undo(edit(edit(x)))) = x (depth-2)" <|
+    //
+    // Skip-rate note: this law skips when either edit is a no-op (backspace at
+    // boundary, delete at end, etc.). At default 100 runs, roughly 30-40% may skip.
+    // We use MaxTest = 1000 to ensure at least ~600 meaningful executions and
+    // keep the law from being vacuous in practice.
+    testPropertyWithConfig
+      { config with maxTest = 1000 }
+      "Law6: undo(undo(edit(edit(x)))) = x (depth-2)" <|
       fun (SingleLineContent c) (msg1: ContentMsg) (msg2: ContentMsg) ->
         let um0 = TextEditor.withUndo (mk c)
         let um1 = TextEditor.updateWithUndo (ContentMsg.toMsg msg1) um0

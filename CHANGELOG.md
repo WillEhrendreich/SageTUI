@@ -5,7 +5,39 @@ All notable changes to SageTUI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — 2026-03-07
+## [Unreleased]
+
+### Changed
+
+- **`FieldId` is now a reference DU** (was `[<Struct>]`). This is technically a breaking
+  change for any code relying on struct-specific behavior (stack allocation, `Span<FieldId>`
+  compatibility, or the `[<Struct>]` default zero-value constructor `FieldId()`). In practice
+  `FieldId` only appears in `Map`, `list`, and record fields — all heap-allocated contexts —
+  so the behavioral impact is negligible. The motivation: the struct default constructor
+  produced `FieldId(null)`, a footgun eliminated by the reference DU. If you were using
+  `FieldId()` anywhere, replace it with `FieldId.create "your-id"`.
+
+### Added
+
+- `FieldId.create` — factory function that validates the input string is non-null. Prefer
+  this over the raw `FieldId` constructor when the value originates from external input.
+- Theme integration for all major widgets (all additive, no breaking changes):
+  - `ProgressBar.withTheme` — applies `theme.Primary`/`theme.TextDim` to filled/empty segments
+  - `TextInput.viewThemed` / `TextInput.viewWithPlaceholderThemed`
+  - `Checkbox.viewThemed` — accent for checked, TextDim for unchecked, bold when focused
+  - `Toggle.viewThemed` — success for on-state, TextDim for off-state, bold when focused
+  - `Tabs.withTheme` / `VirtualList.withTheme`
+- Benchmark CI regression gate (`benchmark-regression` job): 150% threshold, 15 iterations,
+  compares against stored gh-pages baseline on every push and PR.
+
+### Fixed
+
+- Benchmark CI `benchmark-push-baseline` job now has `permissions: {}` on the read-only
+  `benchmark-regression` job, ensuring the write token is never present in PR contexts.
+- `undo` algebraic laws (Laws 1–6): generator-first `SingleLineContent` arbitrary eliminates
+  `Arb.filter` shrinking defect; Laws 5 and 6 correctly guard for no-op edits.
+
+
 
 Initial public release.
 
@@ -98,6 +130,8 @@ Benchmarked on .NET 10.0, i7-11800H:
 | Buffer.diff 10% changed (80×24) | 3.3 μs | 2.2 KB |
 | Render dashboard tree (80×24) | 19.4 μs | 6.6 KB |
 | Arena render dashboard (80×24) | 31.8 μs | 310 KB |
+<!-- 310 KB is initial arena allocation (pre-allocated node pool, amortized across frames). -->
+<!-- Steady-state per-frame allocation after warmup trends toward 0 as the arena is reused. -->
 | Layout 50-item column | 26.1 μs | 91 KB |
 | Layout nested 3-level | 102 μs | 143 KB |
 

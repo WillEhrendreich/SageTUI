@@ -1242,9 +1242,81 @@ let themedWidgetTests = testList "ThemedWidgets" [
   }
 ]
 
+// ── Color-semantic render tests ──────────────────────────────────────────────
+// These tests render themed widgets to a buffer and assert that theme colors
+// are actually present in the rendered cells — not just that the Element DU
+// structure is correct.
+
+let private renderToBuffer w h elem =
+  let buf = Buffer.create w h
+  Render.render { X = 0; Y = 0; Width = w; Height = h } Style.empty buf elem
+  buf
+
+let private fgColorAt x y buf =
+  PackedColor.unpack (Buffer.get x y buf).Fg
+
+let themedColorSemanticTests = testList "ThemedWidgets.ColorSemantics" [
+
+  test "ProgressBar.withTheme: filled cells carry theme.Primary as fg color" {
+    // Width 10, 100% filled → columns 0-9 should all have Fg = theme.Primary
+    let config =
+      { ProgressBar.defaults with Percent = 1.0; Width = 10; ShowLabel = false }
+      |> ProgressBar.withTheme Theme.nord
+    let buf = renderToBuffer 10 1 (ProgressBar.view config)
+    // Every filled cell should have nord Primary as fg
+    for col in 0 .. 9 do
+      fgColorAt col 0 buf
+      |> Expect.equal (sprintf "col %d fg = nord.Primary" col) Theme.nord.Primary
+  }
+
+  test "ProgressBar.withTheme: empty cells carry theme.TextDim as fg color" {
+    // Width 10, 0% filled → all cells should have Fg = theme.TextDim
+    let config =
+      { ProgressBar.defaults with Percent = 0.0; Width = 10; ShowLabel = false }
+      |> ProgressBar.withTheme Theme.dracula
+    let buf = renderToBuffer 10 1 (ProgressBar.view config)
+    for col in 0 .. 9 do
+      fgColorAt col 0 buf
+      |> Expect.equal (sprintf "col %d fg = dracula.TextDim" col) Theme.dracula.TextDim
+  }
+
+  test "Checkbox.viewThemed: checked box cell fg = theme.Accent" {
+    // "[x] Label" — first cell is '[', col 1 is 'x'.  The box span is cols 0-2.
+    // El.fg theme.Accent wraps the "[x]" text, so cols 0-2 should all have Accent fg.
+    let elem = Checkbox.viewThemed Theme.nord "L" false true  // unfocused, checked
+    let buf = renderToBuffer 20 1 elem
+    fgColorAt 1 0 buf
+    |> Expect.equal "checked 'x' cell fg = nord.Accent" Theme.nord.Accent
+  }
+
+  test "Checkbox.viewThemed: unchecked box cell fg = theme.TextDim" {
+    // "[ ] Label" — col 1 is ' ' (inside the box), cols 0-2 wrapped with TextDim
+    let elem = Checkbox.viewThemed Theme.dark "L" false false  // unfocused, unchecked
+    let buf = renderToBuffer 20 1 elem
+    // Col 0 = '[', col 1 = ' ', col 2 = ']'  — all should have TextDim fg
+    fgColorAt 0 0 buf
+    |> Expect.equal "unchecked '[' cell fg = dark.TextDim" Theme.dark.TextDim
+  }
+
+  test "Toggle.viewThemed: on-state symbol cell fg = theme.Success" {
+    // "● onLabel" — col 0 is '●' with Success color
+    let elem = Toggle.viewThemed Theme.catppuccin "On" "Off" false true  // unfocused, on
+    let buf = renderToBuffer 20 1 elem
+    fgColorAt 0 0 buf
+    |> Expect.equal "on symbol fg = catppuccin.Success" Theme.catppuccin.Success
+  }
+
+  test "Toggle.viewThemed: off-state symbol cell fg = theme.TextDim" {
+    // "○ offLabel" — col 0 is '○' with TextDim color
+    let elem = Toggle.viewThemed Theme.nord "On" "Off" false false  // unfocused, off
+    let buf = renderToBuffer 20 1 elem
+    fgColorAt 0 0 buf
+    |> Expect.equal "off symbol fg = nord.TextDim" Theme.nord.TextDim
+  }
+
+]
 
 
-// ── Sub.frameTimings / FrameTimingsSub ───────────────────────────────────────
 
 type TimingsMsg = GotTimings of FrameTimings | OtherMsg
 
@@ -1963,6 +2035,7 @@ let allWidgetTests = testList "Widgets" [
   textFormTests
   themeTests
   themedWidgetTests
+  themedColorSemanticTests
   frameTimingsTests
   undoableCommitTests
   focusRingTests
