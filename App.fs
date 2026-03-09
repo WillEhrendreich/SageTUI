@@ -3,6 +3,7 @@ namespace SageTUI
 open System
 open System.Collections.Concurrent
 open System.Collections.Generic
+open System.Runtime.InteropServices
 open System.Threading
 
 type AppConfig =
@@ -183,6 +184,40 @@ module App =
         | false -> ()
       with _ -> ())
 
+    // POSIX suspend/resume (SIGTSTP / SIGCONT): restore the terminal before the
+    // process is stopped, then re-enter raw/alt-screen when it resumes.
+    // Windows does not have SIGTSTP so we guard on the OS platform.
+    let _sigHandlers =
+      match RuntimeInformation.IsOSPlatform(OSPlatform.Windows) with
+      | true -> []
+      | false ->
+        let tstp =
+          PosixSignalRegistration.Create(PosixSignal.SIGTSTP, fun _ ->
+            try
+              match automation.UseAltScreen with
+              | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
+              | false -> backend.Write(Ansi.showCursor)
+              backend.Flush()
+              match automation.UseRawMode with
+              | true -> backend.LeaveRawMode()
+              | false -> ()
+            with _ -> ()
+          )
+        let cont =
+          PosixSignalRegistration.Create(PosixSignal.SIGCONT, fun _ ->
+            try
+              match automation.UseRawMode with
+              | true -> backend.EnterRawMode()
+              | false -> ()
+              match automation.UseAltScreen with
+              | true -> backend.Write(Ansi.enterAltScreen + Ansi.hideCursor)
+              | false -> backend.Write(Ansi.hideCursor)
+              backend.Flush()
+              needsFullRedraw <- true
+            with _ -> ()
+          )
+        [ tstp; cont ]
+
     try
       interpretCmd initCmd
       let mutable subs = program.Subscribe model
@@ -203,175 +238,200 @@ module App =
           reconcileSubs subs
         | false -> ()
 
-        let elem = program.View model
+        // Skip the full render pipeline when the model is unchanged, no transitions are active,
+        // and no full-redraw was requested. This eliminates wasted CPU on idle frames (e.g., apps
+        // waiting for input) where nothing has changed since the last rendered frame.
+        let shouldRender = modelChanged || not (List.isEmpty activeTransitions) || needsFullRedraw
 
-        // Reconcile keyed elements for transitions. Exits use the previous frame's
-        // keyed areas; enters use the current frame's keyed areas after rendering.
-        let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        let newKeyed = Reconcile.findKeyedElements elem
-        let (entering, exiting) = Reconcile.reconcile prevKeyedElements newKeyed
-
-        // Capture snapshots for exiting elements and start exit transitions
-        // hasDissolve: true if the transition (possibly nested in Sequence) contains a Dissolve.
-        // When true, DissolvePayload is pre-computed once here to avoid per-frame allocation.
-        let rec hasDissolve trans =
-          match trans with
-          | Dissolve _ -> true
-          | Sequence ts -> ts |> List.exists hasDissolve
-          | _ -> false
-        let computePayload (key: string) (transition: Transition) (area: Area) =
-          match hasDissolve transition with
-          | true  -> DissolvePayload (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (area.Width * area.Height))
-          | false -> NoPayload
-        for (key, oldElem) in exiting do
-          match oldElem with
-          | Keyed(_, _, exitTransition, _) ->
-            let snapshot = Array.copy frontBuf.Cells
-            let area = prevKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ())
-            activeTransitions <-
-              { Key = key
-                Transition = exitTransition
-                StartMs = nowMs
-                DurationMs = TransitionDuration.get exitTransition
-                Easing = Ease.cubicInOut
-                SnapshotBefore = snapshot
-                Area = area
-                Payload = computePayload key exitTransition area }
-              :: activeTransitions
-          | _ -> ()
-
-        prevKeyedElements <- newKeyed
-
-        FrameArena.reset arena
-        let rootHandle = Arena.lower arena elem
-
-        match needsFullRedraw with
-        | true ->
-          frontBuf <- Buffer.create width height
-          backBuf <- Buffer.create width height
-          backend.Write(Ansi.clearScreen)
-          backend.Flush()
-          needsFullRedraw <- false
+        match shouldRender with
         | false -> ()
-
-        Buffer.clear backBuf
-        let area = { X = 0; Y = 0; Width = width; Height = height }
-        frameSw.Restart()
-        ArenaRender.renderRoot arena rootHandle area backBuf
-        let renderMs = frameSw.Elapsed.TotalMilliseconds
-        // Rebuild keyed-area map every frame that has keyed elements.
-        // We CANNOT gate this on 'transitions active' — a 'staying' element (present
-        // in both prev and current frames) may reposition silently with no entering/exiting
-        // fires. When it later exits, App.run uses prevKeyAreas for the exit-transition Area.
-        // If prevKeyAreas was never updated during the staying frames, the exit transition
-        // fires at the stale entry position. Gating on HitMap.Count=0 correctly skips the
-        // Map allocation only for apps with zero El.keyed elements.
-        let currentKeyAreas =
-          match arena.HitMap.Count > 0 with
-          | true -> ArenaRender.keyAreas arena
-          | false -> prevKeyAreas
-
-        // Start enter transitions once we know the rendered keyed areas.
-        for (key, newElem) in entering do
-          match newElem with
-          | Keyed(_, enterTransition, _, _) ->
-            let transArea = currentKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ())
-            activeTransitions <-
-              { Key = key
-                Transition = enterTransition
-                StartMs = nowMs
-                DurationMs = TransitionDuration.get enterTransition
-                Easing = Ease.cubicInOut
-                SnapshotBefore = Array.create (width * height) PackedCell.empty
-                Area = transArea
-                Payload = computePayload key enterTransition transArea }
-              :: activeTransitions
-          | _ -> ()
-
-        // Apply active transitions via a recursive dispatcher so Sequence can recurse.
-        // Each Transition case is explicit — compiler warns when a new case is added.
-        let rec applyTransition (t: float) (transition: Transition) (at: ActiveTransition) =
-          match transition with
-          | Fade _ ->
-            TransitionFx.applyFade t backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
-          | ColorMorph _ ->
-            TransitionFx.applyColorMorph t at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
-          | Wipe(dir, _) ->
-            TransitionFx.applyWipe t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
-          | Dissolve _ ->
-            // DissolvePayload pre-computed at transition start (via computePayload).
-            // Also covers Dissolve nested inside Sequence — computePayload recurses via hasDissolve.
-            match at.Payload with
-            | DissolvePayload order ->
-              TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
-            | NoPayload ->
-              failwithf "Dissolve transition '%s' has NoPayload — shuffle order must be pre-computed at transition start" at.Key
-          | SlideIn(dir, _) ->
-            TransitionFx.applySlideIn t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
-          | Grow _ ->
-            TransitionFx.applyGrow t at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
-          | Sequence ts ->
-            // Play sub-transitions in order, sharing the original snapshot.
-            // For pixel-perfect chaining, use multiple El.keyed elements with staggered transitions.
-            let totalMs = TransitionDuration.get (Sequence ts)
-            match totalMs with
-            | 0 -> ()
-            | _ ->
-              let elapsedMs = t * float totalMs
-              let mutable remaining = elapsedMs
-              let mutable applied = false
-              let lastIdx = List.length ts - 1
-              let mutable subIdx = 0
-              for sub in ts do
-                match applied with
-                | false ->
-                  let dur = float (TransitionDuration.get sub)
-                  // Apply this sub-transition if: remaining time fits within it, OR it's the last one
-                  match remaining <= dur || subIdx = lastIdx with
-                  | true ->
-                    let localT = match dur with 0.0 -> 1.0 | _ -> System.Math.Clamp(remaining / dur, 0.0, 1.0)
-                    applyTransition localT sub at
-                    applied <- true
-                  | false ->
-                    remaining <- remaining - dur
-                    subIdx <- subIdx + 1
-                | true -> ()
-          | Custom(_, f) ->
-            TransitionFx.applyCustom t f at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
-
-        activeTransitions |> List.iter (fun at ->
-          let t = ActiveTransition.progress nowMs at
-          applyTransition t at.Transition at)
-
-        // Remove completed transitions
-        activeTransitions <- activeTransitions |> List.filter (fun at -> not (ActiveTransition.isDone nowMs at))
-
-        let changes = Buffer.diff frontBuf backBuf
-        let diffMs = frameSw.Elapsed.TotalMilliseconds - renderMs
-
-        match changes.Count > 0 with
         | true ->
-          let presentStart = frameSw.Elapsed.TotalMilliseconds
-          let output = Presenter.present changes backBuf
-          backend.Write(output)
-          backend.Flush()
-          let presentMs = frameSw.Elapsed.TotalMilliseconds - presentStart
-          let timings =
-            { RenderMs = renderMs
-              DiffMs = diffMs
-              PresentMs = presentMs
-              TotalMs = frameSw.Elapsed.TotalMilliseconds
-              ChangedCells = changes.Count }
-          for sub in subs do
-            match sub with
-            | FrameTimingsSub toMsg -> dispatch (toMsg timings)
+
+          let elem = program.View model
+  
+          // Reconcile keyed elements for transitions. Exits use the previous frame's
+          // keyed areas; enters use the current frame's keyed areas after rendering.
+          let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+          let newKeyed = Reconcile.findKeyedElements elem
+          let (entering, exiting) = Reconcile.reconcile prevKeyedElements newKeyed
+  
+          // Capture snapshots for exiting elements and start exit transitions
+          // hasDissolve: true if the transition (possibly nested in Sequence) contains a Dissolve.
+          // When true, DissolvePayload is pre-computed once here to avoid per-frame allocation.
+          let rec hasDissolve trans =
+            match trans with
+            | Dissolve _ -> true
+            | Sequence ts -> ts |> List.exists hasDissolve
+            | _ -> false
+          let computePayload (key: string) (transition: Transition) (area: Area) =
+            match hasDissolve transition with
+            | true  -> DissolvePayload (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (area.Width * area.Height))
+            | false -> NoPayload
+          for (key, oldElem) in exiting do
+            match oldElem with
+            | Keyed(_, _, exitTransition, _) ->
+              let snapshot = Array.copy frontBuf.Cells
+              let area = prevKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ())
+              activeTransitions <-
+                { Key = key
+                  Transition = exitTransition
+                  StartMs = nowMs
+                  DurationMs = TransitionDuration.get exitTransition
+                  Easing = Ease.cubicInOut
+                  SnapshotBefore = snapshot
+                  Area = area
+                  Payload = computePayload key exitTransition area
+                  PhaseCaptures = Map.empty }
+                :: activeTransitions
             | _ -> ()
-        | false -> ()
-
-        let temp = frontBuf
-        frontBuf <- backBuf
-        backBuf <- temp
-        prevKeyAreas <- currentKeyAreas
+  
+          prevKeyedElements <- newKeyed
+  
+          FrameArena.reset arena
+          let rootHandle = Arena.lower arena elem
+  
+          match needsFullRedraw with
+          | true ->
+            frontBuf <- Buffer.create width height
+            backBuf <- Buffer.create width height
+            backend.Write(Ansi.clearScreen)
+            backend.Flush()
+            needsFullRedraw <- false
+          | false -> ()
+  
+          Buffer.clear backBuf
+          let area = { X = 0; Y = 0; Width = width; Height = height }
+          frameSw.Restart()
+          ArenaRender.renderRoot arena rootHandle area backBuf
+          let renderMs = frameSw.Elapsed.TotalMilliseconds
+          // Rebuild keyed-area map every frame that has keyed elements.
+          // We CANNOT gate this on 'transitions active' — a 'staying' element (present
+          // in both prev and current frames) may reposition silently with no entering/exiting
+          // fires. When it later exits, App.run uses prevKeyAreas for the exit-transition Area.
+          // If prevKeyAreas was never updated during the staying frames, the exit transition
+          // fires at the stale entry position. Gating on HitMap.Count=0 correctly skips the
+          // Map allocation only for apps with zero El.keyed elements.
+          let currentKeyAreas =
+            match arena.HitMap.Count > 0 with
+            | true -> ArenaRender.keyAreas arena
+            | false -> prevKeyAreas
+  
+          // Start enter transitions once we know the rendered keyed areas.
+          for (key, newElem) in entering do
+            match newElem with
+            | Keyed(_, enterTransition, _, _) ->
+              let transArea = currentKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ())
+              activeTransitions <-
+                { Key = key
+                  Transition = enterTransition
+                  StartMs = nowMs
+                  DurationMs = TransitionDuration.get enterTransition
+                  Easing = Ease.cubicInOut
+                  SnapshotBefore = Array.create (width * height) PackedCell.empty
+                  Area = transArea
+                  Payload = computePayload key enterTransition transArea
+                  PhaseCaptures = Map.empty }
+                :: activeTransitions
+            | _ -> ()
+  
+          // Apply active transitions via a recursive dispatcher so Sequence can recurse.
+          // Each Transition case is explicit — compiler warns when a new case is added.
+          let rec applyTransition (t: float) (transition: Transition) (at: ActiveTransition) =
+            match transition with
+            | Fade _ ->
+              TransitionFx.applyFade t backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+            | ColorMorph _ ->
+              TransitionFx.applyColorMorph t at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+            | Wipe(dir, _) ->
+              TransitionFx.applyWipe t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+            | Dissolve _ ->
+              // DissolvePayload pre-computed at transition start (via computePayload).
+              // Also covers Dissolve nested inside Sequence — computePayload recurses via hasDissolve.
+              match at.Payload with
+              | DissolvePayload order ->
+                TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+              | NoPayload ->
+                failwithf "Dissolve transition '%s' has NoPayload — shuffle order must be pre-computed at transition start" at.Key
+            | SlideIn(dir, _) ->
+              TransitionFx.applySlideIn t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+            | Grow _ ->
+              TransitionFx.applyGrow t at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+            | Sequence ts ->
+              // Play sub-transitions sequentially. Each phase starts from a snapshot of the
+              // buffer at the END of the previous phase, enabling true visual chaining
+              // (e.g., Fade → SlideIn slides from the faded state, not the original snapshot).
+              let totalMs = TransitionDuration.get (Sequence ts)
+              match totalMs with
+              | 0 -> ()
+              | _ ->
+                let elapsedMs = t * float totalMs
+                let mutable remaining = elapsedMs
+                let mutable applied = false
+                let lastIdx = List.length ts - 1
+                let mutable subIdx = 0
+                for sub in ts do
+                  match applied with
+                  | false ->
+                    let dur = float (TransitionDuration.get sub)
+                    // Apply this sub-transition if: remaining time fits within it, OR it's the last one
+                    match remaining <= dur || subIdx = lastIdx with
+                    | true ->
+                      let localT = match dur with 0.0 -> 1.0 | _ -> System.Math.Clamp(remaining / dur, 0.0, 1.0)
+                      // Use per-phase snapshot for phases after the first.
+                      // On first frame of a new phase: capture current backBuf (shows end-of-prev-phase rendering).
+                      let phaseAt =
+                        match subIdx with
+                        | 0 -> at  // phase 0 uses the original SnapshotBefore
+                        | _ ->
+                          match at.PhaseCaptures |> Map.tryFind subIdx with
+                          | Some snap -> { at with SnapshotBefore = snap }
+                          | None ->
+                            // First frame of this phase — capture the current backBuf state
+                            let snap = Array.copy backBuf.Cells
+                            at.PhaseCaptures <- at.PhaseCaptures |> Map.add subIdx snap
+                            { at with SnapshotBefore = snap }
+                      applyTransition localT sub phaseAt
+                      applied <- true
+                    | false ->
+                      remaining <- remaining - dur
+                      subIdx <- subIdx + 1
+                  | true -> ()
+            | Custom(_, f) ->
+              TransitionFx.applyCustom t f at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+  
+          activeTransitions |> List.iter (fun at ->
+            let t = ActiveTransition.progress nowMs at
+            applyTransition t at.Transition at)
+  
+          // Remove completed transitions
+          activeTransitions <- activeTransitions |> List.filter (fun at -> not (ActiveTransition.isDone nowMs at))
+  
+          let changes = Buffer.diff frontBuf backBuf
+          let diffMs = frameSw.Elapsed.TotalMilliseconds - renderMs
+  
+          match changes.Count > 0 with
+          | true ->
+            let presentStart = frameSw.Elapsed.TotalMilliseconds
+            let output = Presenter.present changes backBuf
+            backend.Write(output)
+            backend.Flush()
+            let presentMs = frameSw.Elapsed.TotalMilliseconds - presentStart
+            let timings =
+              { RenderMs = renderMs
+                DiffMs = diffMs
+                PresentMs = presentMs
+                TotalMs = frameSw.Elapsed.TotalMilliseconds
+                ChangedCells = changes.Count }
+            for sub in subs do
+              match sub with
+              | FrameTimingsSub toMsg -> dispatch (toMsg timings)
+              | _ -> ()
+          | false -> ()
+  
+          let temp = frontBuf
+          frontBuf <- backBuf
+          backBuf <- temp
+          prevKeyAreas <- currentKeyAreas
 
         // Drain all available events per frame (burst input, paste)
         let processEvent (event: TerminalEvent) =

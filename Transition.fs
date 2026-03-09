@@ -20,6 +20,10 @@ type ActiveTransition = {
   /// pre-computed shuffle order (avoids per-frame O(N) array allocation).
   /// For all other kinds: NoPayload.
   Payload: TransitionPayload
+  /// Per-phase snapshots for Sequence transitions. Key is 1-based phase index (phase 2 onwards).
+  /// Populated lazily on the first frame of each new phase.
+  /// Empty for non-Sequence transitions.
+  mutable PhaseCaptures: Map<int, PackedCell array>
 }
 
 module ActiveTransition =

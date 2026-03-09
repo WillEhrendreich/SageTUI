@@ -494,6 +494,53 @@ module RemoteData =
     | Loaded a -> f a
     | Failed ex -> Failed ex
 
+/// Helpers for the common async data-loading pattern using RemoteData.
+///
+/// Usage:
+///   type Msg = GotPosts of RemoteData<Post list>
+///   // In Init or on user action:
+///   let fetchPosts () = Deferred.load (fun () -> Api.getPosts()) GotPosts
+///   // In View:
+///   let postView =
+///     Deferred.view (El.text "Loading…") (fun ex -> El.text ex.Message) renderPosts model.Posts
+module Deferred =
+
+  /// Start loading remote data. Dispatches `toMsg Loading` immediately (on the next frame),
+  /// then dispatches `toMsg (Loaded data)` or `toMsg (Failed ex)` when the async completes.
+  ///
+  /// Example:
+  ///   type Msg = GotPosts of RemoteData<Post list>
+  ///   let load () = Deferred.load (fun () -> Api.getPosts()) GotPosts
+  let load (fetch: unit -> Async<'a>) (toMsg: RemoteData<'a> -> 'msg) : Cmd<'msg> =
+    Batch [
+      Delay(0, toMsg Loading)
+      OfAsync (fun dispatch -> async {
+        let! result = Async.Catch(fetch())
+        match result with
+        | Choice1Of2 data -> dispatch (toMsg (Loaded data))
+        | Choice2Of2 ex   -> dispatch (toMsg (Failed ex))
+      })
+    ]
+
+  /// Re-trigger a load (e.g., on "Refresh" button). Semantically equivalent to `load`
+  /// but communicates intent: this is a user-initiated reload of already-attempted data.
+  let reload (fetch: unit -> Async<'a>) (toMsg: RemoteData<'a> -> 'msg) : Cmd<'msg> =
+    load fetch toMsg
+
+  /// Standard view pattern for remote data.
+  ///
+  /// - While Idle or Loading: renders `loading`
+  /// - On failure: renders `error ex`
+  /// - When data is available: renders `render data`
+  ///
+  /// Example:
+  ///   Deferred.view spinner errorView renderPosts model.Posts
+  let view (loading: Element) (error: exn -> Element) (render: 'a -> Element) (rd: RemoteData<'a>) : Element =
+    match rd with
+    | Idle | Loading -> loading
+    | Failed ex -> error ex
+    | Loaded a -> render a
+
 type TerminalBackend = {
   Size: unit -> int * int
   Write: string -> unit

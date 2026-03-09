@@ -261,7 +261,8 @@ let arenaAllocationTests =
                   Easing = Ease.cubicInOut
                   SnapshotBefore = snapshot
                   Area = area
-                  Payload = DissolvePayload order }
+                  Payload = DissolvePayload order
+                  PhaseCaptures = Map.empty }
 
             let frame () =
                 let t = ActiveTransition.progress 150L at
