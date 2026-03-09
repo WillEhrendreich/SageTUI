@@ -1535,6 +1535,24 @@ let virtualTableTests = testList "VirtualTable" [
     | Column [_; Row [Empty]; _] -> ()
     | other -> failwith (sprintf "unexpected: %A" other)
   }
+  test "VirtualTable.view selected row gets SelectionColor background" {
+    // Model starts with SelectedIndex = Some 0 (first row selected)
+    let m = VirtualList.ofArray 3 [| 0; 1; 2 |]
+    let cfg = VirtualTable.create vtColumns
+    match VirtualTable.view cfg m with
+    | Column [_; _; Column (row0 :: row1 :: _)] ->
+      match row0 with
+      | Styled(s, _) ->
+        s.Bg |> Expect.equal "blue bg on selected" (Some (Color.Named(BaseColor.Blue, Normal)))
+      | Row _ | Text _ ->
+        failwith "row 0 (selected) should be Styled with selection color"
+      | other -> failwith (sprintf "row 0 unexpected: %A" other)
+      match row1 with
+      | Styled(s, _) when s.Bg = Some (Color.Named(BaseColor.Blue, Normal)) ->
+        failwith "row 1 (not selected) should NOT have selection color"
+      | _ -> ()
+    | other -> failwith (sprintf "unexpected top level: %A" other)
+  }
 ]
 [<Tests>]
 let allWidgetTests = testList "Widgets" [

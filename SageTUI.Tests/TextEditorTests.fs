@@ -220,6 +220,50 @@ let selectionTests = testList "TextEditor.Selection" [
     m'.Col       |> Expect.equal "cursor at anchor" 6
     m'.SelectionAnchor |> Expect.equal "anchor cleared" None
   }
+  test "TESelectLeft extends selection leftward" {
+    let m = { mk "hello" with Col = 3 }
+    let m' = TextEditor.update TESelectLeft m
+    m'.Col |> Expect.equal "col at 2" 2
+    m'.SelectionAnchor |> Expect.equal "anchor at (0,3)" (Some (0, 3))
+  }
+  test "TESelectRight extends selection rightward" {
+    let m = { mk "hello" with Col = 2 }
+    let m' = TextEditor.update TESelectRight m
+    m'.Col |> Expect.equal "col at 3" 3
+    m'.SelectionAnchor |> Expect.equal "anchor at (0,2)" (Some (0, 2))
+  }
+  test "TESelectUp extends selection to previous row" {
+    let m = { mk "abc\ndef" with Row = 1; Col = 2 }
+    let m' = TextEditor.update TESelectUp m
+    m'.Row |> Expect.equal "row 0" 0
+    m'.Col |> Expect.equal "col" 2
+    m'.SelectionAnchor |> Expect.equal "anchor at (1,2)" (Some (1, 2))
+  }
+  test "TESelectDown extends selection to next row" {
+    let m = { mk "abc\ndef" with Row = 0; Col = 1 }
+    let m' = TextEditor.update TESelectDown m
+    m'.Row |> Expect.equal "row 1" 1
+    m'.Col |> Expect.equal "col" 1
+    m'.SelectionAnchor |> Expect.equal "anchor at (0,1)" (Some (0, 1))
+  }
+  test "TESelectUp clamps col to line length" {
+    let m = { mk "ab\ncde" with Row = 1; Col = 3 }
+    let m' = TextEditor.update TESelectUp m
+    m'.Row |> Expect.equal "row 0" 0
+    m'.Col |> Expect.equal "clamped to 2" 2
+  }
+  test "TESelectWordLeft extends selection by word" {
+    let m = { mk "hello world" with Col = 11 }
+    let m' = TextEditor.update TESelectWordLeft m
+    m'.Col |> Expect.equal "at word start" 6
+    m'.SelectionAnchor |> Expect.equal "anchor at (0,11)" (Some (0, 11))
+  }
+  test "TESelectWordRight extends selection by word" {
+    let m = { mk "hello world" with Col = 0 }
+    let m' = TextEditor.update TESelectWordRight m
+    m'.Col |> Expect.equal "at word end" 5
+    m'.SelectionAnchor |> Expect.equal "anchor at (0,0)" (Some (0, 0))
+  }
 ]
 
 // ── paste ────────────────────────────────────────────────────────────────────
@@ -281,7 +325,6 @@ let viewTests = testList "TextEditor.view" [
   test "view focused: current row shows reversed cursor" {
     let m = { mk "hi" with Col = 1 }
     let el = TextEditor.view true 5 m
-    // Row 0 is focused: should have Row with reversed text at cursor
     match el with
     | Column (firstRow :: _) ->
       match firstRow with
@@ -298,6 +341,65 @@ let viewTests = testList "TextEditor.view" [
       | Text _, Text _ -> ()
       | _ -> failtest "expected two Text elements"
     | _ -> failtest "expected two-element Column"
+  }
+  test "view renders single-line selection as highlighted span" {
+    let m = { mk "hello" with Col = 5; SelectionAnchor = Some (0, 0) }
+    let el = TextEditor.view true 5 m
+    match el with
+    | Column (row0 :: _) ->
+      match row0 with
+      | Row [Styled(_, Text("hello", _))] -> ()
+      | Row [Text("hello", _)] -> failtest "expected Styled selection, got plain Text"
+      | _ -> failwithf "unexpected row: %A" row0
+    | _ -> failtest "expected Column"
+  }
+  test "view renders partial-line selection: before, selected, after" {
+    // "hello world", anchor at col 6, cursor at col 11 → selects "world"
+    let m = { mk "hello world" with Col = 11; SelectionAnchor = Some (0, 6) }
+    let el = TextEditor.view true 5 m
+    match el with
+    | Column (Row (before :: sel :: []) :: _) ->
+      match before with
+      | Text("hello ", _) -> ()
+      | _ -> failwithf "expected 'hello ' before selection, got %A" before
+      match sel with
+      | Styled(_, Text("world", _)) -> ()
+      | Text("world", _) -> failtest "selected span should be Styled"
+      | _ -> failwithf "unexpected sel element: %A" sel
+    | other -> failwithf "unexpected: %A" other
+  }
+  test "view renders multi-line selection: first row and last row" {
+    // "abc\ndef", anchor at (0,1), cursor at (1,2)
+    // Row 0: "a" plain + "bc" highlighted
+    // Row 1: "de" highlighted + "f" plain
+    let m = { mk "abc\ndef" with Row = 1; Col = 2; SelectionAnchor = Some (0, 1) }
+    let el = TextEditor.view true 5 m
+    match el with
+    | Column (row0 :: row1 :: _) ->
+      match row0 with
+      | Row (Text("a", _) :: Styled(_, Text("bc", _)) :: []) -> ()
+      | Row (Text("a", _) :: Text("bc", _) :: []) ->
+        failtest "row 0 tail should be Styled (selected)"
+      | _ -> failwithf "row 0 unexpected: %A" row0
+      match row1 with
+      | Row (Styled(_, Text("de", _)) :: Text("f", _) :: []) -> ()
+      | Row (Text("de", _) :: Text("f", _) :: []) ->
+        failtest "row 1 head should be Styled (selected)"
+      | _ -> failwithf "row 1 unexpected: %A" row1
+    | _ -> failtest "expected Column with at least 2 rows"
+  }
+  test "view renders emoji cursor without broken surrogate" {
+    // U+1F600 😀 → surrogate pair \uD83D\uDE00 in .NET; col=1 points to high surrogate
+    let m = { mk "a\U0001F600b" with Col = 1 }
+    let el = TextEditor.view true 5 m
+    match el with
+    | Column (Row children :: _) ->
+      match children with
+      | [Text("a", _); Styled(_, Text(emoji, _)); Text("b", _)]
+      | [Text("a", _); Text(emoji, _); Text("b", _)] ->
+        emoji |> Expect.equal "emoji preserved" "\U0001F600"
+      | _ -> failwithf "unexpected children: %A" children
+    | _ -> failtest "expected Column"
   }
 ]
 

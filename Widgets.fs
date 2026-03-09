@@ -753,10 +753,14 @@ module VirtualTable =
       |> El.row
     let listCfg : VirtualListConfig<'a> = {
       SelectionColor = config.SelectionColor
-      RenderRow = fun _selected row ->
-        config.Columns
-        |> List.map (fun col -> col.Render row |> El.width col.Width)
-        |> El.row
+      RenderRow = fun selected row ->
+        let cols =
+          config.Columns
+          |> List.map (fun col -> col.Render row |> El.width col.Width)
+          |> El.row
+        match selected with
+        | true  -> El.bg config.SelectionColor cols
+        | false -> cols
     }
     let dataRows = VirtualList.view listCfg model
     El.column [ header; separator; dataRows ]
@@ -1229,6 +1233,20 @@ module TextForm =
       | false -> r
       | true  -> runValidation { r with Touched = true })
 
+  /// Apply an update function to the currently focused field, running validation if the field is touched.
+  let private applyToFocused (updateInput: TextInputModel -> TextInputModel) (m: TextFormModel) =
+    let idx = m.FocusIndex
+    let rows =
+      m.Rows |> List.mapi (fun i r ->
+        match i = idx with
+        | false -> r
+        | true  ->
+          let updated = { r with Input = updateInput r.Input }
+          match r.Touched with
+          | true  -> runValidation updated
+          | false -> updated)
+    { m with Rows = rows }
+
   /// Update the form. Returns `(newModel, submitRequested)`.
   /// When `submitRequested = true`, fire your submit `Cmd` and then dispatch `TFSubmitResult`.
   let update (msg: TextFormMsg) (m: TextFormModel) : TextFormModel * bool =
@@ -1246,30 +1264,10 @@ module TextForm =
         m, false
 
     | TFKey key ->
-        let idx = m.FocusIndex
-        let rows =
-          m.Rows |> List.mapi (fun i r ->
-            match i = idx with
-            | false -> r
-            | true  ->
-                let updated = { r with Input = TextInput.handleKey key r.Input }
-                match r.Touched with
-                | true  -> runValidation updated
-                | false -> updated)
-        { m with Rows = rows }, false
+        applyToFocused (TextInput.handleKey key) m, false
 
     | TFEvent event ->
-        let idx = m.FocusIndex
-        let rows =
-          m.Rows |> List.mapi (fun i r ->
-            match i = idx with
-            | false -> r
-            | true  ->
-                let updated = { r with Input = TextInput.handleEvent event r.Input }
-                match r.Touched with
-                | true  -> runValidation updated
-                | false -> updated)
-        { m with Rows = rows }, false
+        applyToFocused (TextInput.handleEvent event) m, false
 
     | TFTabNext ->
         let blurred = blurCurrent m
@@ -1375,7 +1373,8 @@ type TextEditorMsg =
   | TEMoveDocEnd
   | TEWordJumpLeft
   | TEWordJumpRight
-  | TESelectLeft    | TESelectRight
+  | TESelectLeft    | TESelectRight | TESelectUp | TESelectDown
+  | TESelectWordLeft | TESelectWordRight
   | TESelectAll
   | TECut
   | TECopy
@@ -1559,6 +1558,31 @@ module TextEditor =
       let line = currentLine m'
       let newCol = min line.Length (m'.Col + 1)
       { m' with Col = newCol; SelectionAnchor = Some anchor }
+    | TESelectUp ->
+      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+      let newRow = max 0 (m'.Row - 1)
+      let newCol = clampCol m'.Lines.[newRow] m'.Col
+      { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
+    | TESelectDown ->
+      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+      let newRow = min (m'.Lines.Length - 1) (m'.Row + 1)
+      let newCol = clampCol m'.Lines.[newRow] m'.Col
+      { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
+    | TESelectWordLeft ->
+      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+      let newRow, newCol =
+        match m'.Col with
+        | 0 when m'.Row > 0 -> m'.Row - 1, m'.Lines.[m'.Row - 1].Length
+        | _ -> m'.Row, prevWordBoundary m'.Lines.[m'.Row] m'.Col
+      { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
+    | TESelectWordRight ->
+      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+      let line = m'.Lines.[m'.Row]
+      let newRow, newCol =
+        match m'.Col = line.Length with
+        | true when m'.Row < m'.Lines.Length - 1 -> m'.Row + 1, 0
+        | _ -> m'.Row, nextWordBoundary line m'.Col
+      { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
     | TESelectAll ->
       let lastRow = m'.Lines.Length - 1
       { m' with Row = lastRow; Col = m'.Lines.[lastRow].Length; SelectionAnchor = Some (0, 0) }
@@ -1599,23 +1623,52 @@ module TextEditor =
   let view (focused: bool) (height: int) (m: TextEditorModel) : Element =
     let m' = scrollIntoView height m
     let visibleLines = m'.Lines.[m'.ScrollTop .. min (m'.ScrollTop + height - 1) (m'.Lines.Length - 1)]
+
+    // Normalized selection range: (startRow, startCol), (endRow, endCol) with start <= end
+    let selRange =
+      match focused, m'.SelectionAnchor with
+      | false, _ | true, None -> None
+      | true, Some (ar, ac) ->
+        let cursor = (m'.Row, m'.Col)
+        let anchor = (ar, ac)
+        Some (if anchor <= cursor then anchor, cursor else cursor, anchor)
+
     let rows =
       visibleLines |> Array.mapi (fun vi line ->
         let absRow = m'.ScrollTop + vi
-        let isCursorRow = focused && absRow = m'.Row
-        match isCursorRow with
-        | false -> El.text (if line = "" then " " else line)
-        | true ->
-          // Split line into before-cursor, cursor-char, after-cursor
-          let col = m'.Col
-          let before = if col > 0 then line.[..col-1] else ""
-          let cursorChar = if col < line.Length then string line.[col] else " "
-          let after  = if col < line.Length - 1 then line.[col+1..] else ""
+        match selRange with
+        | Some ((startRow, startCol), (endRow, endCol)) when absRow >= startRow && absRow <= endRow ->
+          // Row is (partially or fully) within selection
+          let colStart = if absRow = startRow then startCol else 0
+          let colEnd   = if absRow = endRow   then endCol   else line.Length
+          let before = if colStart > 0 then line.[..colStart - 1] else ""
+          let sel    = if colEnd > colStart then line.[colStart..colEnd - 1]
+                       else match line with "" -> " " | _ -> ""
+          let after  = if colEnd < line.Length then line.[colEnd..] else ""
           El.row [
             if before <> "" then El.text before
-            El.text cursorChar |> El.reverse
-            if after  <> "" then El.text after
-          ])
+            if sel    <> "" then El.text sel |> El.reverse
+            if after  <> "" then El.text after ]
+        | _ ->
+          // No selection — show cursor or plain text
+          match focused && absRow = m'.Row with
+          | false -> El.text (if line = "" then " " else line)
+          | true ->
+            // Surrogate-safe extraction of the character under the cursor
+            let col = m'.Col
+            let cursorChar, runeWidth =
+              if col < line.Length then
+                match System.Char.IsHighSurrogate(line.[col]) with
+                | true when col + 1 < line.Length && System.Char.IsLowSurrogate(line.[col + 1]) ->
+                  System.String([| line.[col]; line.[col + 1] |]), 2
+                | _ -> string line.[col], 1
+              else " ", 0
+            let before = if col > 0 then line.[..col - 1] else ""
+            let after  = if col + runeWidth < line.Length then line.[col + runeWidth..] else ""
+            El.row [
+              if before     <> "" then El.text before
+              El.text cursorChar |> El.reverse
+              if after      <> "" then El.text after ])
       |> Array.toList
     El.column rows
 
@@ -1654,6 +1707,10 @@ type FuzzyFinderModel<'item> = {
 
 module FuzzyFinder =
 
+  // Word boundary characters for scoring — module-level to avoid per-call allocation
+  let private boundaryChars =
+    System.Collections.Generic.HashSet<char>([' '; '-'; '_'; '.'; '/'])
+
   // ── Scoring ──────────────────────────────────────────────────────────────
 
   /// Score `query` against `candidate`.
@@ -1689,9 +1746,12 @@ module FuzzyFinder =
           | false -> run <- 1
         score <- score + float maxRun * 2.0
         // Bonus: word boundary matches (match after space, -, _, ., /)
-        let boundaryChars = System.Collections.Generic.HashSet<char>([' '; '-'; '_'; '.'; '/'])
         for pos in positions do
-          if pos > 0 && boundaryChars.Contains(candidate.[pos-1]) then score <- score + 1.5
+          // Skip the check if candidate.[pos-1] is a low surrogate (part of a multi-char codepoint)
+          if pos > 0
+             && not (System.Char.IsLowSurrogate(candidate.[pos - 1]))
+             && boundaryChars.Contains(candidate.[pos - 1]) then
+            score <- score + 1.5
           elif pos = 0 then score <- score + 1.0
         Some (score, positions)
 
