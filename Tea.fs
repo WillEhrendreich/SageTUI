@@ -132,6 +132,24 @@ module Cmd =
     | Batch cmds -> cmds |> List.collect extractDelays
     | _ -> []
 
+/// Per-frame render timing measurements. All values are in milliseconds.
+/// Available via FrameTimingsSub — subscribe to receive one record per frame.
+type FrameTimings = {
+  /// Time spent in ArenaRender.renderRoot (layout + draw into back buffer). Milliseconds.
+  RenderMs: float
+  /// Time spent in Buffer.diff (SIMD chunk comparison). Milliseconds.
+  DiffMs: float
+  /// Time spent in Presenter.present + backend.Write + Flush. Milliseconds.
+  PresentMs: float
+  /// Total frame time (render + diff + present). Milliseconds.
+  TotalMs: float
+  /// Number of cells that changed this frame (0 = no update written to terminal).
+  ChangedCells: int
+}
+
+module FrameTimings =
+  let empty = { RenderMs = 0.0; DiffMs = 0.0; PresentMs = 0.0; TotalMs = 0.0; ChangedCells = 0 }
+
 /// A subscription that connects external events to messages.
 type Sub<'msg> =
   | KeySub of (Key * Modifiers -> 'msg option)
@@ -141,6 +159,8 @@ type Sub<'msg> =
   | TimerSub of id: string * interval: TimeSpan * tick: (unit -> 'msg)
   | ResizeSub of (int * int -> 'msg)
   | CustomSub of id: string * start: (('msg -> unit) -> CancellationToken -> Async<unit>)
+  /// Delivers a FrameTimings record to the given message after each rendered frame.
+  | FrameTimingsSub of (FrameTimings -> 'msg)
 
 and FocusDirection =
   | FocusNext
@@ -196,6 +216,15 @@ module Sub =
     | ResizeSub handler -> ResizeSub(fun input -> handler input |> f)
     | CustomSub(id, start) ->
       CustomSub(id, fun dispatch ct -> start (f >> dispatch) ct)
+    | FrameTimingsSub toMsg -> FrameTimingsSub(toMsg >> f)
+
+  /// Subscribe to per-frame render timing measurements.
+  /// Dispatches a FrameTimings message after each frame that produced visible output.
+  /// Use to build perf overlays, frame rate monitors, or adaptive quality controls.
+  ///
+  /// Example:
+  ///   Sub.frameTimings GotTimings
+  let frameTimings (toMsg: FrameTimings -> 'msg) : Sub<'msg> = FrameTimingsSub toMsg
 
   /// Subscribe to an `IObservable<'msg>`. Dispatches each emitted value as a message.
   /// The subscription is automatically cancelled when the app leaves the state that
@@ -281,8 +310,8 @@ module Undoable =
     { Past = m.Present :: m.Past; Present = newPresent; Future = [] }
 
   /// Commit only if `newPresent` differs from current Present (structural equality).
-  let commitIfChanged (newPresent: 'model) (m: UndoableModel<'model>) : UndoableModel<'model> =
-    match System.Collections.Generic.EqualityComparer<'model>.Default.Equals(m.Present, newPresent) with
+  let commitIfChanged (newPresent: 'model) (m: UndoableModel<'model>) : UndoableModel<'model> when 'model : equality =
+    match m.Present = newPresent with
     | true -> m
     | false -> commit newPresent m
 

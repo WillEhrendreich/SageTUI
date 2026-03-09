@@ -54,6 +54,7 @@ module App =
     let mutable prevKeyAreas = Map.empty<string, Area>
     let mutable activeTransitions: ActiveTransition list = []
     let mutable exitCode = 0
+    let frameSw = System.Diagnostics.Stopwatch()
 
     let msgChannel = ConcurrentQueue<'msg>()
     let dispatch msg = msgChannel.Enqueue(msg)
@@ -242,7 +243,9 @@ module App =
 
         Buffer.clear backBuf
         let area = { X = 0; Y = 0; Width = width; Height = height }
+        frameSw.Restart()
         ArenaRender.renderRoot arena rootHandle area backBuf
+        let renderMs = frameSw.Elapsed.TotalMilliseconds
         let currentKeyAreas = ArenaRender.keyAreas arena
 
         // Start enter transitions once we know the rendered keyed areas.
@@ -279,12 +282,25 @@ module App =
         activeTransitions <- activeTransitions |> List.filter (fun at -> not (ActiveTransition.isDone nowMs at))
 
         let changes = Buffer.diff frontBuf backBuf
+        let diffMs = frameSw.Elapsed.TotalMilliseconds - renderMs
 
         match changes.Count > 0 with
         | true ->
+          let presentStart = frameSw.Elapsed.TotalMilliseconds
           let output = Presenter.present changes backBuf
           backend.Write(output)
           backend.Flush()
+          let presentMs = frameSw.Elapsed.TotalMilliseconds - presentStart
+          let timings =
+            { RenderMs = renderMs
+              DiffMs = diffMs
+              PresentMs = presentMs
+              TotalMs = frameSw.Elapsed.TotalMilliseconds
+              ChangedCells = changes.Count }
+          for sub in program.Subscribe model do
+            match sub with
+            | FrameTimingsSub toMsg -> dispatch (toMsg timings)
+            | _ -> ()
         | false -> ()
 
         let temp = frontBuf

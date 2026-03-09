@@ -1383,9 +1383,21 @@ let layoutSolveTests = testList "Layout.solve" [
     Layout.solve 90 [Ratio(1, 3)]
     |> Expect.equal "1/3" [(0, 30)]
 
-  testCase "Min sets floor" <| fun () ->
+  testCase "Min grows to fill when no Fill items" <| fun () ->
     Layout.solve 100 [Min 20]
-    |> Expect.equal "min" [(0, 20)]
+    |> Expect.equal "min grows to 100" [(0, 100)]
+
+  testCase "Min acts as floor when Fill items exist" <| fun () ->
+    Layout.solve 100 [Min 20; Fill]
+    |> Expect.equal "min=20, fill=80" [(0, 20); (20, 80)]
+
+  testCase "two Mins share surplus equally" <| fun () ->
+    Layout.solve 100 [Min 20; Min 30]
+    |> Expect.equal "20+25=45, 30+25=55" [(0, 45); (45, 55)]
+
+  testCase "Min clamped when exceeds available" <| fun () ->
+    Layout.solve 5 [Min 20]
+    |> Expect.equal "clamped to 5" [(0, 5)]
 
   testCase "Max caps" <| fun () ->
     Layout.solve 100 [Max 50]

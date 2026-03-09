@@ -31,6 +31,9 @@ module Layout =
     let n = List.length constraints
     let sizes = Array.create n 0
     let mutable remaining = available
+    // Min participates in fill distribution only when no Fill items exist.
+    // When Fill items exist, Min acts as a floor (Fixed-like) and Fill takes surplus.
+    let hasFill = constraints |> List.exists (function Fill -> true | _ -> false)
     let mutable fillCount = 0
 
     constraints |> List.iteri (fun i c ->
@@ -45,8 +48,11 @@ module Layout =
         sizes[i] <- available * num / den
         remaining <- remaining - sizes[i]
       | Min minSize ->
-        sizes[i] <- minSize
+        sizes[i] <- min minSize remaining
         remaining <- remaining - sizes[i]
+        match hasFill with
+        | false -> fillCount <- fillCount + 1  // grows to fill surplus when no Fill items
+        | true  -> ()                          // stays at floor when Fill items exist
       | Max maxSize ->
         sizes[i] <- min maxSize remaining
         remaining <- remaining - sizes[i]
@@ -62,6 +68,8 @@ module Layout =
         match c with
         | Fill ->
           sizes[i] <- perFill + (match extra > 0 with | true -> extra <- extra - 1; 1 | false -> 0)
+        | Min _ when not hasFill ->
+          sizes[i] <- sizes[i] + perFill + (match extra > 0 with | true -> extra <- extra - 1; 1 | false -> 0)
         | _ -> ())
     | false -> ()
 
@@ -77,6 +85,7 @@ module Layout =
     let n = List.length constraints
     let sizes = Array.create n 0
     let mutable remaining = available
+    let hasFill = constraints |> List.exists (function Fill -> true | _ -> false)
     let mutable fillCount = 0
     let mutable fillContentTotal = 0
     let contentArr = List.toArray contentSizes
@@ -94,8 +103,13 @@ module Layout =
         sizes[i] <- available * num / den
         remaining <- remaining - sizes[i]
       | Min minSize ->
-        sizes[i] <- minSize
+        sizes[i] <- min minSize remaining
         remaining <- remaining - sizes[i]
+        match hasFill with
+        | false ->
+          fillCount <- fillCount + 1
+          fillContentTotal <- fillContentTotal + max 0 (contentArr[i] - sizes[i])
+        | true -> ()
       | Max maxSize ->
         sizes[i] <- min maxSize remaining
         remaining <- remaining - sizes[i]
@@ -104,12 +118,13 @@ module Layout =
         fillContentTotal <- fillContentTotal + contentArr[i]
       | _ -> ())
 
-    // Phase 2: allocate Fill items with content awareness
+    // Phase 2: allocate Fill/Min items with content awareness
+    // Min items participate in this phase only when no Fill items exist
     match fillCount > 0 with
     | true ->
       match fillContentTotal <= remaining with
       | true ->
-        // Enough space: each Fill gets content size + equal share of excess
+        // Enough space: each fill participant gets content size + equal share of excess
         let excess = remaining - fillContentTotal
         let perExtra = excess / fillCount
         let mutable extraRem = excess % fillCount
@@ -118,6 +133,10 @@ module Layout =
           | Fill ->
             let bonus = match extraRem > 0 with | true -> extraRem <- extraRem - 1; 1 | false -> 0
             sizes[i] <- contentArr[i] + perExtra + bonus
+          | Min _ when not hasFill ->
+            let bonus = match extraRem > 0 with | true -> extraRem <- extraRem - 1; 1 | false -> 0
+            let extra = max 0 (contentArr[i] - sizes[i])
+            sizes[i] <- sizes[i] + extra + perExtra + bonus - extra  // grow to at least content, then share excess
           | _ -> ())
       | false ->
         // Not enough space: proportional shrink (flex-shrink)
@@ -125,6 +144,7 @@ module Layout =
           constraints |> List.mapi (fun i c ->
             match c with
             | Fill -> Some(i, contentArr[i])
+            | Min _ when not hasFill -> Some(i, max 0 (contentArr[i] - sizes[i]))
             | _ -> None)
           |> List.choose id
         let totalContent = fillItems |> List.sumBy snd
@@ -137,7 +157,7 @@ module Layout =
           let mutable rem = pool - used
           sized |> List.iter (fun (i, s) ->
             let bonus = match rem > 0 with | true -> rem <- rem - 1; 1 | false -> 0
-            sizes[i] <- s + bonus)
+            sizes[i] <- sizes[i] + s + bonus)
     | false -> ()
 
     let mutable offset = 0

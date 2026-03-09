@@ -1012,6 +1012,66 @@ let themeTests = testList "Theme" [
   }
 ]
 
+
+
+// ── Sub.frameTimings / FrameTimingsSub ───────────────────────────────────────
+
+type TimingsMsg = GotTimings of FrameTimings | OtherMsg
+
+let frameTimingsTests = testList "Sub.frameTimings" [
+  test "Sub.frameTimings creates FrameTimingsSub" {
+    match Sub.frameTimings GotTimings with
+    | FrameTimingsSub _ -> ()
+    | other -> failwith (sprintf "expected FrameTimingsSub, got %A" other)
+  }
+  test "Sub.map transforms FrameTimingsSub message" {
+    let original = Sub.frameTimings (fun t -> t)
+    let mapped = Sub.map (fun t -> GotTimings t) original
+    match mapped with
+    | FrameTimingsSub _ -> ()
+    | other -> failwith (sprintf "Sub.map should produce FrameTimingsSub, got %A" other)
+  }
+  test "FrameTimings.empty has zero values" {
+    FrameTimings.empty.RenderMs   |> Expect.equal "renderMs"  0.0
+    FrameTimings.empty.DiffMs     |> Expect.equal "diffMs"    0.0
+    FrameTimings.empty.PresentMs  |> Expect.equal "presentMs" 0.0
+    FrameTimings.empty.TotalMs    |> Expect.equal "totalMs"   0.0
+    FrameTimings.empty.ChangedCells |> Expect.equal "cells"   0
+  }
+  test "FrameTimingsSub is ignored in TestHarness subscription scan" {
+    // TestHarness scans subs to route key/resize events.
+    // FrameTimingsSub must not crash the scan (catch-all | _ -> () handles it).
+    let timingsSub = Sub.frameTimings GotTimings
+    let keySub = Keys.bind [ Key.Char 'q', OtherMsg ]
+    let prog : Program<int, TimingsMsg> =
+      { Init    = fun () -> 0, Cmd.none
+        Update  = fun msg m ->
+          match msg with | GotTimings _ -> m, Cmd.none | OtherMsg -> m + 1, Cmd.none
+        View    = fun m -> El.text (string m)
+        Subscribe = fun _ -> [ keySub; timingsSub ] }
+    let app = TestHarness.init 80 24 prog
+    let app' = TestHarness.pressKey (Key.Char 'q') app
+    app'.Model |> Expect.equal "key handled" 1
+  }
+]
+
+// ── Undoable.commitIfChanged equality constraint ──────────────────────────────
+
+type EquatableModel = { Value: int }
+
+let undoableCommitTests = testList "Undoable.commitIfChanged" [
+  test "unchanged model is not committed" {
+    let m = Undoable.init { Value = 5 }
+    let m' = Undoable.commitIfChanged { Value = 5 } m
+    m'.Past |> Expect.isEmpty "no new entry"
+  }
+  test "changed model is committed" {
+    let m = Undoable.init { Value = 5 }
+    let m' = Undoable.commitIfChanged { Value = 10 } m
+    m'.Past |> Expect.hasLength "one past entry" 1
+    m'.Present.Value |> Expect.equal "present updated" 10
+  }
+]
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -1033,4 +1093,6 @@ let allWidgetTests = testList "Widgets" [
   formTests
   textFormTests
   themeTests
+  frameTimingsTests
+  undoableCommitTests
 ]

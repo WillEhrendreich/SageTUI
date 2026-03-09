@@ -499,7 +499,21 @@ let sizingTests = testList "CSS sizing constraints" [
     let buf = renderToBuffer 20 1
                 (El.minWidth 10 (El.text "Hi"))
     charAt 0 0 buf |> Expect.equal "H" 'H'
-    // Min constraint gives 10 cols to "Hi"
+
+  testCase "Min width grows to fill when alone in row" <| fun () ->
+    // El.minWidth 5 inside a row with no other children grows to fill parent
+    let buf = renderToBuffer 20 1
+                (El.row [ El.minWidth 5 (El.text "Hi") ])
+    charAt 0 0 buf |> Expect.equal "H at col 0" 'H'
+    charAt 1 0 buf |> Expect.equal "i at col 1" 'i'
+
+  testCase "Min width stays at floor when Fill sibling present" <| fun () ->
+    // row [minWidth 5 "AB" | fill "X"] - min item gets 5, fill gets 15
+    let buf = renderToBuffer 20 1
+                (El.row [ El.minWidth 5 (El.text "AB"); El.text "X" ])
+    charAt 0 0 buf |> Expect.equal "A" 'A'
+    charAt 1 0 buf |> Expect.equal "B" 'B'
+    charAt 5 0 buf |> Expect.equal "X at col 5" 'X'
 
   testCase "Max width caps" <| fun () ->
     let buf = renderToBuffer 20 1
