@@ -361,8 +361,8 @@ let widgetIntegrationTests =
 
     test "Table renders headers and rows" {
       let columns = [
-        { Header = "Name"; Width = 15; Render = fun (n, _) -> El.text n }
-        { Header = "Score"; Width = 10; Render = fun (_, s) -> El.text s }
+        { Header = "Name"; Width = 15; SortKey = None; Fill = false; Render = fun (n, _) -> El.text n }
+        { Header = "Score"; Width = 10; SortKey = None; Fill = false; Render = fun (_, s) -> El.text s }
       ]
       let rows = [ ("Alice", "95"); ("Bob", "87") ]
       let elem = Table.view columns rows None

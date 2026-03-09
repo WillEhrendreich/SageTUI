@@ -614,14 +614,39 @@ module Tabs =
     { config with
         ActiveColor   = Some theme.Primary
         InactiveColor = Some theme.TextDim }
+
+/// Sort direction for table columns.
+type SortDirection = Ascending | Descending
+
+/// Tracks which column is currently sorted and in which direction.
+type SortState = { Column: int; Direction: SortDirection }
+
 type TableColumn<'a> = {
   /// Column header text.
   Header: string
-  /// Fixed column width in characters.
+  /// Fixed column width in characters. Ignored when Fill = true.
   Width: int
+  /// Optional sort key — when Some, the column header shows ▲▼ and VirtualTable.sortItems can sort by it.
+  SortKey: ('a -> System.IComparable) option
+  /// When true, this column expands to fill remaining horizontal space.
+  /// Only the first Fill column in a row will expand; subsequent Fill columns use Width.
+  Fill: bool
   /// Render function for each data cell.
   Render: 'a -> Element
 }
+
+module TableColumn =
+  /// Create a TableColumn with default settings (no sort, fixed width, no fill).
+  let create (header: string) (width: int) (render: 'a -> Element) : TableColumn<'a> =
+    { Header = header; Width = width; SortKey = None; Fill = false; Render = render }
+
+  /// Add a sort key extractor — makes the column sortable in VirtualTable.
+  let withSort (key: 'a -> System.IComparable) (col: TableColumn<'a>) : TableColumn<'a> =
+    { col with SortKey = Some key }
+
+  /// Make the column fill remaining row width instead of using a fixed Width.
+  let asFill (col: TableColumn<'a>) : TableColumn<'a> =
+    { col with Fill = true }
 
 module Table =
   /// Render a table with a header row, a separator, and data rows.
@@ -629,22 +654,28 @@ module Table =
   ///
   /// NOTE: This renders all rows. For large datasets use VirtualList or VirtualTable.
   let view (columns: TableColumn<'a> list) (rows: 'a list) (selectedRow: int option) =
+    let inline applyWidth (col: TableColumn<'a>) el =
+      match col.Fill with
+      | true  -> El.fill el
+      | false -> El.width col.Width el
     let header =
       columns
       |> List.map (fun col ->
-        El.text col.Header |> El.bold |> El.width col.Width)
+        El.text col.Header |> El.bold |> applyWidth col)
       |> El.row
     let separator =
       columns
       |> List.map (fun col ->
-        El.text (System.String('─', col.Width)) |> El.width col.Width)
+        match col.Fill with
+        | true  -> El.fill (El.text "")  // separator for fill column: empty (grows with col)
+        | false -> El.text (System.String('─', col.Width)) |> El.width col.Width)
       |> El.row
     let dataRows =
       rows
       |> List.mapi (fun i row ->
         let rowEl =
           columns
-          |> List.map (fun col -> col.Render row |> El.width col.Width)
+          |> List.map (fun col -> col.Render row |> applyWidth col)
           |> El.row
         match selectedRow with
         | Some si when si = i ->
@@ -845,29 +876,79 @@ type VirtualTableConfig<'a> = {
   SeparatorChar: char
   /// Show a proportional scrollbar on the right side of the data area. Default: false.
   ShowScrollbar: bool
+  /// Current sort state — which column is sorted and in which direction. None = unsorted.
+  Sort: SortState option
 }
 
 module VirtualTable =
-  /// Default config: Blue selection, standard horizontal separator, no scrollbar.
+  /// Default config: Blue selection, standard horizontal separator, no scrollbar, unsorted.
   let create (columns: TableColumn<'a> list) : VirtualTableConfig<'a> =
     { Columns = columns
       SelectionColor = Color.Named(BaseColor.Blue, Intensity.Normal)
       SeparatorChar = '─'
-      ShowScrollbar = false }
+      ShowScrollbar = false
+      Sort = None }
+
+  /// Toggle sort state for a column: None → Ascending → Descending → None.
+  /// Pure function — takes current sort state and column index, returns new sort state.
+  let toggleSort (colIdx: int) (current: SortState option) : SortState option =
+    match current with
+    | Some s when s.Column = colIdx ->
+      match s.Direction with
+      | Ascending  -> Some { Column = colIdx; Direction = Descending }
+      | Descending -> None
+    | _ -> Some { Column = colIdx; Direction = Ascending }
+
+  /// Return items sorted by the given sort state and column list.
+  /// If sort is None or the sort column has no SortKey, returns items unchanged.
+  let sortItems (columns: TableColumn<'a> list) (sort: SortState option) (items: 'a array) : 'a array =
+    match sort with
+    | None -> items
+    | Some s ->
+      match columns |> List.tryItem s.Column with
+      | None -> items
+      | Some col ->
+        match col.SortKey with
+        | None -> items
+        | Some key ->
+          match s.Direction with
+          | Ascending  -> items |> Array.sortBy key
+          | Descending -> items |> Array.sortByDescending key
+
+  let private sortIndicator (cfg: VirtualTableConfig<'a>) (colIdx: int) : string =
+    match cfg.Sort with
+    | Some s when s.Column = colIdx ->
+      match s.Direction with
+      | Ascending  -> "▲"
+      | Descending -> "▼"
+    | _ -> ""
 
   /// Render a virtualised table: fixed header + separator + windowed data rows.
+  /// Sort indicators (▲▼) appear on the currently-sorted column header.
   /// The model's ViewportHeight controls how many data rows are rendered.
   let view (config: VirtualTableConfig<'a>) (model: VirtualListModel<'a>) : Element =
+    let inline applyWidth (col: TableColumn<'a>) el =
+      match col.Fill with
+      | true  -> El.fill el
+      | false -> El.width col.Width el
     let header =
       config.Columns
-      |> List.map (fun col -> El.text col.Header |> El.bold |> El.width col.Width)
+      |> List.mapi (fun i col ->
+        let indicator = sortIndicator config i
+        let headerText =
+          match col.SortKey, indicator with
+          | Some _, ind when ind <> "" -> sprintf "%s%s" col.Header ind
+          | Some _, _                  -> sprintf "%s " col.Header  // space as placeholder for indicator
+          | None, _                    -> col.Header
+        El.text headerText |> El.bold |> applyWidth col)
       |> El.row
     let separator =
       config.Columns
       |> List.map (fun col ->
-        match col.Width with
-        | 0 -> El.empty
-        | w -> El.text (System.String(config.SeparatorChar, w)) |> El.width w)
+        match col.Fill, col.Width with
+        | true, _  -> El.fill (El.text "")
+        | false, 0 -> El.empty
+        | false, w -> El.text (System.String(config.SeparatorChar, w)) |> El.width w)
       |> El.row
     let listCfg : VirtualListConfig<'a> = {
       SelectionColor = config.SelectionColor
@@ -875,7 +956,7 @@ module VirtualTable =
       RenderRow = fun selected row ->
         let cols =
           config.Columns
-          |> List.map (fun col -> col.Render row |> El.width col.Width)
+          |> List.map (fun col -> col.Render row |> applyWidth col)
           |> El.row
         match selected with
         | true  -> El.bg config.SelectionColor cols

@@ -126,14 +126,14 @@ let widgetSnapshots =
     // Table
     snapshotTest "widget-table"
       (let columns = [
-        { Header = "Name"; Width = 12; Render = fun (n: string, _: string) -> El.text n }
-        { Header = "Score"; Width = 8; Render = fun (_, s) -> El.text s }
+        { Header = "Name"; Width = 12; SortKey = None; Fill = false; Render = fun (n: string, _: string) -> El.text n }
+        { Header = "Score"; Width = 8; SortKey = None; Fill = false; Render = fun (_, s) -> El.text s }
        ]
        render 30 8 (Table.view columns [ ("Alice", "95"); ("Bob", "87"); ("Carol", "91") ] None))
     snapshotTest "widget-table-selected"
       (let columns = [
-        { Header = "Name"; Width = 12; Render = fun (n: string, _: string) -> El.text n }
-        { Header = "Score"; Width = 8; Render = fun (_, s) -> El.text s }
+        { Header = "Name"; Width = 12; SortKey = None; Fill = false; Render = fun (n: string, _: string) -> El.text n }
+        { Header = "Score"; Width = 8; SortKey = None; Fill = false; Render = fun (_, s) -> El.text s }
        ]
        render 30 8 (Table.view columns [ ("Alice", "95"); ("Bob", "87"); ("Carol", "91") ] (Some 1)))
 

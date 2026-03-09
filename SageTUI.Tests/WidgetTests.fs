@@ -107,8 +107,8 @@ let tabsTests = testList "Tabs" [
 let tableTests = testList "Table" [
   test "produces Column with header, separator, rows" {
     let cols: TableColumn<string * int> list = [
-      { Header = "Name"; Width = 10; Render = fun (n, _) -> El.text n }
-      { Header = "Age"; Width = 5; Render = fun (_, a) -> El.text (string a) }
+      { Header = "Name"; Width = 10; SortKey = None; Fill = false; Render = fun (n, _) -> El.text n }
+      { Header = "Age"; Width = 5; SortKey = None; Fill = false; Render = fun (_, a) -> El.text (string a) }
     ]
     let rows = [("Alice", 30); ("Bob", 25)]
     let elem = Table.view cols rows None
@@ -118,7 +118,7 @@ let tableTests = testList "Table" [
   }
   test "selected row gets styled" {
     let cols: TableColumn<string> list = [
-      { Header = "X"; Width = 5; Render = fun x -> El.text x }
+      { Header = "X"; Width = 5; SortKey = None; Fill = false; Render = fun x -> El.text x }
     ]
     let rows = ["a"; "b"; "c"]
     let elem = Table.view cols rows (Some 1)
@@ -131,7 +131,7 @@ let tableTests = testList "Table" [
   }
   test "empty rows has header and separator only" {
     let cols: TableColumn<string> list = [
-      { Header = "H"; Width = 3; Render = fun _ -> El.text "" }
+      { Header = "H"; Width = 3; SortKey = None; Fill = false; Render = fun _ -> El.text "" }
     ]
     let elem = Table.view cols [] None
     match elem with
@@ -140,8 +140,8 @@ let tableTests = testList "Table" [
   }
   test "multiple columns render in each row" {
     let cols: TableColumn<int> list = [
-      { Header = "A"; Width = 5; Render = fun x -> El.text (string x) }
-      { Header = "B"; Width = 5; Render = fun x -> El.text (string (x * 2)) }
+      { Header = "A"; Width = 5; SortKey = None; Fill = false; Render = fun x -> El.text (string x) }
+      { Header = "B"; Width = 5; SortKey = None; Fill = false; Render = fun x -> El.text (string (x * 2)) }
     ]
     let rows = [1; 2; 3]
     let elem = Table.view cols rows None
@@ -1845,8 +1845,8 @@ let textInputWordSelTests = testList "TextInput word and selection" [
 // ── VirtualTable ──────────────────────────────────────────────────────────────
 
 let vtColumns = [
-  { Header = "ID"; Width = 5; Render = fun (i: int) -> El.text (sprintf "%d" i) }
-  { Header = "Name"; Width = 10; Render = fun (i: int) -> El.text (sprintf "item%d" i) }
+  { Header = "ID"; Width = 5; SortKey = None; Fill = false; Render = fun (i: int) -> El.text (sprintf "%d" i) }
+  { Header = "Name"; Width = 10; SortKey = None; Fill = false; Render = fun (i: int) -> El.text (sprintf "item%d" i) }
 ]
 
 let virtualTableTests = testList "VirtualTable" [
@@ -1885,7 +1885,7 @@ let virtualTableTests = testList "VirtualTable" [
     | other -> failwith (sprintf "unexpected: %A" other)
   }
   test "VirtualTable.view zero-width column emits Empty separator cell" {
-    let cols = [{ Header = "X"; Width = 0; Render = fun _ -> El.empty }]
+    let cols = [{ Header = "X"; Width = 0; SortKey = None; Fill = false; Render = fun _ -> El.empty }]
     let m = VirtualList.ofArray 3 [| 0 |]
     let cfg = VirtualTable.create cols
     match VirtualTable.view cfg m with
@@ -1910,6 +1910,156 @@ let virtualTableTests = testList "VirtualTable" [
       | _ -> ()
     | other -> failwith (sprintf "unexpected top level: %A" other)
   }
+]
+
+// ── VirtualTable sort + fill tests ────────────────────────────────────────────
+
+let vtSortFillTests = testList "VirtualTable sort+fill" [
+
+  // ── TableColumn helpers ──────────────────────────────────────────────────────
+
+  test "TableColumn.create has no sort and no fill by default" {
+    let col = TableColumn.create "ID" 5 (fun (i: int) -> El.text (string i))
+    col.SortKey |> Expect.isNone "no sort key"
+    col.Fill    |> Expect.isFalse "not fill"
+  }
+
+  test "TableColumn.withSort adds a sort key" {
+    let col = TableColumn.create "Val" 8 (fun (x: int) -> El.text (string x))
+    let col2 = TableColumn.withSort (fun x -> x :> System.IComparable) col
+    col2.SortKey |> Expect.isSome "has sort key"
+  }
+
+  test "TableColumn.asFill sets Fill to true" {
+    let col = TableColumn.create "Val" 8 (fun (x: int) -> El.text (string x))
+    let col2 = TableColumn.asFill col
+    col2.Fill |> Expect.isTrue "fill is true"
+    col2.Width |> Expect.equal "width unchanged" 8
+  }
+
+  // ── VirtualTable.toggleSort ──────────────────────────────────────────────────
+
+  test "toggleSort None -> Ascending on column 0" {
+    let result = VirtualTable.toggleSort 0 None
+    result |> Expect.equal "ascending" (Some { Column = 0; Direction = SortDirection.Ascending })
+  }
+
+  test "toggleSort Ascending -> Descending on same column" {
+    let current = Some { Column = 0; Direction = SortDirection.Ascending }
+    let result = VirtualTable.toggleSort 0 current
+    result |> Expect.equal "descending" (Some { Column = 0; Direction = SortDirection.Descending })
+  }
+
+  test "toggleSort Descending -> None on same column" {
+    let current = Some { Column = 0; Direction = SortDirection.Descending }
+    let result = VirtualTable.toggleSort 0 current
+    result |> Expect.isNone "back to unsorted"
+  }
+
+  test "toggleSort different column resets to Ascending" {
+    let current = Some { Column = 1; Direction = SortDirection.Descending }
+    let result = VirtualTable.toggleSort 0 current
+    result |> Expect.equal "new column ascending" (Some { Column = 0; Direction = SortDirection.Ascending })
+  }
+
+  // ── VirtualTable.sortItems ────────────────────────────────────────────────────
+
+  test "sortItems None returns items unchanged" {
+    let items = [| 3; 1; 2 |]
+    let cols = [ TableColumn.create "N" 5 (fun (i: int) -> El.text (string i))
+                 |> TableColumn.withSort (fun i -> i :> System.IComparable) ]
+    let result = VirtualTable.sortItems cols None items
+    result |> Expect.equal "unchanged" items
+  }
+
+  test "sortItems Ascending sorts low to high" {
+    let items = [| 30; 10; 20 |]
+    let cols = [ TableColumn.create "N" 5 (fun (i: int) -> El.text (string i))
+                 |> TableColumn.withSort (fun i -> i :> System.IComparable) ]
+    let sort = Some { Column = 0; Direction = SortDirection.Ascending }
+    let result = VirtualTable.sortItems cols sort items
+    result |> Expect.equal "ascending" [| 10; 20; 30 |]
+  }
+
+  test "sortItems Descending sorts high to low" {
+    let items = [| 30; 10; 20 |]
+    let cols = [ TableColumn.create "N" 5 (fun (i: int) -> El.text (string i))
+                 |> TableColumn.withSort (fun i -> i :> System.IComparable) ]
+    let sort = Some { Column = 0; Direction = SortDirection.Descending }
+    let result = VirtualTable.sortItems cols sort items
+    result |> Expect.equal "descending" [| 30; 20; 10 |]
+  }
+
+  test "sortItems with column lacking SortKey returns items unchanged" {
+    let items = [| 3; 1; 2 |]
+    let cols = [ TableColumn.create "N" 5 (fun (i: int) -> El.text (string i)) ] // no SortKey
+    let sort = Some { Column = 0; Direction = SortDirection.Ascending }
+    let result = VirtualTable.sortItems cols sort items
+    result |> Expect.equal "unchanged (no key)" items
+  }
+
+  test "sortItems with out-of-range column index returns items unchanged" {
+    let items = [| 3; 1; 2 |]
+    let cols = [ TableColumn.create "N" 5 (fun (i: int) -> El.text (string i)) ]
+    let sort = Some { Column = 99; Direction = SortDirection.Ascending }
+    let result = VirtualTable.sortItems cols sort items
+    result |> Expect.equal "unchanged (bad index)" items
+  }
+
+  // ── VirtualTable.view sort indicators ─────────────────────────────────────────
+
+  test "VirtualTable.view shows ▲ in sorted-ascending column header" {
+    let sortableCol =
+      TableColumn.create "Score" 8 (fun (i: int) -> El.text (string i))
+      |> TableColumn.withSort (fun i -> i :> System.IComparable)
+    let cfg = { VirtualTable.create [sortableCol] with Sort = Some { Column = 0; Direction = SortDirection.Ascending } }
+    let m = VirtualList.ofArray 3 [| 5; 3; 9 |]
+    let view = VirtualTable.view cfg m
+    let rendered = TestHarness.renderElement 20 1 view
+    rendered |> Expect.stringContains "ascending indicator" "▲"
+  }
+
+  test "VirtualTable.view shows ▼ in sorted-descending column header" {
+    let sortableCol =
+      TableColumn.create "Score" 8 (fun (i: int) -> El.text (string i))
+      |> TableColumn.withSort (fun i -> i :> System.IComparable)
+    let cfg = { VirtualTable.create [sortableCol] with Sort = Some { Column = 0; Direction = SortDirection.Descending } }
+    let m = VirtualList.ofArray 3 [| 5; 3; 9 |]
+    let view = VirtualTable.view cfg m
+    let rendered = TestHarness.renderElement 20 1 view
+    rendered |> Expect.stringContains "descending indicator" "▼"
+  }
+
+  test "VirtualTable.view no sort indicator when Sort is None" {
+    let sortableCol =
+      TableColumn.create "Score" 8 (fun (i: int) -> El.text (string i))
+      |> TableColumn.withSort (fun i -> i :> System.IComparable)
+    let cfg = VirtualTable.create [sortableCol] // Sort = None
+    let m = VirtualList.ofArray 3 [| 5; 3; 9 |]
+    let view = VirtualTable.view cfg m
+    let rendered = TestHarness.renderElement 20 1 view
+    rendered |> Expect.stringContains "header visible" "Score"
+    rendered.Contains("▲") |> Expect.isFalse "no up arrow"
+    rendered.Contains("▼") |> Expect.isFalse "no down arrow"
+  }
+
+  // ── Fill column layout ────────────────────────────────────────────────────────
+
+  test "Table.view fill column wraps cell in El.fill" {
+    let fillCol = TableColumn.create "Name" 10 (fun ((_, name): int * string) -> El.text name) |> TableColumn.asFill
+    let fixedCol = TableColumn.create "Age"  5 (fun ((age, _): int * string) -> El.text (string age))
+    // With one row, structure is: Column [ Row headers; Row sep; Row dataRow ]
+    match Table.view [fixedCol; fillCol] [(42, "Alice")] None with
+    | Column (Row headerCells :: _sep :: Row dataCells :: _) ->
+      match List.item 1 headerCells with
+      | Constrained(Fill, _) -> ()
+      | other -> failwithf "fill column header not wrapped in El.fill: %A" other
+      match List.item 1 dataCells with
+      | Constrained(Fill, _) -> ()
+      | other -> failwithf "fill column data cell not wrapped in El.fill: %A" other
+    | other -> failwithf "unexpected: %A" other
+  }
+
 ]
 
 // ── SplitPane tests ───────────────────────────────────────────────────────────
@@ -2120,5 +2270,6 @@ let allWidgetTests = testList "Widgets" [
   textInputWordSelTests
   textInputSurrogateTests
   virtualTableTests
+  vtSortFillTests
   splitPaneTests
 ]
