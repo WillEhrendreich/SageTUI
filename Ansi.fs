@@ -17,6 +17,12 @@ module Ansi =
   let leaveAltScreen = sprintf "%s?1049l" esc
   let enableMouseTracking = sprintf "%s?1000h%s?1006h" esc esc
   let disableMouseTracking = sprintf "%s?1000l%s?1006l" esc esc
+  /// Enable button-event tracking (?1002h): terminal sends motion events while a mouse button is held.
+  /// Also enables SGR extended encoding (?1006h) for coordinates beyond 223.
+  /// Pair with disableButtonTracking on exit.
+  let enableButtonTracking = sprintf "%s?1002h%s?1006h" esc esc
+  /// Disable button-event tracking (?1002l) and SGR extended encoding (?1006l).
+  let disableButtonTracking = sprintf "%s?1002l%s?1006l" esc esc
   let resetStyle = sprintf "%s0m" esc
 
   let fgColor (c: Color) =

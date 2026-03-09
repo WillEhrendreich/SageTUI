@@ -4929,9 +4929,53 @@ let sprint40SequencePhaseTests = testList "Sprint 40: SequencePhase.phaseAt" [
     localT |> Expect.equal "localT 1.0" 1.0
 ]
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 40 P4: Mouse motion tracking ANSI escape constants unit tests
+// (Tests that Ansi.enableButtonTracking / disableButtonTracking are correct
+// escape sequences, and that the sub-list detection helpers are correct.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+let sprint40MouseTrackingTests = testList "Sprint 40: mouse motion auto-enable" [
+  testCase "enableButtonTracking emits ?1002h (button-event mode)" <| fun () ->
+    Ansi.enableButtonTracking |> Expect.stringContains "contains ?1002h" "?1002h"
+
+  testCase "disableButtonTracking emits ?1002l" <| fun () ->
+    Ansi.disableButtonTracking |> Expect.stringContains "contains ?1002l" "?1002l"
+
+  testCase "enableButtonTracking also enables SGR ?1006h" <| fun () ->
+    Ansi.enableButtonTracking |> Expect.stringContains "contains ?1006h" "?1006h"
+
+  testCase "disableButtonTracking also disables SGR ?1006l" <| fun () ->
+    Ansi.disableButtonTracking |> Expect.stringContains "contains ?1006l" "?1006l"
+
+  testCase "hasDragSub: empty list → false" <| fun () ->
+    let subs : Sub<int> list = []
+    let hasDrag = subs |> List.exists (function DragSub _ -> true | _ -> false)
+    hasDrag |> Expect.isFalse "no DragSub in empty list"
+
+  testCase "hasDragSub: KeySub only → false" <| fun () ->
+    let subs : Sub<int> list = [ KeySub (fun _ -> None) ]
+    subs |> List.exists (function DragSub _ -> true | _ -> false)
+    |> Expect.isFalse "no DragSub in KeySub list"
+
+  testCase "hasDragSub: DragSub present → true" <| fun () ->
+    let subs : Sub<int> list = [ KeySub (fun _ -> None); DragSub (fun _ -> None) ]
+    subs |> List.exists (function DragSub _ -> true | _ -> false)
+    |> Expect.isTrue "DragSub detected"
+
+  testCase "hasDragSub: mixed subs with DragSub → true" <| fun () ->
+    let subs : Sub<int> list = [
+      TimerSub("t", System.TimeSpan.FromSeconds 1.0, fun () -> 0)
+      ResizeSub (fun _ -> None)
+      DragSub (fun _ -> None) ]
+    subs |> List.exists (function DragSub _ -> true | _ -> false)
+    |> Expect.isTrue "DragSub detected in mixed list"
+]
+
 [<Tests>]
 let sprint40Tests =
   testList "Sprint 40" [
     sprint40WideCharContinuationTests
     sprint40SequencePhaseTests
+    sprint40MouseTrackingTests
   ]

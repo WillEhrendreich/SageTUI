@@ -63,6 +63,9 @@ module App =
     let mutable prevKeyAreas = Map.empty<string, Area>
     let mutable activeTransitions: ActiveTransition list = []
     let mutable exitCode = 0
+    // Track whether button-event mouse tracking (?1002h) is currently active.
+    // Auto-toggled by reconcileSubs when DragSub enters or leaves the sub list.
+    let mutable dragTrackingActive = false
     let frameSw = System.Diagnostics.Stopwatch()
 
     let msgChannel = ConcurrentQueue<'msg>()
@@ -118,6 +121,19 @@ module App =
       // Event-driven subs (KeySub, MouseSub, ClickSub, FocusSub, ResizeSub) need no
       // lifecycle tracking here — they are matched against events in processEvent below.
       // Warn on duplicate IDs — the second sub silently won't start (the ContainsKey guard below).
+
+      // Auto-enable button-event mouse tracking (?1002h) when a DragSub is registered.
+      // Auto-disable when the last DragSub is removed. This lets apps opt in to drag
+      // tracking simply by returning a DragSub — no manual terminal escape needed.
+      let hasDragSub = currentSubs |> List.exists (function DragSub _ -> true | _ -> false)
+      match hasDragSub, dragTrackingActive with
+      | true, false ->
+        backend.Write Ansi.enableButtonTracking
+        dragTrackingActive <- true
+      | false, true ->
+        backend.Write Ansi.disableButtonTracking
+        dragTrackingActive <- false
+      | _ -> ()
       let ids =
         currentSubs
         |> List.choose (function
@@ -200,6 +216,9 @@ module App =
         for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
         activeSubs.Clear()
         running <- false
+        match dragTrackingActive with
+        | true -> backend.Write Ansi.disableButtonTracking; dragTrackingActive <- false
+        | false -> ()
         match automation.UseAltScreen with
         | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
         | false -> backend.Write(Ansi.showCursor)
@@ -521,9 +540,13 @@ module App =
         | None ->
           Thread.Sleep 1
 
+      match dragTrackingActive with
+      | true -> backend.Write Ansi.disableButtonTracking
+      | false -> ()
       match automation.UseAltScreen with
       | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
       | false -> backend.Write(Ansi.showCursor)
+      backend.Flush()
       match automation.UseRawMode with
       | true -> backend.LeaveRawMode()
       | false -> ()
@@ -531,6 +554,9 @@ module App =
       if exitCode <> 0 then
         System.Environment.Exit exitCode
     with ex ->
+      match dragTrackingActive with
+      | true -> backend.Write Ansi.disableButtonTracking
+      | false -> ()
       match automation.UseAltScreen with
       | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
       | false -> backend.Write(Ansi.showCursor)
@@ -615,6 +641,7 @@ module App =
     let mutable running = true
     let mutable needsFullRedraw = true
     let mutable exitCode = 0
+    let mutable dragTrackingActive = false
     let frameSw = System.Diagnostics.Stopwatch()
 
     let msgChannel = ConcurrentQueue<'msg>()
@@ -659,6 +686,11 @@ module App =
         running <- false
 
     let reconcileSubs (currentSubs: Sub<'msg> list) =
+      let hasDragSub = currentSubs |> List.exists (function DragSub _ -> true | _ -> false)
+      match hasDragSub, dragTrackingActive with
+      | true, false -> backend.Write Ansi.enableButtonTracking; dragTrackingActive <- true
+      | false, true -> backend.Write Ansi.disableButtonTracking; dragTrackingActive <- false
+      | _ -> ()
       let ids =
         currentSubs
         |> List.choose (function
@@ -702,6 +734,9 @@ module App =
     let cleanup () =
       for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
       activeSubs.Clear()
+      match dragTrackingActive with
+      | true -> backend.Write Ansi.disableButtonTracking; dragTrackingActive <- false
+      | false -> ()
       match clearOnExit with
       | true ->
         clearInlineArea()
