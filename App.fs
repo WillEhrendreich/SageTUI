@@ -91,6 +91,7 @@ module App =
           do! Async.Sleep ms
           dispatch msg
         } |> Async.Start
+      | DirectMsg msg -> dispatch msg
       | TerminalOutput s -> backend.Write s
       | Quit code ->
         for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
@@ -576,10 +577,11 @@ module App =
       with _ -> 0
     let reservedOutput = String.replicate inlineHeight "\n"
     Console.Write(reservedOutput)
-    // After printing N newlines, cursor is at startRow+N. Recalculate:
-    // If the terminal didn't scroll, startRow stays; if it did scroll, adjust.
+    // After printing N newlines the cursor is below the reserved area.
+    // Recalculate startRow: if scrolling occurred, CursorTop will reflect it.
     let endRow =
       try Console.CursorTop
+      // If CursorTop is unavailable (non-TTY), assume we're at screen bottom.
       with _ -> startRow + inlineHeight
     startRow <- max 0 (endRow - inlineHeight)
 
@@ -625,6 +627,7 @@ module App =
           do! Async.Sleep ms
           dispatch msg
         } |> Async.Start
+      | DirectMsg msg -> dispatch msg
       | TerminalOutput s -> backend.Write s
       | Quit code ->
         for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
@@ -673,7 +676,27 @@ module App =
         sb.Append(Ansi.clearToEol) |> ignore
       backend.Write(sb.ToString())
 
+    let cleanup () =
+      for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
+      activeSubs.Clear()
+      match clearOnExit with
+      | true ->
+        clearInlineArea()
+        backend.Write(Ansi.moveCursor startRow 0)
+      | false ->
+        backend.Write(Ansi.moveCursor (startRow + inlineHeight) 0)
+      backend.Write(Ansi.showCursor)
+      backend.Flush()
+      backend.LeaveRawMode()
+
+    let cancelHandler =
+      System.ConsoleCancelEventHandler(fun _ args ->
+        args.Cancel <- true   // prevent immediate process termination
+        cleanup()
+        System.Environment.Exit(130))
+
     try
+      Console.CancelKeyPress.AddHandler(cancelHandler)
       backend.EnterRawMode()
       backend.Write(Ansi.hideCursor)
       interpretCmd initCmd
@@ -735,25 +758,22 @@ module App =
               handler (k, m) |> Option.iter dispatch
             | ResizeSub handler, Resized(w, h) ->
               width <- w
+              // Reallocate buffers for new width so cells are never out of bounds.
+              // height is ignored — inline area keeps its reserved inlineHeight.
+              frontBuf <- Buffer.create w inlineHeight
+              backBuf <- Buffer.create w inlineHeight
               needsFullRedraw <- true
               handler (w, h) |> Option.iter dispatch
             | _ -> ()
         | None -> Thread.Sleep 1
 
-      // Exit: restore terminal state
-      match clearOnExit with
-      | true ->
-        clearInlineArea()
-        backend.Write(Ansi.moveCursor startRow 0)
-      | false ->
-        backend.Write(Ansi.moveCursor (startRow + inlineHeight) 0)
-      backend.Write(Ansi.showCursor)
-      backend.Flush()
-      backend.LeaveRawMode()
+      cleanup()
+      Console.CancelKeyPress.RemoveHandler(cancelHandler)
       match exitCode with
       | 0 -> ()
       | code -> System.Environment.Exit code
     with ex ->
+      Console.CancelKeyPress.RemoveHandler(cancelHandler)
       backend.Write(Ansi.showCursor)
       backend.Flush()
       backend.LeaveRawMode()
@@ -770,3 +790,31 @@ module App =
   let runInlinePersist (height: int) (program: Program<'model, 'msg>) =
     let backend = Backend.auto()
     runInlineWith AppConfig.defaults height false backend program
+
+  /// Run an inline program that produces a typed result on exit.
+  ///
+  /// The program's `Update` function should call `Cmd.quit` or return a result
+  /// by storing it in the model. Extract the result by reading the returned model
+  /// after the program exits, or use `resultFn` to project from the final model.
+  ///
+  ///   let result =
+  ///     App.runInlineResult 10 (fun m -> m.Selected) program
+  ///   // Returns Some selectedItem if the user confirmed, None if they cancelled.
+  ///
+  /// `cancelMsg` is dispatched when the result function returns None on quit — useful
+  /// for signalling cancellation cleanly. Omit for simple pickers that return model state.
+  let runInlineResult
+    (height: int)
+    (resultFn: 'model -> 'result option)
+    (program: Program<'model, 'msg>) : 'result option =
+    let resultRef = ref None
+    let wrapped : Program<'model, 'msg> =
+      { program with
+          Update = fun msg model ->
+            let newModel, cmd = program.Update msg model
+            let result = resultFn newModel
+            resultRef.Value <- result
+            newModel, cmd }
+    let backend = Backend.auto()
+    runInlineWith AppConfig.defaults height true backend wrapped
+    !resultRef

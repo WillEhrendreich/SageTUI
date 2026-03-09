@@ -11,6 +11,9 @@ type Cmd<'msg> =
   | OfCancellableAsync of id: string * (CancellationToken -> ('msg -> unit) -> Async<unit>)
   | CancelSub of string
   | Delay of milliseconds: int * 'msg
+  /// Dispatch a message synchronously — processed in the same drain loop before the next render.
+  /// Unlike Delay(0, msg), DirectMsg does not schedule an async task; it enqueues directly.
+  | DirectMsg of 'msg
   /// Quit the application with the given exit code (0 = success).
   | Quit of exitCode: int
   /// Write a raw ANSI/escape sequence through the terminal backend.
@@ -58,11 +61,27 @@ module Cmd =
       OfCancellableAsync(id, fun ct dispatch -> run ct (f >> dispatch))
     | CancelSub id -> CancelSub id
     | Delay(ms, msg) -> Delay(ms, f msg)
+    | DirectMsg msg -> DirectMsg(f msg)
     | Quit code -> Quit code
     | TerminalOutput s -> TerminalOutput s
 
-  /// Dispatch a message immediately (synchronous, no delay).
-  let ofMsg (msg: 'msg) : Cmd<'msg> = Delay(0, msg)
+  /// Dispatch a message synchronously before the next render frame.
+  ///
+  /// Unlike Cmd.nextFrame, this does not schedule an async task — the message is
+  /// placed directly in the drain queue and processed in the same drain pass before
+  /// any render occurs. Chain multiple DirectMsg commands via Cmd.batch for
+  /// ordered synchronous message sequences.
+  ///
+  ///   model, Cmd.batch [ Cmd.ofMsg Loaded; Cmd.ofMsg (SetTitle "foo") ]
+  ///   // Both messages processed before the next frame — no intermediate renders.
+  let ofMsg (msg: 'msg) : Cmd<'msg> = DirectMsg msg
+
+  /// Dispatch a message in the next event loop iteration (one frame later).
+  ///
+  /// Equivalent to the old `Cmd.ofMsg` semantics: schedules a 0ms async task.
+  /// Prefer `Cmd.ofMsg` for immediate dispatch; use `Cmd.nextFrame` only when you
+  /// explicitly want the message deferred until the next iteration.
+  let nextFrame (msg: 'msg) : Cmd<'msg> = Delay(0, msg)
 
   /// Run a Task and dispatch the result as a message.
   /// If the task throws, the exception is logged to stderr and ignored — the app
@@ -93,7 +112,7 @@ module Cmd =
       })
 
   /// Extract all synchronously-dispatchable messages from a Cmd tree.
-  /// Returns messages from every Delay case (regardless of delay duration).
+  /// Returns messages from every Delay and DirectMsg case.
   /// Async operations and subscriptions are not executed.
   /// Useful for asserting what messages a command will eventually produce in unit tests.
   let rec toMessages (cmd: Cmd<'msg>) : 'msg list =
@@ -101,6 +120,7 @@ module Cmd =
     | NoCmd | OfAsync _ | OfCancellableAsync _ | CancelSub _ | Quit _ | TerminalOutput _ -> []
     | Batch cmds -> cmds |> List.collect toMessages
     | Delay(_, msg) -> [ msg ]
+    | DirectMsg msg -> [ msg ]
 
   // --- Cmd inspection utilities (useful in tests) ---
 

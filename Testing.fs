@@ -74,6 +74,9 @@ module TestHarness =
       | Delay(0, msg) ->
         let newModel, nextCmd = program.Update msg model
         loop seqN newModel nextCmd
+      | DirectMsg msg ->
+        let newModel, nextCmd = program.Update msg model
+        loop seqN newModel nextCmd
       | Delay(n, msg) ->
         let delay = { FireAt = effectiveNow + TimeSpan.FromMilliseconds(float n); Seq = seqN; Message = msg }
         model, false, None, [ delay ], seqN + 1

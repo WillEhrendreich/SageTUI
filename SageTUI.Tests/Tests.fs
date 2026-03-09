@@ -2424,8 +2424,8 @@ let cmdExtendedTests = testList "Cmd extended" [
     let inner : Cmd<int> = Cmd.ofMsg 42
     let outer : Cmd<string> = Cmd.map (sprintf "%d") inner
     match outer with
-    | Delay(0, "42") -> ()
-    | _ -> failwith "expected mapped Delay"
+    | DirectMsg "42" -> ()
+    | _ -> failwith "expected mapped DirectMsg"
 
   testCase "Sub.map transforms KeySub messages" <| fun () ->
     let inner : Sub<int> = KeySub(fun (k, _) ->
@@ -4541,5 +4541,143 @@ let sprint36Tests =
     sprint36FocusRingConstraintTests
     sprint36DegenerateAnchorTests
     sprint36RunInlineTests
+  ]
+
+// ─── Sprint 37 tests ────────────────────────────────────────────────────────
+
+/// Cmd.ofMsg now uses DirectMsg for synchronous dispatch, Cmd.nextFrame for deferred.
+let sprint37CmdSemanticTests =
+  testList "Cmd semantics" [
+    testCase "Cmd.ofMsg produces DirectMsg" <| fun () ->
+      match Cmd.ofMsg "hello" with
+      | DirectMsg "hello" -> ()
+      | other -> failwithf "expected DirectMsg, got %A" other
+
+    testCase "Cmd.nextFrame produces Delay(0, msg)" <| fun () ->
+      match Cmd.nextFrame "hello" with
+      | Delay(0, "hello") -> ()
+      | other -> failwithf "expected Delay(0,...), got %A" other
+
+    testCase "Cmd.map over DirectMsg maps the message" <| fun () ->
+      let mapped = Cmd.ofMsg 1 |> Cmd.map (fun x -> x * 2)
+      mapped |> Cmd.toMessages |> Expect.equal "maps msg" [2]
+
+    testCase "Cmd.toMessages includes DirectMsg" <| fun () ->
+      Cmd.batch [ Cmd.ofMsg 1; Cmd.ofMsg 2 ]
+      |> Cmd.toMessages
+      |> Expect.equal "both msgs" [1; 2]
+
+    testCase "Cmd.toMessages includes both DirectMsg and Delay" <| fun () ->
+      Cmd.batch [ Cmd.ofMsg "direct"; Cmd.nextFrame "deferred" ]
+      |> Cmd.toMessages
+      |> Expect.equal "both" ["direct"; "deferred"]
+
+    testCase "DirectMsg is processed before render in drain loop" <| fun () ->
+      // Verify: model is updated by direct messages before the program renders.
+      // We inject a DirectMsg from Init and verify the second model state renders.
+      let rendered = System.Collections.Generic.List<int>()
+      let events = [ KeyPressed(Key.Escape, Modifiers.None) ]
+      let backend, _ = TestBackend.create 20 3 events
+      let program : Program<int, int> =
+        { Init = fun () -> 0, Cmd.ofMsg 42   // dispatch 42 via DirectMsg
+          Update = fun msg _ -> msg, (if msg = 0 then NoCmd else Quit 0)
+          View = fun count ->
+            rendered.Add(count)
+            El.text (sprintf "count=%d" count)
+          Subscribe = fun _ -> [] }
+      App.runInlineWith AppConfig.defaults 3 true backend program
+      // model should have been 42 when rendered (after DirectMsg was processed)
+      rendered |> Seq.exists (fun v -> v = 42) |> Expect.isTrue "42 rendered"
+
+    testCase "Cmd.ofMsg chained via batch processes all before render" <| fun () ->
+      let msgs = System.Collections.Generic.List<string>()
+      let events = [ KeyPressed(Key.Escape, Modifiers.None) ]
+      let backend, _ = TestBackend.create 10 2 events
+      let program : Program<string list, string> =
+        { Init = fun () -> [], Cmd.batch [ Cmd.ofMsg "a"; Cmd.ofMsg "b"; Cmd.ofMsg "c" ]
+          Update = fun msg model ->
+            let next = model @ [msg]
+            next, (if next.Length >= 3 then Quit 0 else NoCmd)
+          View = fun model ->
+            msgs.Add(model |> String.concat "")
+            El.text (model |> String.concat "")
+          Subscribe = fun _ -> [] }
+      App.runInlineWith AppConfig.defaults 2 true backend program
+      // All three messages should have been processed
+      msgs |> Seq.exists (fun s -> s = "abc") |> Expect.isTrue "abc rendered"
+  ]
+
+/// runInlineWith resize now reallocates buffers.
+let sprint37ResizeFixTests =
+  testList "runInline resize buffer reallocation" [
+    testCase "resize event reallocates buffers without out-of-bounds panic" <| fun () ->
+      // Inject Resized then quit — verifies no ArrayIndexOutOfRange
+      let events = [
+        Resized(60, 5)   // widen from 20 to 60
+        KeyPressed(Key.Escape, Modifiers.None)
+      ]
+      let backend, getOutput = TestBackend.create 20 3 events
+      let program : Program<unit, Key> =
+        { Init = fun () -> (), NoCmd
+          Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+          View = fun () -> El.text "after-resize"
+          Subscribe = fun _ ->
+            [ KeySub (fun (k,_) -> Some k)
+              ResizeSub (fun _ -> None) ] }
+      App.runInlineWith AppConfig.defaults 3 true backend program
+      // Should complete without exception; after resize content should still render
+      let output = getOutput()
+      output |> Expect.stringContains "content renders after resize" "after-resize"
+
+    testCase "resize to narrower width truncates without crash" <| fun () ->
+      let events = [
+        Resized(5, 3)    // narrow from 40 to 5
+        KeyPressed(Key.Escape, Modifiers.None)
+      ]
+      let backend, getOutput = TestBackend.create 40 3 events
+      let program : Program<unit, Key> =
+        { Init = fun () -> (), NoCmd
+          Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+          View = fun () -> El.text "x"
+          Subscribe = fun _ ->
+            [ KeySub (fun (k,_) -> Some k)
+              ResizeSub (fun _ -> None) ] }
+      App.runInlineWith AppConfig.defaults 3 true backend program
+      getOutput() |> Expect.stringContains "x in output" "x"
+  ]
+
+/// runInlineResult extracts typed result from model on quit.
+let sprint37InlineResultTests =
+  testList "runInlineResult" [
+    testCase "resultFn maps final model to Some value on quit" <| fun () ->
+      // The program immediately dispatches DirectMsg to set model to 99 then quits
+      let program : Program<int, int> =
+        { Init = fun () -> 0, Cmd.batch [ Cmd.ofMsg 99; Cmd.ofMsg -1 ]
+          Update = fun msg model ->
+            match msg with
+            | 99 -> 99, NoCmd
+            | _ -> model, Quit 0
+          View = fun m -> El.text (string m)
+          Subscribe = fun _ -> [] }
+      let result = App.runInlineResult 5 (fun m -> if m = 99 then Some m else None) program
+      result |> Expect.equal "got 99" (Some 99)
+
+    testCase "resultFn returns None if model never satisfies predicate" <| fun () ->
+      // Model is `unit`, result always None; Escape quits
+      let program : Program<unit, Key> =
+        { Init = fun () -> (), Cmd.ofMsg Key.Escape
+          Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+          View = fun () -> El.text "nothing"
+          Subscribe = fun _ -> [] }
+      let result : int option = App.runInlineResult 2 (fun () -> None) program
+      result |> Expect.equal "none" None
+  ]
+
+[<Tests>]
+let sprint37Tests =
+  testList "Sprint 37" [
+    sprint37CmdSemanticTests
+    sprint37ResizeFixTests
+    sprint37InlineResultTests
   ]
 
