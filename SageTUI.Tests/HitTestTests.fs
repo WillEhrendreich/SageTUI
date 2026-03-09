@@ -108,6 +108,43 @@ let hitMapTests = testList "HitMap" [
     ArenaRender.hitTest arena 15 0 |> Expect.equal "btn2" (Some "btn2")
     ArenaRender.hitTest arena 25 0 |> Expect.equal "btn3" (Some "btn3")
   }
+
+  test "keyAreas reports scoped row child areas" {
+    let arena = FrameArena.create 256 1024 256
+    let elem =
+      El.row [
+        El.text "Btn1" |> El.keyed "btn1" |> El.width 10
+        El.text "Btn2" |> El.keyed "btn2" |> El.width 10
+        El.text "Btn3" |> El.keyed "btn3" |> El.width 10
+      ]
+    let area = { X = 0; Y = 0; Width = 80; Height = 24 }
+    let buf = Buffer.create 80 24
+    let rootHandle = Arena.lower arena elem
+    ArenaRender.renderRoot arena rootHandle area buf
+
+    let areas = ArenaRender.keyAreas arena
+
+    areas.["btn1"] |> Expect.equal "btn1 area" { X = 0; Y = 0; Width = 10; Height = 24 }
+    areas.["btn2"] |> Expect.equal "btn2 area" { X = 10; Y = 0; Width = 10; Height = 24 }
+    areas.["btn3"] |> Expect.equal "btn3 area" { X = 20; Y = 0; Width = 10; Height = 24 }
+  }
+
+  test "keyAreas keeps topmost keyed area in overlays" {
+    let arena = FrameArena.create 256 1024 256
+    let elem =
+      El.overlay [
+        El.text "Background" |> El.keyed "shared" |> El.fill
+        El.text "Foreground" |> El.keyed "shared" |> El.width 20
+      ]
+    let area = { X = 0; Y = 0; Width = 80; Height = 24 }
+    let buf = Buffer.create 80 24
+    let rootHandle = Arena.lower arena elem
+    ArenaRender.renderRoot arena rootHandle area buf
+
+    let areas = ArenaRender.keyAreas arena
+
+    areas.["shared"] |> Expect.equal "uses topmost overlay area" { X = 0; Y = 0; Width = 20; Height = 24 }
+  }
 ]
 
 [<Tests>]

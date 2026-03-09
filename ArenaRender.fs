@@ -511,3 +511,17 @@ module ArenaRender =
         | true -> result <- Some entry.Key
         | false -> ()
     result
+
+  let keyAreas (arena: FrameArena) : Map<string, Area> =
+    let mutable areas = Map.empty
+    for i in 0 .. arena.HitMap.Count - 1 do
+      let entry = arena.HitMap.[i]
+      areas <-
+        Map.add
+          entry.Key
+          { X = entry.X
+            Y = entry.Y
+            Width = entry.Width
+            Height = entry.Height }
+          areas
+    areas

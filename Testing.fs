@@ -323,6 +323,16 @@ module TestHarness =
   let renderBuffer (app: TestApp<'model, 'msg>) =
     snd (renderArena app)
 
+  /// Render the current view and return keyed element areas from the arena hit map.
+  /// Useful for asserting layout-scoped interactive regions in tests.
+  let keyAreas (app: TestApp<'model, 'msg>) : Map<string, Area> =
+    let arena, _ = renderArena app
+    ArenaRender.keyAreas arena
+
+  /// Try to get the rendered area for a keyed element in the current view.
+  let tryFindKeyArea (key: string) (app: TestApp<'model, 'msg>) : Area option =
+    keyAreas app |> Map.tryFind key
+
   /// Render the current view to a plain string (rows separated by '\n').
   let render (app: TestApp<'model, 'msg>) : string =
     renderBuffer app |> Buffer.toString

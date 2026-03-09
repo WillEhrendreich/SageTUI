@@ -2279,6 +2279,21 @@ let private counterProgram2 : Program<int, CounterMsg2> = {
 }
 
 let appRunTests = testList "App.run" [
+  testCase "automation settings keep alt screen and raw mode enabled by default" <| fun () ->
+    let settings = App.automationSettings (fun _ -> None)
+    settings.UseAltScreen |> Expect.isTrue "alt screen should be enabled by default"
+    settings.UseRawMode |> Expect.isTrue "raw mode should be enabled by default"
+
+  testCase "automation settings can disable alt screen and raw mode" <| fun () ->
+    let env =
+      Map.ofList
+        [ "SAGETUI_DISABLE_ALT_SCREEN", Some "true"
+          "SAGETUI_DISABLE_RAW_MODE", Some "1" ]
+
+    let settings = App.automationSettings (fun name -> Map.tryFind name env |> Option.flatten)
+    settings.UseAltScreen |> Expect.isFalse "alt screen should be disabled when requested"
+    settings.UseRawMode |> Expect.isFalse "raw mode should be disabled when requested"
+
   testCase "counter increments on 'j' and quits on 'q'" <| fun () ->
     let events = [
       KeyPressed(Key.Char 'j', Modifiers.None)

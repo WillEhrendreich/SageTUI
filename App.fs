@@ -17,6 +17,31 @@ module AppConfig =
       ArenaLayout = 4096 }
 
 module App =
+  let private isTruthyEnvVar (value: string option) =
+    match value with
+    | Some text ->
+      match text.Trim().ToLowerInvariant() with
+      | "1"
+      | "true"
+      | "yes"
+      | "on" -> true
+      | _ -> false
+    | None -> false
+
+  type AutomationSettings =
+    { UseAltScreen: bool
+      UseRawMode: bool }
+
+  let automationSettings (envReader: string -> string option) =
+    { UseAltScreen =
+        envReader "SAGETUI_DISABLE_ALT_SCREEN"
+        |> isTruthyEnvVar
+        |> not
+      UseRawMode =
+        envReader "SAGETUI_DISABLE_RAW_MODE"
+        |> isTruthyEnvVar
+        |> not }
+
   let runWith (config: AppConfig) (backend: TerminalBackend) (program: Program<'model, 'msg>) =
     let mutable width, height = backend.Size()
     let mutable model, initCmd = program.Init()
@@ -26,6 +51,7 @@ module App =
     let mutable running = true
     let mutable needsFullRedraw = true
     let mutable prevKeyedElements = Map.empty<string, Element>
+    let mutable prevKeyAreas = Map.empty<string, Area>
     let mutable activeTransitions: ActiveTransition list = []
     let mutable exitCode = 0
 
@@ -70,6 +96,12 @@ module App =
         exitCode <- code
         running <- false
 
+    let fullScreenArea () =
+      { X = 0
+        Y = 0
+        Width = width
+        Height = height }
+
     let reconcileSubs (currentSubs: Sub<'msg> list) =
       // Only TimerSub and CustomSub need lifecycle management (CancellationTokenSource).
       // Event-driven subs (KeySub, MouseSub, ClickSub, FocusSub, ResizeSub) need no
@@ -111,8 +143,17 @@ module App =
             Async.Start(start dispatch cts.Token, cts.Token)
         | _ -> ()
 
-    backend.EnterRawMode()
-    backend.Write(Ansi.enterAltScreen + Ansi.hideCursor)
+    let automation =
+      automationSettings (fun name ->
+        System.Environment.GetEnvironmentVariable(name)
+        |> Option.ofObj)
+
+    match automation.UseRawMode with
+    | true -> backend.EnterRawMode()
+    | false -> ()
+    match automation.UseAltScreen with
+    | true -> backend.Write(Ansi.enterAltScreen + Ansi.hideCursor)
+    | false -> backend.Write(Ansi.hideCursor)
 
     // Support automated recording: SAGETUI_EXIT_AFTER_MS=N quits after N ms.
     let exitAfterMs =
@@ -132,9 +173,13 @@ module App =
     // thread pool's unhandled handler, restore terminal state before the process dies.
     System.AppDomain.CurrentDomain.UnhandledException.AddHandler(fun _ _ ->
       try
-        backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
+        match automation.UseAltScreen with
+        | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
+        | false -> backend.Write(Ansi.showCursor)
         backend.Flush()
-        backend.LeaveRawMode()
+        match automation.UseRawMode with
+        | true -> backend.LeaveRawMode()
+        | false -> ()
       with _ -> ())
 
     try
@@ -159,9 +204,8 @@ module App =
 
         let elem = program.View model
 
-        // Reconcile keyed elements for transitions
-        // TODO: transitions are currently full-screen only. Scoped transitions
-        // require layout-time area tracking (ArenaRender recording node→area map).
+        // Reconcile keyed elements for transitions. Exits use the previous frame's
+        // keyed areas; enters use the current frame's keyed areas after rendering.
         let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         let newKeyed = Reconcile.findKeyedElements elem
         let (entering, exiting, _) = Reconcile.reconcile prevKeyedElements newKeyed
@@ -178,22 +222,7 @@ module App =
                 DurationMs = TransitionDuration.get exitTransition
                 Easing = Ease.cubicInOut
                 SnapshotBefore = snapshot
-                Area = { X = 0; Y = 0; Width = width; Height = height } }
-              :: activeTransitions
-          | _ -> ()
-
-        // Start enter transitions
-        for (key, newElem) in entering do
-          match newElem with
-          | Keyed(_, enterTransition, _, _) ->
-            activeTransitions <-
-              { Key = key
-                Transition = enterTransition
-                StartMs = nowMs
-                DurationMs = TransitionDuration.get enterTransition
-                Easing = Ease.cubicInOut
-                SnapshotBefore = Array.create (width * height) PackedCell.empty
-                Area = { X = 0; Y = 0; Width = width; Height = height } }
+                Area = prevKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ()) }
               :: activeTransitions
           | _ -> ()
 
@@ -214,6 +243,22 @@ module App =
         Buffer.clear backBuf
         let area = { X = 0; Y = 0; Width = width; Height = height }
         ArenaRender.renderRoot arena rootHandle area backBuf
+        let currentKeyAreas = ArenaRender.keyAreas arena
+
+        // Start enter transitions once we know the rendered keyed areas.
+        for (key, newElem) in entering do
+          match newElem with
+          | Keyed(_, enterTransition, _, _) ->
+            activeTransitions <-
+              { Key = key
+                Transition = enterTransition
+                StartMs = nowMs
+                DurationMs = TransitionDuration.get enterTransition
+                Easing = Ease.cubicInOut
+                SnapshotBefore = Array.create (width * height) PackedCell.empty
+                Area = currentKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ()) }
+              :: activeTransitions
+          | _ -> ()
 
         // Apply active transitions
         activeTransitions |> List.iter (fun at ->
@@ -245,6 +290,7 @@ module App =
         let temp = frontBuf
         frontBuf <- backBuf
         backBuf <- temp
+        prevKeyAreas <- currentKeyAreas
 
         // Drain all available events per frame (burst input, paste)
         let processEvent (event: TerminalEvent) =
@@ -281,14 +327,22 @@ module App =
         | None ->
           Thread.Sleep 1
 
-      backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
-      backend.LeaveRawMode()
+      match automation.UseAltScreen with
+      | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
+      | false -> backend.Write(Ansi.showCursor)
+      match automation.UseRawMode with
+      | true -> backend.LeaveRawMode()
+      | false -> ()
       if exitCode <> 0 then
         System.Environment.Exit exitCode
     with ex ->
-      backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
+      match automation.UseAltScreen with
+      | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
+      | false -> backend.Write(Ansi.showCursor)
       backend.Flush()
-      backend.LeaveRawMode()
+      match automation.UseRawMode with
+      | true -> backend.LeaveRawMode()
+      | false -> ()
       reraise()
 
   /// Run with an explicit backend (for testing or custom backends).

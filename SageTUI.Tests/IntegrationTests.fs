@@ -960,6 +960,55 @@ let sendMsgsTests =
   ]
 
 // ============================================================
+// TestHarness.keyAreas TESTS
+// ============================================================
+
+let keyAreasTests =
+  testList "TestHarness.keyAreas" [
+    test "reports scoped row child areas" {
+      let program =
+        App.simple
+          (fun () -> (), NoCmd)
+          (fun _ model -> model, NoCmd)
+          (fun () ->
+            El.row [
+              El.text "Btn1" |> El.keyed "btn1" |> El.width 10
+              El.text "Btn2" |> El.keyed "btn2" |> El.width 10
+              El.text "Btn3" |> El.keyed "btn3" |> El.width 10
+            ])
+
+      let app = TestHarness.init 80 24 program
+      let areas = TestHarness.keyAreas app
+
+      areas.["btn1"] |> Expect.equal "btn1 area" { X = 0; Y = 0; Width = 10; Height = 24 }
+      areas.["btn2"] |> Expect.equal "btn2 area" { X = 10; Y = 0; Width = 10; Height = 24 }
+      areas.["btn3"] |> Expect.equal "btn3 area" { X = 20; Y = 0; Width = 10; Height = 24 }
+    }
+
+    test "tryFindKeyArea returns topmost overlay area" {
+      let program =
+        App.simple
+          (fun () -> (), NoCmd)
+          (fun _ model -> model, NoCmd)
+          (fun () ->
+            El.overlay [
+              El.text "Background" |> El.keyed "shared" |> El.fill
+              El.text "Foreground" |> El.keyed "shared" |> El.width 20
+            ])
+
+      let app = TestHarness.init 80 24 program
+
+      TestHarness.tryFindKeyArea "shared" app
+      |> Expect.equal "uses topmost overlay area" (Some { X = 0; Y = 0; Width = 20; Height = 24 })
+    }
+
+    test "tryFindKeyArea returns None for missing key" {
+      let app = TestHarness.init 80 24 counterProgram
+      TestHarness.tryFindKeyArea "missing" app |> Expect.isNone "missing key"
+    }
+  ]
+
+// ============================================================
 // TuiExpect TESTS
 // ============================================================
 
@@ -1059,6 +1108,7 @@ let integrationTests =
     formIntegrationTests
     pendingDelayTests
     sendMsgsTests
+    keyAreasTests
     tuiExpectTests
     pendingDelayRecordTests
   ]

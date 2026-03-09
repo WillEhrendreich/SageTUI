@@ -202,6 +202,28 @@ module RawMode =
           Runtime.InteropServices.Marshal.FreeHGlobal(handle)
 
 module Backend =
+  let private tryGetConsoleSize () =
+    try
+      Some (Console.WindowWidth, Console.WindowHeight)
+    with _ ->
+      None
+
+  let private tryParsePositiveInt (value: string option) =
+    match value with
+    | Some text ->
+      match Int32.TryParse text with
+      | true, parsed when parsed > 0 -> Some parsed
+      | _ -> None
+    | None -> None
+
+  let private safeInitialSize (envReader: string -> string option) =
+    match tryGetConsoleSize () with
+    | Some size -> size
+    | None ->
+      match tryParsePositiveInt (envReader "COLUMNS"), tryParsePositiveInt (envReader "LINES") with
+      | Some width, Some height -> width, height
+      | _ -> 80, 25
+
   let private mapKey (ki: ConsoleKeyInfo) : Key option =
     match ki.Key with
     | ConsoleKey.Escape -> Some Escape
@@ -261,18 +283,20 @@ module Backend =
 
   let create (profile: TerminalProfile) : TerminalBackend =
     let mutable savedModes = Unchecked.defaultof<RawMode.SavedModes>
-    let mutable lastW = Console.WindowWidth
-    let mutable lastH = Console.WindowHeight
+    let mutable lastW, lastH = profile.Size
+    let currentSize () =
+      match tryGetConsoleSize () with
+      | Some size -> size
+      | None -> lastW, lastH
     let checkResize () =
-      let w = Console.WindowWidth
-      let h = Console.WindowHeight
+      let w, h = currentSize ()
       match w <> lastW || h <> lastH with
       | true ->
         lastW <- w
         lastH <- h
         Some (Resized(w, h))
       | false -> None
-    { Size = fun () -> (Console.WindowWidth, Console.WindowHeight)
+    { Size = fun () -> currentSize ()
       Write = fun s -> Console.Write(s)
       Flush = fun () -> Console.Out.Flush()
       PollEvent = fun timeoutMs ->
@@ -299,7 +323,7 @@ module Backend =
   /// Auto-detect terminal capabilities and create a backend. Zero ceremony.
   let auto () : TerminalBackend =
     let envReader k = System.Environment.GetEnvironmentVariable(k) |> Option.ofObj
-    let sizeGetter () = System.Console.WindowWidth, System.Console.WindowHeight
+    let sizeGetter () = safeInitialSize envReader
     let profile =
       Detect.fromEnvironment envReader sizeGetter
       |> Detect.adjustForMultiplexer envReader

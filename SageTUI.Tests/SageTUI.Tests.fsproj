@@ -18,12 +18,16 @@
     <Compile Include="IntegrationTests.fs" />
     <Compile Include="SnapshotTests.fs" />
     <Compile Include="SampleShowcaseTests.fs" />
+    <Compile Include="ProcessHelpers.fs" />
+    <Compile Include="Hex1bE2ETests.fs" />
+    <Compile Include="TemplateSmokeTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SageTUI.Library.fsproj" />
     <ProjectReference Include="..\SageTUI.Html\SageTUI.Html.fsproj" />
+    <ProjectReference Include="..\examples\Counter\Counter.fsproj" />
     <ProjectReference Include="..\samples\04-InteractiveForm\InteractiveForm.fsproj" />
     <ProjectReference Include="..\samples\09-SystemMonitor\SystemMonitor.fsproj" />
   </ItemGroup>
@@ -32,6 +36,7 @@
     <PackageReference Include="Expecto" Version="10.2.3" />
     <PackageReference Include="Expecto.FsCheck" Version="10.2.3" />
     <PackageReference Include="FsCheck" Version="2.16.6" />
+    <PackageReference Include="Hex1b" Version="0.109.0" />
     <PackageReference Include="Verify.Expecto" Version="31.13.2" />
   </ItemGroup>
 
