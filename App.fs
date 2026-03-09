@@ -283,10 +283,10 @@ module App =
               :: activeTransitions
           | _ -> ()
 
-        // Apply active transitions
-        activeTransitions |> List.iter (fun at ->
-          let t = ActiveTransition.progress nowMs at
-          match at.Transition with
+        // Apply active transitions via a recursive dispatcher so Sequence can recurse.
+        // Each Transition case is explicit — compiler warns when a new case is added.
+        let rec applyTransition (t: float) (transition: Transition) (at: ActiveTransition) =
+          match transition with
           | Fade _ ->
             TransitionFx.applyFade t backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
           | ColorMorph _ ->
@@ -294,20 +294,54 @@ module App =
           | Wipe(dir, _) ->
             TransitionFx.applyWipe t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
           | Dissolve _ ->
-            // Payload is always DissolvePayload for Dissolve — computed once at transition start.
-            // NoPayload here means a construction site failed to initialise it — fail loudly
-            // instead of silently re-enabling the eliminated per-frame O(N) allocation.
+            // Payload is always DissolvePayload for top-level Dissolve — computed once at transition
+            // start to avoid per-frame allocation. For Dissolve nested inside Sequence, at.Payload is
+            // NoPayload (the parent is Sequence); generate a seeded shuffle inline rather than failing.
             match at.Payload with
             | DissolvePayload order ->
               TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
             | NoPayload ->
-              failwith (sprintf "Key '%s': Dissolve transition has NoPayload — DissolvePayload must be set at construction site" at.Key)
-          // SlideIn, Grow, Sequence, Custom: not yet implemented — no visual effect.
-          // Explicit arms (not | _ ->) so the compiler warns when a new Transition case is added.
-          | SlideIn _ -> ()
-          | Grow _ -> ()
-          | Sequence _ -> ()
-          | Custom _ -> ())
+              let seed = at.Area.Y * 1000 + at.Area.Width
+              let order = TransitionFx.fisherYatesShuffle seed (at.Area.Width * at.Area.Height)
+              TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+          | SlideIn(dir, _) ->
+            TransitionFx.applySlideIn t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+          | Grow _ ->
+            TransitionFx.applyGrow t at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+          | Sequence ts ->
+            // Play sub-transitions in order, sharing the original snapshot.
+            // For pixel-perfect chaining, use multiple El.keyed elements with staggered transitions.
+            let totalMs = TransitionFx.applySequenceDuration ts
+            match totalMs with
+            | 0 -> ()
+            | _ ->
+              let elapsedMs = t * float totalMs
+              let mutable remaining = elapsedMs
+              let mutable applied = false
+              let lastIdx = List.length ts - 1
+              let mutable subIdx = 0
+              for sub in ts do
+                match applied with
+                | false ->
+                  let dur = float (TransitionDuration.get sub)
+                  // Apply this sub-transition if: remaining time fits within it, OR it's the last one
+                  match remaining <= dur || subIdx = lastIdx with
+                  | true ->
+                    let localT = match dur with 0.0 -> 1.0 | _ -> System.Math.Clamp(remaining / dur, 0.0, 1.0)
+                    applyTransition localT sub at
+                    applied <- true
+                  | false ->
+                    remaining <- remaining - dur
+                    subIdx <- subIdx + 1
+                | true -> ()
+          | Custom _ ->
+            // Custom carries a user-supplied function; a future API will expose it as a
+            // cell-level callback (t, col, row) -> PackedCell. No-op for now.
+            ()
+
+        activeTransitions |> List.iter (fun at ->
+          let t = ActiveTransition.progress nowMs at
+          applyTransition t at.Transition at)
 
         // Remove completed transitions
         activeTransitions <- activeTransitions |> List.filter (fun at -> not (ActiveTransition.isDone nowMs at))

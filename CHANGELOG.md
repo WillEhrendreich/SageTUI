@@ -50,9 +50,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added reconcile-tier allocation test (≤ 8,192 B/frame for 8 keyed elements; Map-based baseline).
   - Added `App.run keyAreas gate regression` test: verifies that `prevKeyAreas` is updated for staying elements (guards against reintroducing the Sprint 24 bug).
 
-### Fixed
+- **Sprint 28 — SlideIn / Grow transitions implemented, Sequence dispatcher, NuGet release pipeline**:
+  - `TransitionFx.applySlideIn` — new directional slide-in effect. Content enters from any of four edges (Right/Left/Down/Up), sliding to its final position as `t` advances 0→1. Implemented as a shifted clip: the new content is offset and reveals progressively into the area, while uncovered cells show the snapshot. 19 new unit tests cover all four directions, boundary conditions, and vertical offset.
+  - `TransitionFx.applyGrow` — new center-expand effect. Content expands outward from the area center using Chebyshev distance, producing a rectangular grow envelope. At `t=0` only the center is visible; at `t=1` the full area is revealed.
+  - `TransitionFx.applySequenceDuration` — helper returning total duration of a `Sequence` transition list (including nested). Powers the `Sequence` dispatcher in `App.fs`.
+  - `App.fs` apply loop refactored into `let rec applyTransition` — handles all cases including `Sequence` (sub-transitions dispatched in order with local `t` scaling, sharing the original snapshot). `Dissolve` inside `Sequence` generates a seeded shuffle inline rather than failing on `NoPayload`.
+  - NuGet publish workflow (`.github/workflows/nuget-publish.yml`): triggered on `v*` tags; builds release, runs tests, packs with tag version, pushes to NuGet.org via `NUGET_API_KEY` secret.
+  - `RepositoryUrl` and `PackageProjectUrl` corrected to `https://github.com/WillEhrendreich/SageTUI`.
+  - `scratch.fsx` added at repo root — interactive SageFs validation script for iterating on transition logic.
 
-- Benchmark CI `benchmark-push-baseline` job now has `permissions: {}` on the read-only
+
   `benchmark-regression` job, ensuring the write token is never present in PR contexts.
 - `undo` algebraic laws (Laws 1–6): generator-first `SingleLineContent` arbitrary eliminates
   `Arb.filter` shrinking defect; Laws 5 and 6 correctly guard for no-op edits.

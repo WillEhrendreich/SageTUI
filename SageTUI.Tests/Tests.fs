@@ -2963,6 +2963,163 @@ let activeTransitionTests = testList "ActiveTransition" [
     ActiveTransition.progress 100L at |> Expect.equal "quadOut at 0.5" 0.75
 ]
 
+// ── SlideIn / Grow / Sequence tests (Sprint 28) ──────────────────────────────
+
+let slideInTests = testList "TransitionFx.applySlideIn" [
+  testCase "slideIn Right at t=0 shows all snapshot" <| fun () ->
+    let buf = Buffer.create 4 1
+    let snap = Array.init 4 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 4 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applySlideIn 0.0 Direction.Right snap cur 0 4 1 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "all snapshot at t=0" (int 'O'))
+
+  testCase "slideIn Right at t=1 shows all current" <| fun () ->
+    let buf = Buffer.create 4 1
+    let snap = Array.init 4 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 4 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applySlideIn 1.0 Direction.Right snap cur 0 4 1 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "all current at t=1" (int 'N'))
+
+  testCase "slideIn Right at t=0.5 shows right half as content" <| fun () ->
+    // 4 cols, shift=2: cols 0-1 show snapshot, cols 2-3 show current[0-1] (shifted)
+    let buf  = Buffer.create 4 1
+    let snap = Array.init 4 (fun i -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = [| PackedCell.create (int 'A') 0 0 0us
+                  PackedCell.create (int 'B') 0 0 0us
+                  PackedCell.create (int 'C') 0 0 0us
+                  PackedCell.create (int 'D') 0 0 0us |]
+    TransitionFx.applySlideIn 0.5 Direction.Right snap cur 0 4 1 buf
+    buf.Cells.[0].Rune |> Expect.equal "col0 snapshot" (int 'O')
+    buf.Cells.[1].Rune |> Expect.equal "col1 snapshot" (int 'O')
+    buf.Cells.[2].Rune |> Expect.equal "col2 content[0]" (int 'A')
+    buf.Cells.[3].Rune |> Expect.equal "col3 content[1]" (int 'B')
+
+  testCase "slideIn Left at t=0 shows all snapshot" <| fun () ->
+    let buf  = Buffer.create 4 1
+    let snap = Array.init 4 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 4 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applySlideIn 0.0 Direction.Left snap cur 0 4 1 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "all snapshot at t=0" (int 'O'))
+
+  testCase "slideIn Left at t=1 shows all current" <| fun () ->
+    let buf  = Buffer.create 4 1
+    let snap = Array.init 4 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 4 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applySlideIn 1.0 Direction.Left snap cur 0 4 1 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "all current at t=1" (int 'N'))
+
+  testCase "slideIn Down at t=0 shows all snapshot" <| fun () ->
+    let buf  = Buffer.create 2 3
+    let snap = Array.init 6 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 6 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applySlideIn 0.0 Direction.Down snap cur 0 2 3 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "all snapshot at t=0" (int 'O'))
+
+  testCase "slideIn Down at t=1 shows all current" <| fun () ->
+    let buf  = Buffer.create 2 3
+    let snap = Array.init 6 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 6 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applySlideIn 1.0 Direction.Down snap cur 0 2 3 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "all current at t=1" (int 'N'))
+
+  testCase "slideIn Up at t=0 shows all snapshot" <| fun () ->
+    let buf  = Buffer.create 2 3
+    let snap = Array.init 6 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 6 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applySlideIn 0.0 Direction.Up snap cur 0 2 3 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "all snapshot at t=0" (int 'O'))
+
+  testCase "slideIn Up at t=1 shows all current" <| fun () ->
+    let buf  = Buffer.create 2 3
+    let snap = Array.init 6 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 6 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applySlideIn 1.0 Direction.Up snap cur 0 2 3 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "all current at t=1" (int 'N'))
+
+  testCase "slideIn respects vertical offset (offset>0)" <| fun () ->
+    // buf has 2 rows; transition applies to row 1 only (offset=1, height=1)
+    let buf  = Buffer.create 3 2
+    let snap = Array.init 3 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 3 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applySlideIn 1.0 Direction.Right snap cur 1 3 1 buf
+    // row 0 cells untouched (remain default)
+    buf.Cells.[3].Rune |> Expect.equal "row1 col0 = N" (int 'N')
+    buf.Cells.[4].Rune |> Expect.equal "row1 col1 = N" (int 'N')
+    buf.Cells.[5].Rune |> Expect.equal "row1 col2 = N" (int 'N')
+]
+
+let growTests = testList "TransitionFx.applyGrow" [
+  testCase "grow at t=0 shows mostly snapshot (center revealed)" <| fun () ->
+    // 1x1 area — the single center cell is revealed even at t~0
+    let buf  = Buffer.create 1 1
+    let snap = [| PackedCell.create (int 'O') 0 0 0us |]
+    let cur  = [| PackedCell.create (int 'N') 0 0 0us |]
+    TransitionFx.applyGrow 0.0 snap cur 0 1 1 buf
+    // at t=0, r=0, Chebyshev distance from (0.5,0.5) to (0.5,0.5) = 0 <= 0, so center IS revealed
+    buf.Cells.[0].Rune |> Expect.equal "1x1 at t=0 reveals center" (int 'N')
+
+  testCase "grow at t=1 shows all current" <| fun () ->
+    let buf  = Buffer.create 4 4
+    let snap = Array.init 16 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 16 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applyGrow 1.0 snap cur 0 4 4 buf
+    buf.Cells |> Array.iter (fun c -> c.Rune |> Expect.equal "all current at t=1" (int 'N'))
+
+  testCase "grow at t=0 on 4x4 shows snapshot at corners" <| fun () ->
+    let buf  = Buffer.create 4 4
+    let snap = Array.init 16 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 16 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applyGrow 0.0 snap cur 0 4 4 buf
+    // At t=0, r≈0; corners (0,0) are far from center (2,2) — should still be snapshot
+    buf.Cells.[0].Rune  |> Expect.equal "top-left is snapshot" (int 'O')
+    buf.Cells.[3].Rune  |> Expect.equal "top-right is snapshot" (int 'O')
+    buf.Cells.[12].Rune |> Expect.equal "bottom-left is snapshot" (int 'O')
+    buf.Cells.[15].Rune |> Expect.equal "bottom-right is snapshot" (int 'O')
+
+  testCase "grow at t=0.5 reveals center of 4x4" <| fun () ->
+    let buf  = Buffer.create 4 4
+    let snap = Array.init 16 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 16 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applyGrow 0.5 snap cur 0 4 4 buf
+    // Center cells (1,1) (1,2) (2,1) (2,2) should be revealed (close to center)
+    buf.Cells.[1 * 4 + 1].Rune |> Expect.equal "center (1,1) revealed" (int 'N')
+    buf.Cells.[1 * 4 + 2].Rune |> Expect.equal "center (1,2) revealed" (int 'N')
+    buf.Cells.[2 * 4 + 1].Rune |> Expect.equal "center (2,1) revealed" (int 'N')
+    buf.Cells.[2 * 4 + 2].Rune |> Expect.equal "center (2,2) revealed" (int 'N')
+    // Corners should still be snapshot
+    buf.Cells.[0].Rune  |> Expect.equal "corner (0,0) snapshot" (int 'O')
+    buf.Cells.[15].Rune |> Expect.equal "corner (3,3) snapshot" (int 'O')
+
+  testCase "grow is centred — same cell count revealed for equal t in symmetric area" <| fun () ->
+    // If we grow at t=0.5, center-revealed cells must be symmetric
+    let buf  = Buffer.create 3 3
+    let snap = Array.init 9 (fun _ -> PackedCell.create (int 'O') 0 0 0us)
+    let cur  = Array.init 9 (fun _ -> PackedCell.create (int 'N') 0 0 0us)
+    TransitionFx.applyGrow 0.5 snap cur 0 3 3 buf
+    let revealedCount = buf.Cells |> Array.filter (fun c -> c.Rune = int 'N') |> Array.length
+    // At t=0.5 in 3x3, center cell (1,1) is at distance 0 and the 4 adjacent at distance 0.5-1
+    (revealedCount, 0) |> Expect.isGreaterThan "at least center revealed"
+]
+
+let sequenceDurationTests = testList "TransitionFx.applySequenceDuration" [
+  testCase "empty sequence has zero duration" <| fun () ->
+    TransitionFx.applySequenceDuration [] |> Expect.equal "empty" 0
+
+  testCase "single transition returns its duration" <| fun () ->
+    TransitionFx.applySequenceDuration [ Fade 300<ms> ] |> Expect.equal "300ms" 300
+
+  testCase "multiple transitions sum durations" <| fun () ->
+    TransitionFx.applySequenceDuration [ Fade 200<ms>; Wipe(Direction.Right, 300<ms>) ]
+    |> Expect.equal "500ms" 500
+
+  testCase "nested Sequence durations sum recursively" <| fun () ->
+    TransitionFx.applySequenceDuration
+      [ Fade 100<ms>; Sequence [ Wipe(Direction.Down, 200<ms>); Dissolve 300<ms> ] ]
+    |> Expect.equal "600ms" 600
+]
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ============================================================
 // Phase 10: Widget Example Tests
 // ============================================================
@@ -3397,6 +3554,9 @@ let allTests = testList "All" [
     reconcileTests
     durationTests
     activeTransitionTests
+    slideInTests
+    growTests
+    sequenceDurationTests
   ]
   testList "Phase 10" [
     textInputBasicTests

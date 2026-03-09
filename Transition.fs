@@ -120,6 +120,100 @@ module TransitionFx =
           buf.Cells.[(offset + row) * buf.Width + col] <- cell
         | false -> ()
 
+  /// SlideIn: new content enters from the given direction, sliding to its final position.
+  /// The new content is shifted and clips into the area as t advances from 0 to 1.
+  /// At t=0 the area shows the snapshot; at t=1 it shows the new content fully in place.
+  let applySlideIn (t: float) (dir: Direction) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
+    for row in 0 .. height - 1 do
+      for col in 0 .. width - 1 do
+        let idx = row * width + col
+        match idx < snapshot.Length && idx < current.Length with
+        | true ->
+          let cell =
+            match dir with
+            | Direction.Right ->
+              // Content enters from the right; at t, the left portion (shift cols) still shows snapshot.
+              let shift = int (float width * (1.0 - t))
+              match col < shift with
+              | true  -> snapshot.[idx]
+              | false ->
+                let srcIdx = row * width + (col - shift)
+                match srcIdx < current.Length with
+                | true  -> current.[srcIdx]
+                | false -> snapshot.[idx]
+            | Direction.Left ->
+              // Content enters from the left; at t, right portion shows snapshot.
+              let visible = int (float width * t)
+              let shift   = width - visible
+              match col >= visible with
+              | true  -> snapshot.[idx]
+              | false ->
+                let srcIdx = row * width + (col + shift)
+                match srcIdx < current.Length with
+                | true  -> current.[srcIdx]
+                | false -> snapshot.[idx]
+            | Direction.Down ->
+              // Content enters from below; top rows still show snapshot.
+              let shift = int (float height * (1.0 - t))
+              match row < shift with
+              | true  -> snapshot.[idx]
+              | false ->
+                let srcIdx = (row - shift) * width + col
+                match srcIdx < current.Length with
+                | true  -> current.[srcIdx]
+                | false -> snapshot.[idx]
+            | Direction.Up ->
+              // Content enters from above; bottom rows still show snapshot.
+              let visible = int (float height * t)
+              let shift   = height - visible
+              match row >= visible with
+              | true  -> snapshot.[idx]
+              | false ->
+                let srcIdx = (row + shift) * width + col
+                match srcIdx < current.Length with
+                | true  -> current.[srcIdx]
+                | false -> snapshot.[idx]
+          buf.Cells.[(offset + row) * buf.Width + col] <- cell
+        | false -> ()
+
+  /// Grow: new content expands outward from the center using Chebyshev distance.
+  /// At t=0 a single cell at the center shows the new content; at t=1 the full area is revealed.
+  let applyGrow (t: float) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
+    let cx = float width  * 0.5
+    let cy = float height * 0.5
+    // maxRadius covers the farthest corner from center
+    let maxR = max cx cy + 0.5
+    let r = maxR * t
+    for row in 0 .. height - 1 do
+      for col in 0 .. width - 1 do
+        let idx = row * width + col
+        match idx < snapshot.Length && idx < current.Length with
+        | true ->
+          // Chebyshev distance from cell centre to area centre
+          let dx = abs (float col + 0.5 - cx)
+          let dy = abs (float row + 0.5 - cy)
+          let cell =
+            match max dx dy <= r with
+            | true  -> current.[idx]
+            | false -> snapshot.[idx]
+          buf.Cells.[(offset + row) * buf.Width + col] <- cell
+        | false -> ()
+
+  /// Sequence: plays each sub-transition in order, using the same original snapshot.
+  /// This is an approximation — sub-transitions share the original "before" snapshot rather
+  /// than chaining from each other's output. For pixel-perfect chaining use multiple El.keyed
+  /// elements with staggered enter/exit transitions instead.
+  /// Called from App.fs applyTransition (a recursive dispatcher) to keep the
+  /// Dissolve-payload and cross-sub-dispatch logic colocated with App state.
+  let applySequenceDuration (ts: Transition list) =
+    let rec getDurMs sub =
+      match sub with
+      | Fade d | ColorMorph d | Dissolve d | Grow d -> int d
+      | Wipe(_, d) | SlideIn(_, d) -> int d
+      | Sequence inner -> inner |> List.sumBy getDurMs
+      | Custom _ -> 200
+    ts |> List.sumBy getDurMs
+
 module TransitionDuration =
   let rec get (t: Transition) =
     match t with

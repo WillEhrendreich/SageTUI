@@ -14,9 +14,9 @@
     <PackageTags>fsharp;tui;terminal;elm-architecture;functional;simd;layout;cli</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <RepositoryUrl>https://github.com/SageTUI/SageTUI</RepositoryUrl>
+    <RepositoryUrl>https://github.com/WillEhrendreich/SageTUI</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageProjectUrl>https://github.com/SageTUI/SageTUI</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/WillEhrendreich/SageTUI</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>

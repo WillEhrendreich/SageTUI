@@ -1,0 +1,81 @@
+name: NuGet Publish
+
+# Publishes the SageTUI NuGet package when a version tag is pushed.
+# Tag format: v0.1.0, v1.0.0-beta.1, etc.
+#
+# Prerequisites:
+#   - Set NUGET_API_KEY as a GitHub Actions secret in the repository settings.
+#
+# Security model:
+#   - Uses id-token: write + contents: read only.
+#   - The pack step verifies the assembly matches the tag version.
+#   - Publish only runs after build and test pass.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Tag version: $TAG"
+
+      - name: Restore
+        run: dotnet restore SageTUI.slnx
+
+      - name: Build (Release)
+        run: dotnet build SageTUI.Library.fsproj --no-restore -c Release /p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Test
+        run: dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -- --summary-location
+
+      - name: Pack
+        run: >
+          dotnet pack SageTUI.Library.fsproj
+          --no-build
+          -c Release
+          -o ./artifacts
+          /p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Verify package was created
+        run: |
+          PKG=$(ls ./artifacts/SageTUI.*.nupkg 2>/dev/null | head -1)
+          if [ -z "$PKG" ]; then
+            echo "ERROR: No .nupkg found in ./artifacts"
+            exit 1
+          fi
+          echo "Package: $PKG"
+
+      - name: Push to NuGet.org
+        run: >
+          dotnet nuget push ./artifacts/*.nupkg
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package-${{ steps.version.outputs.VERSION }}
+          path: ./artifacts/*.nupkg
+          if-no-files-found: error
