@@ -202,6 +202,24 @@ let selectionTests = testList "TextEditor.Selection" [
     m'.Lines.[0] |> Expect.equal "after delete" " world"
     m'.SelectionAnchor |> Expect.equal "anchor cleared" None
   }
+  test "Backspace with mid-text selection deletes selection only (no double-delete)" {
+    // Bug: m'.SelectionAnchor was checked (always None after deleteSelection) → extra char deleted
+    // Fix: m.SelectionAnchor is checked → selection-only delete
+    // "hello world", anchor at col 3, cursor at col 5 → selects "lo"
+    let m = { mk "hello world" with Col = 5; SelectionAnchor = Some (0, 3) }
+    let m' = TextEditor.update TEBackspace m
+    m'.Lines.[0] |> Expect.equal "selection deleted only" "hel world"
+    m'.Col       |> Expect.equal "cursor at anchor" 3
+    m'.SelectionAnchor |> Expect.equal "anchor cleared" None
+  }
+  test "Delete with mid-text selection deletes selection only (no double-delete)" {
+    // "hello world", anchor at col 6, cursor at col 11 → selects "world"
+    let m = { mk "hello world" with Col = 11; SelectionAnchor = Some (0, 6) }
+    let m' = TextEditor.update TEDelete m
+    m'.Lines.[0] |> Expect.equal "selection deleted only" "hello "
+    m'.Col       |> Expect.equal "cursor at anchor" 6
+    m'.SelectionAnchor |> Expect.equal "anchor cleared" None
+  }
 ]
 
 // ── paste ────────────────────────────────────────────────────────────────────

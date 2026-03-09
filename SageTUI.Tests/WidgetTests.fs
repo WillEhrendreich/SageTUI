@@ -961,6 +961,19 @@ let textFormTests = testList "TextForm" [
     let f = mkForm ()
     TextForm.getValue "nonexistent" f |> Expect.isNone "not found"
   }
+  test "TFEvent Pasted inserts text into focused field" {
+    let m = TextForm.init [TextForm.field "q" "Query"]
+    let m' = TextForm.update (TFEvent (Pasted "hello world")) m |> fst
+    m'.Rows.[0].Input.Text |> Expect.equal "pasted text" "hello world"
+  }
+  test "TFEvent Ctrl+A selects all in focused field" {
+    let m0 = TextForm.init [TextForm.field "q" "Query"]
+    let m1 = TextForm.update (TFKey (Key.Char 'h')) m0 |> fst
+    let m2 = TextForm.update (TFKey (Key.Char 'i')) m1 |> fst
+    let m3 = TextForm.update (TFEvent (KeyPressed(Key.Char 'a', Modifiers.Ctrl))) m2 |> fst
+    m3.Rows.[0].Input.SelectionAnchor |> Expect.equal "anchor at 0" (Some 0)
+    m3.Rows.[0].Input.Cursor |> Expect.equal "cursor at end" 2
+  }
 ]
 
 let themeTests = testList "Theme" [
@@ -1078,7 +1091,7 @@ let undoableCommitTests = testList "Undoable.commitIfChanged" [
 
 let mkList n = VirtualList.ofArray 5 [| 0 .. n - 1 |]
 
-let vlCfg = VirtualList.create (fun (i: int) -> El.text (sprintf "item %d" i))
+let vlCfg = VirtualList.create (fun _selected (i: int) -> El.text (sprintf "item %d" i))
 
 let virtualListTests = testList "VirtualList" [
   test "ofArray empty list has no selection" {
@@ -1178,6 +1191,49 @@ let virtualListTests = testList "VirtualList" [
     m'.SelectedIndex |> Expect.equal "sel 2" (Some 2)
     m'.ScrollOffset  |> (fun v -> (v, 3) |> Expect.isLessThan "offset not stale")
   }
+  test "RenderRow receives selected=true for the selected row" {
+    let mutable sawSelected = false
+    let cfg = VirtualList.create (fun selected _ ->
+      if selected then sawSelected <- true
+      El.empty)
+    let m = VirtualList.ofArray 3 [| 0; 1; 2 |]  // SelectedIndex = Some 0
+    VirtualList.view cfg m |> ignore
+    sawSelected |> Expect.isTrue "selected=true passed for row 0"
+  }
+  test "RenderRow receives selected=false for non-selected rows" {
+    let falseCount = ref 0
+    let cfg = VirtualList.create (fun selected _ ->
+      if not selected then incr falseCount
+      El.empty)
+    let m = VirtualList.ofArray 3 [| 0; 1; 2 |]  // SelectedIndex = Some 0
+    VirtualList.view cfg m |> ignore
+    !falseCount |> Expect.equal "2 non-selected rows" 2
+  }
+  test "handleEvent Up calls selectPrev" {
+    let m = { VirtualList.ofArray 5 [| 0 .. 9 |] with SelectedIndex = Some 3 }
+    let result = VirtualList.handleEvent (KeyPressed(Key.Up, Modifiers.None)) m
+    result.SelectedIndex |> Expect.equal "moved up" (Some 2)
+  }
+  test "handleEvent Down calls selectNext" {
+    let m = { VirtualList.ofArray 5 [| 0 .. 9 |] with SelectedIndex = Some 3 }
+    let result = VirtualList.handleEvent (KeyPressed(Key.Down, Modifiers.None)) m
+    result.SelectedIndex |> Expect.equal "moved down" (Some 4)
+  }
+  test "handleEvent Home calls selectFirst" {
+    let m = { VirtualList.ofArray 5 [| 0 .. 9 |] with SelectedIndex = Some 7 }
+    let result = VirtualList.handleEvent (KeyPressed(Key.Home, Modifiers.None)) m
+    result.SelectedIndex |> Expect.equal "jumped to first" (Some 0)
+  }
+  test "handleEvent End calls selectLast" {
+    let m = VirtualList.ofArray 5 [| 0 .. 9 |]
+    let result = VirtualList.handleEvent (KeyPressed(Key.End, Modifiers.None)) m
+    result.SelectedIndex |> Expect.equal "jumped to last" (Some 9)
+  }
+  test "handleEvent unhandled key returns model unchanged" {
+    let m = VirtualList.ofArray 5 [| 0 .. 4 |]
+    let result = VirtualList.handleEvent (KeyPressed(Key.Char 'x', Modifiers.None)) m
+    result |> Expect.equal "unchanged" m
+  }
   test "view produces Column with exactly ViewportHeight rows" {
     let m = mkList 20
     match VirtualList.view vlCfg m with
@@ -1207,8 +1263,14 @@ let virtualListTests = testList "VirtualList" [
     | other -> failwith (sprintf "expected Column, got %A" other)
   }
   test "view selected row gets highlight style" {
+    // Use a config that actually uses the selected bool to add styling
+    let highlightCfg =
+      VirtualList.create (fun selected (i: int) ->
+        match selected with
+        | true -> El.bg (Color.Named(BaseColor.Blue, Normal)) (El.text (sprintf "item %d" i))
+        | false -> El.text (sprintf "item %d" i))
     let m = mkList 5
-    match VirtualList.view vlCfg m with
+    match VirtualList.view highlightCfg m with
     | Column children ->
       match children[0] with
       | Styled(s, _) ->
@@ -1217,8 +1279,13 @@ let virtualListTests = testList "VirtualList" [
     | other -> failwith (sprintf "expected Column, got %A" other)
   }
   test "view non-selected rows are not highlighted" {
+    let highlightCfg =
+      VirtualList.create (fun selected (i: int) ->
+        match selected with
+        | true -> El.bg (Color.Named(BaseColor.Blue, Normal)) (El.text (sprintf "item %d" i))
+        | false -> El.text (sprintf "item %d" i))
     let m = mkList 5
-    match VirtualList.view vlCfg m with
+    match VirtualList.view highlightCfg m with
     | Column children ->
       match children[1] with
       | Text _ -> ()

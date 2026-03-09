@@ -100,6 +100,15 @@ let matchAllTests = testList "FuzzyFinder.matchAll" [
     // At minimum, getStatus should rank highly
     results |> Array.exists (fun r -> r.Candidate = "getStatus") |> Expect.isTrue "getStatus matches"
   }
+  test "matchAll sets OriginalIndex to position in input array" {
+    let candidates = [| "zebra"; "apple"; "mango" |]
+    let results = FuzzyFinder.matchAll "" candidates
+    results |> Expect.hasLength "all 3" 3
+    let byName (n: string) = results |> Array.find (fun r -> r.Candidate = n)
+    (byName "zebra").OriginalIndex |> Expect.equal "zebra idx=0" 0
+    (byName "apple").OriginalIndex |> Expect.equal "apple idx=1" 1
+    (byName "mango").OriginalIndex |> Expect.equal "mango idx=2" 2
+  }
 ]
 
 // ── FuzzyFinder widget model ─────────────────────────────────────────────────
@@ -143,6 +152,16 @@ let widgetTests = testList "FuzzyFinder.widget" [
     let m = FuzzyFinder.init id [| "apple" |]
     let m' = m |> FuzzyFinder.update (FFQueryChanged "zzz")
     FuzzyFinder.selectedItem m' |> Expect.isNone "no match"
+  }
+  test "selectedItem returns correct item for duplicate display strings" {
+    // Both items stringify to "Alice" — must use OriginalIndex not string reverse-lookup
+    let items = [| (1, "Alice"); (2, "Alice") |]
+    let m = FuzzyFinder.init (fun (_, name) -> name) items
+    // SelectedIdx = 0 → first Alice (id = 1)
+    FuzzyFinder.selectedItem m |> Option.map fst |> Expect.equal "first Alice" (Some 1)
+    // Move to idx 1 → second Alice (id = 2)
+    let m' = { m with SelectedIdx = 1 }
+    FuzzyFinder.selectedItem m' |> Option.map fst |> Expect.equal "second Alice" (Some 2)
   }
   test "FFSetItems replaces items and reruns query" {
     let m = FuzzyFinder.init id [| "a" |]

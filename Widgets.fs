@@ -589,13 +589,14 @@ type VirtualListModel<'row> = {
 type VirtualListConfig<'row> = {
   /// Color to highlight the selected row background. Default: Blue.
   SelectionColor: Color
-  /// Render function for each row.
-  RenderRow: 'row -> Element
+  /// Render function for each row. The bool is true when the row is selected.
+  RenderRow: bool -> 'row -> Element
 }
 
 module VirtualList =
-  /// Default config with Blue selection and %A renderer. Specify RenderRow for typed usage.
-  let create (renderRow: 'row -> Element) : VirtualListConfig<'row> =
+  /// Create a config with Blue selection and a typed render function.
+  /// The render function receives `selected: bool` allowing custom selection styling.
+  let create (renderRow: bool -> 'row -> Element) : VirtualListConfig<'row> =
     { SelectionColor = Color.Named(BaseColor.Blue, Intensity.Normal)
       RenderRow = renderRow }
 
@@ -684,6 +685,7 @@ module VirtualList =
 
   /// Render only the visible window of items, padded to ViewportHeight with empty rows.
   /// Always produces exactly ViewportHeight rows to prevent layout shifts.
+  /// The RenderRow function receives the selection state as a bool.
   let view (config: VirtualListConfig<'row>) (m: VirtualListModel<'row>) : Element =
     let total = m.Items.Length
     let vh = max 1 m.ViewportHeight
@@ -696,13 +698,23 @@ module VirtualList =
       let rows =
         [ for vi in 0 .. visibleCount - 1 do
             let i = offset + vi
-            let rowEl = config.RenderRow m.Items[i]
-            match m.SelectedIndex with
-            | Some si when si = i -> yield rowEl |> El.bg config.SelectionColor
-            | _ -> yield rowEl
+            let selected = m.SelectedIndex = Some i
+            yield config.RenderRow selected m.Items[i]
           for _ in visibleCount .. vh - 1 do
             yield El.empty ]
       El.column rows
+
+  /// Handle keyboard events for navigation: Up/Down/PageUp/PageDown/Home/End.
+  /// Returns the updated model, or the same model for unhandled events.
+  let handleEvent (event: TerminalEvent) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+    match event with
+    | KeyPressed(Key.Up,       _) -> selectPrev m
+    | KeyPressed(Key.Down,     _) -> selectNext m
+    | KeyPressed(Key.PageUp,   _) -> pageUp m
+    | KeyPressed(Key.PageDown, _) -> pageDown m
+    | KeyPressed(Key.Home,     _) -> selectFirst m
+    | KeyPressed(Key.End,      _) -> selectLast m
+    | _ -> m
 
 // ── VirtualTable ─────────────────────────────────────────────────────────────
 // Combines the column-header/separator structure of Table with VirtualList's
@@ -741,7 +753,7 @@ module VirtualTable =
       |> El.row
     let listCfg : VirtualListConfig<'a> = {
       SelectionColor = config.SelectionColor
-      RenderRow = fun row ->
+      RenderRow = fun _selected row ->
         config.Columns
         |> List.map (fun col -> col.Render row |> El.width col.Width)
         |> El.row
@@ -1165,6 +1177,7 @@ type TextFormModel = {
 
 type TextFormMsg =
   | TFKey        of Key
+  | TFEvent      of TerminalEvent
   | TFTabNext
   | TFTabPrev
   | TFSubmit
@@ -1240,6 +1253,19 @@ module TextForm =
             | false -> r
             | true  ->
                 let updated = { r with Input = TextInput.handleKey key r.Input }
+                match r.Touched with
+                | true  -> runValidation updated
+                | false -> updated)
+        { m with Rows = rows }, false
+
+    | TFEvent event ->
+        let idx = m.FocusIndex
+        let rows =
+          m.Rows |> List.mapi (fun i r ->
+            match i = idx with
+            | false -> r
+            | true  ->
+                let updated = { r with Input = TextInput.handleEvent event r.Input }
                 match r.Touched with
                 | true  -> runValidation updated
                 | false -> updated)
@@ -1419,18 +1445,19 @@ module TextEditor =
            yield! m.Lines.[r2+1..] |]
       replaceLines newLines r1 c1 m
 
-  let private isWordChar (c: char) = System.Char.IsLetterOrDigit c || c = '_'
+  let private isWordChar (text: string) (i: int) =
+    text.[i] = '_' || System.Char.IsLetterOrDigit(text, i)
 
   let private prevWordBoundary (line: string) (col: int) =
     let mutable i = col - 1
-    while i > 0 && not (isWordChar line.[i-1]) do i <- i - 1
-    while i > 0 && isWordChar line.[i-1]      do i <- i - 1
+    while i > 0 && not (isWordChar line (i-1)) do i <- i - 1
+    while i > 0 && isWordChar line (i-1)      do i <- i - 1
     i
 
   let private nextWordBoundary (line: string) (col: int) =
     let mutable i = col
-    while i < line.Length && not (isWordChar line.[i]) do i <- i + 1
-    while i < line.Length && isWordChar line.[i]       do i <- i + 1
+    while i < line.Length && not (isWordChar line i) do i <- i + 1
+    while i < line.Length && isWordChar line i       do i <- i + 1
     i
 
   /// Update the model with a TextEditorMsg.
@@ -1460,8 +1487,8 @@ module TextEditor =
              yield! m'.Lines.[m'.Row+1..] |]
         replaceLines newLines (m'.Row + 1) 0 m'
     | TEBackspace ->
-      match m'.SelectionAnchor with
-      | Some _ -> m'  // already deleted in m' above
+      match m.SelectionAnchor with
+      | Some _ -> m'  // selection was deleted in the pre-pass; don't also delete the char before cursor
       | None ->
         match m'.Col, m'.Row with
         | 0, 0 -> m'
@@ -1480,8 +1507,8 @@ module TextEditor =
           let newLines = m'.Lines |> Array.mapi (fun i l -> if i = r then newLine else l)
           replaceLines newLines r (col - 1) m'
     | TEDelete ->
-      match m'.SelectionAnchor with
-      | Some _ -> m'
+      match m.SelectionAnchor with
+      | Some _ -> m'  // selection was deleted in the pre-pass; don't also delete the char at cursor
       | None ->
         let line = m'.Lines.[m'.Row]
         if m'.Col = line.Length then
@@ -1602,6 +1629,8 @@ type FuzzyMatch = {
   Score          : float
   /// Zero-based indices of matched characters in Candidate (for highlighting).
   MatchPositions : int array
+  /// Index of this item in the original Items array. Use for correct lookup with duplicate display strings.
+  OriginalIndex  : int
 }
 
 /// Message type for the FuzzyFinder widget.
@@ -1673,12 +1702,15 @@ module FuzzyFinder =
       match sc with 0 -> compare a.Candidate.Length b.Candidate.Length | _ -> sc)
 
   /// Run the scoring pass over all candidates synchronously.
+  /// OriginalIndex in each result reflects the index of the candidate in the input array.
   let matchAll (query: string) (candidates: string array) : FuzzyMatch array =
     candidates
-    |> Array.choose (fun c ->
+    |> Array.mapi (fun origIdx c ->
       match scoreMatch query c with
       | None -> None
-      | Some (score, positions) -> Some { Candidate = c; Score = score; MatchPositions = positions })
+      | Some (score, positions) ->
+        Some { Candidate = c; Score = score; MatchPositions = positions; OriginalIndex = origIdx })
+    |> Array.choose id
     |> sortMatches
 
   // ── Widget API ────────────────────────────────────────────────────────────
@@ -1690,12 +1722,15 @@ module FuzzyFinder =
     { Items = items; ToString = toString; Query = ""; Results = results; SelectedIdx = 0 }
 
   /// Get the currently selected item, if any.
+  /// Uses the OriginalIndex stored in the result for correct lookup even with duplicate display strings.
   let selectedItem (m: FuzzyFinderModel<'item>) : 'item option =
     match m.Results.Length, m.SelectedIdx with
     | 0, _ -> None
     | _, i  ->
-      let candidate = m.Results.[i].Candidate
-      m.Items |> Array.tryFind (fun item -> m.ToString item = candidate)
+      let origIdx = m.Results.[i].OriginalIndex
+      match origIdx >= 0 && origIdx < m.Items.Length with
+      | true  -> Some m.Items.[origIdx]
+      | false -> None
 
   let private requery (query: string) (m: FuzzyFinderModel<'item>) =
     let candidates = m.Items |> Array.map m.ToString
@@ -1713,7 +1748,7 @@ module FuzzyFinder =
       let m' = { m with Items = items }
       requery m.Query m'
 
-  /// Create a Cmd that runs a fuzzy search asynchronously.
+  /// Create a Cmd that runs a fuzzy search asynchronously on a thread pool thread.
   /// Wraps result in `toMsg` so it can be dispatched to your TEA program.
   let searchAsync
       (query    : string)
@@ -1722,7 +1757,7 @@ module FuzzyFinder =
       (toMsg    : FuzzyMatch array -> 'msg)
       : Cmd<'msg> =
     Cmd.ofAsync (fun dispatch -> async {
-      do! Async.Sleep 0  // yield to scheduler
+      do! Async.SwitchToThreadPool()
       let candidates = items |> Array.map toString
       let results = matchAll query candidates
       dispatch (toMsg results)
