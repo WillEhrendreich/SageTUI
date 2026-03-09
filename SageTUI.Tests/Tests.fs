@@ -2905,20 +2905,19 @@ let reconcileTests = testList "Reconcile" [
   testCase "reconcile detects entering elements" <| fun () ->
     let oldKeys = Map.empty
     let newKeys = Map.ofList [ "k1", Empty ]
-    let (entering, _, _) = Reconcile.reconcile oldKeys newKeys
+    let (entering, _) = Reconcile.reconcile oldKeys newKeys
     entering.Length |> Expect.equal "1 entering" 1
   testCase "reconcile detects exiting elements" <| fun () ->
     let oldKeys = Map.ofList [ "k1", Empty ]
     let newKeys = Map.empty
-    let (_, exiting, _) = Reconcile.reconcile oldKeys newKeys
+    let (_, exiting) = Reconcile.reconcile oldKeys newKeys
     exiting.Length |> Expect.equal "1 exiting" 1
   testCase "reconcile detects staying elements" <| fun () ->
     let oldKeys = Map.ofList [ "k1", Empty ]
     let newKeys = Map.ofList [ "k1", Empty ]
-    let (entering, exiting, staying) = Reconcile.reconcile oldKeys newKeys
+    let (entering, exiting) = Reconcile.reconcile oldKeys newKeys
     entering.Length |> Expect.equal "0 entering" 0
     exiting.Length |> Expect.equal "0 exiting" 0
-    staying.Length |> Expect.equal "1 staying" 1
 ]
 
 let durationTests = testList "TransitionDuration" [
@@ -2940,27 +2939,27 @@ let activeTransitionTests = testList "ActiveTransition" [
   testCase "progress at start = 0" <| fun () ->
     let at = { Key = "k"; Transition = ColorMorph 200<ms>; StartMs = 1000L
                DurationMs = 200; Easing = Ease.linear
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; Payload = NoPayload }
     ActiveTransition.progress 1000L at |> Expect.equal "start" 0.0
   testCase "progress at end = 1" <| fun () ->
     let at = { Key = "k"; Transition = ColorMorph 200<ms>; StartMs = 1000L
                DurationMs = 200; Easing = Ease.linear
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; Payload = NoPayload }
     ActiveTransition.progress 1200L at |> Expect.equal "end" 1.0
   testCase "isDone at end" <| fun () ->
     let at = { Key = "k"; Transition = Fade 200<ms>; StartMs = 1000L
                DurationMs = 200; Easing = Ease.linear
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; Payload = NoPayload }
     ActiveTransition.isDone 1200L at |> Expect.isTrue "done"
   testCase "not done before end" <| fun () ->
     let at = { Key = "k"; Transition = Fade 200<ms>; StartMs = 1000L
                DurationMs = 200; Easing = Ease.linear
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; Payload = NoPayload }
     ActiveTransition.isDone 1100L at |> Expect.isFalse "not done"
   testCase "easing applied to progress" <| fun () ->
     let at = { Key = "k"; Transition = ColorMorph 200<ms>; StartMs = 0L
                DurationMs = 200; Easing = Ease.quadOut
-               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; DissolveOrder = None }
+               SnapshotBefore = [||]; Area = { X = 0; Y = 0; Width = 10; Height = 5 }; Payload = NoPayload }
     ActiveTransition.progress 100L at |> Expect.equal "quadOut at 0.5" 0.75
 ]
 

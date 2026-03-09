@@ -152,6 +152,24 @@ module El =
     Padded({ Top = v; Right = h; Bottom = v; Left = h }, elem)
 
   /// Tag an element with a key for transition tracking.
+  ///
+  /// <remarks>
+  /// Layout modifiers such as <c>El.width</c>, <c>El.height</c>, and <c>El.fill</c>
+  /// must be applied <b>after</b> <c>El.keyed</c>, not inside the wrapped element,
+  /// if they need to influence the parent layout pass.
+  ///
+  /// The keyed wrapper is transparent to the parent layout — it passes through to
+  /// its child but does not itself carry a size constraint. Only a Constrained wrapper
+  /// on the outside of the keyed element is visible to Row/Column layout.
+  ///
+  /// <code>
+  /// // ✅ Correct — width 40 is visible to the parent Row
+  /// El.keyed "panel" content |> El.width 40
+  ///
+  /// // ⚠️ Width 40 is invisible to the parent Row; "panel" acts as implicit Fill
+  /// El.keyed "panel" (content |> El.width 40)
+  /// </code>
+  /// </remarks>
   let keyed key elem =
     Keyed(key, Fade 0<ms>, Fade 0<ms>, elem)
 

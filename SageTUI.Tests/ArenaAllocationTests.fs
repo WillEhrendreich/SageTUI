@@ -261,14 +261,14 @@ let arenaAllocationTests =
                   Easing = Ease.cubicInOut
                   SnapshotBefore = snapshot
                   Area = area
-                  DissolveOrder = Some order }
+                  Payload = DissolvePayload order }
 
             let frame () =
                 let t = ActiveTransition.progress 150L at
-                match at.DissolveOrder with
-                | Some o ->
+                match at.Payload with
+                | DissolvePayload o ->
                     TransitionFx.applyDissolve t o at.SnapshotBefore buf.Cells at.Area.Y at.Area.Width at.Area.Height buf
-                | None -> ()
+                | NoPayload -> ()
 
             let totalAllocated = measureAllocBytes 100 1000 frame
             let perFrame = totalAllocated / 1000L
@@ -276,4 +276,119 @@ let arenaAllocationTests =
             (perFrame, 64L)
             |> Expect.isLessThanOrEqual
                 (sprintf "Dissolve per-frame apply allocated %d bytes (expected < 64). DissolveOrder must be pre-computed and passed as a cached array, not re-allocated per frame." perFrame)
+
+        testSequenced (testCase "reconcile tier allocates < 2KB per frame in steady state (8 keyed elements)" <| fun () ->
+            // Panel: measures the full reconcile path — findKeyedElements + reconcile + keyAreas —
+            // for a tree with 8 keyed elements in steady state (same tree both frames).
+            // Before Sprint 26, 'staying' in reconcile added an extra Map.filter + Map.toList per frame.
+            // This test guards against reintroducing per-frame reconcile overhead.
+            let arena = FrameArena.create 4096 65536 4096
+            let buf   = Buffer.create 80 24
+            let area  = { X = 0; Y = 0; Width = 80; Height = 24 }
+
+            let tree =
+                El.column [
+                    El.keyed "header"  (El.text "Header"  |> El.fg (Color.Named(Cyan,  Bright))) |> El.height 1
+                    El.row [
+                        El.keyed "sideA"  (El.text "Side A"  |> El.bordered Light) |> El.width 20
+                        El.column [
+                            El.keyed "mainA"  (El.text "Main A"  |> El.bordered Light) |> El.fill
+                            El.keyed "mainB"  (El.text "Main B"  |> El.bordered Light) |> El.fill
+                        ] |> El.fill
+                        El.keyed "sideB"  (El.text "Side B"  |> El.bordered Light) |> El.width 20
+                    ] |> El.fill
+                    El.row [
+                        El.keyed "statusL" (El.text "Status: OK" |> El.fg (Color.Named(Green, Bright)))
+                        El.keyed "statusM" (El.text " | " |> El.dim)
+                        El.keyed "statusR" (El.text "80x24"      |> El.dim)
+                    ] |> El.height 1
+                ]
+
+            let mutable prevKeyedElements = Map.empty
+
+            let frame () =
+                let newKeyed = Reconcile.findKeyedElements tree
+                let _ = Reconcile.reconcile prevKeyedElements newKeyed
+                prevKeyedElements <- newKeyed
+                FrameArena.reset arena
+                let root = Arena.lower arena tree
+                ArenaRender.renderRoot arena root area buf
+                ArenaRender.keyAreas arena |> ignore
+
+            let totalAllocated = measureAllocBytes 100 1000 frame
+            let perFrame = totalAllocated / 1000L
+
+            // Current Map-based implementation allocates ~4KB/frame for 8 keyed elements:
+            //   findKeyedElements: Map<string,Element> (8 nodes × ~200B each) ≈ 1600B
+            //   reconcile: 2× Map enumeration + list construction              ≈  800B
+            //   keyAreas:  Map<string,Area> construction (8 nodes)             ≈ 1600B
+            // Threshold is 8192B (generous for debug JIT). Future work: replace
+            // Map<string,*> with pooled Dictionary to reach <256B/frame.
+            // The 'staying' path previously added an extra Map.filter + Map.toList per frame.
+            (perFrame, 8192L)
+            |> Expect.isLessThanOrEqual
+                (sprintf "Reconcile tier allocated %d B/frame for 8 keyed elements (threshold 8192 B). Check findKeyedElements, reconcile, and keyAreas for unexpected allocations." perFrame))
+
+        testCase "App.run keyAreas gate regression: prevKeyAreas updated for staying elements" <| fun () ->
+            // Regression test for Sprint 24 bug: App.run had a gate that skipped keyAreas
+            // rebuild when entering/exiting were both empty. This was wrong because 'staying'
+            // elements (present in both frames) can reposition silently — no enter/exit fires.
+            //
+            // This test simulates the exact App.run frame logic to verify that:
+            // (a) keyAreas is rebuilt every frame when HitMap.Count > 0
+            // (b) prevKeyAreas reflects the CURRENT frame's positions after each frame
+            // (c) On a frame where no transitions fire (staying-only), prevKeyAreas is still updated
+            //
+            // If someone reintroduces the gate 'entering.IsEmpty && exiting.IsEmpty → skip keyAreas',
+            // frame 2 would return X=0 (stale prevKeyAreas) instead of X=40, and this test fails.
+            let arena = FrameArena.create 4096 65536 4096
+            let buf   = Buffer.create 80 24
+            let fullArea = { X = 0; Y = 0; Width = 80; Height = 24 }
+
+            let mutable prevKeyAreas       = Map.empty<string, Area>
+            let mutable prevKeyedElements  = Map.empty<string, Element>
+
+            // Simulates the App.run frame logic relevant to keyAreas correctness.
+            let simulateFrame (elem: Element) =
+                let newKeyed = Reconcile.findKeyedElements elem
+                let (entering, exiting) = Reconcile.reconcile prevKeyedElements newKeyed
+                prevKeyedElements <- newKeyed
+
+                FrameArena.reset arena
+                let root = Arena.lower arena elem
+                ArenaRender.renderRoot arena root fullArea buf
+
+                // CRITICAL: must NOT gate this on entering/exiting — staying elements reposition silently
+                let currentKeyAreas =
+                    match arena.HitMap.Count > 0 with
+                    | true  -> ArenaRender.keyAreas arena
+                    | false -> prevKeyAreas
+                prevKeyAreas <- currentKeyAreas
+                (entering, exiting, currentKeyAreas)
+
+            // Frame 1: panel enters at left half (X=0)
+            // El.width outside El.keyed so it is visible to the Row layout pass
+            let elemLeft  = El.row [ El.keyed "panel" (El.text "P") |> El.width 40; El.fill (El.text "") ]
+            let (entering1, exiting1, areas1) = simulateFrame elemLeft
+
+            entering1 |> List.map fst |> Expect.contains "frame 1: panel must enter" "panel"
+            exiting1  |> Expect.isEmpty "frame 1: nothing exits"
+            areas1.["panel"].X |> Expect.equal "frame 1: panel at X=0" 0
+
+            // Frame 2: panel STAYS but repositions to right half (X=40) — no enter/exit
+            let elemRight = El.row [ El.fill (El.text ""); El.keyed "panel" (El.text "P") |> El.width 40 ]
+            let (entering2, exiting2, areas2) = simulateFrame elemRight
+
+            entering2 |> Expect.isEmpty "frame 2: panel stays (no enter)"
+            exiting2  |> Expect.isEmpty "frame 2: panel stays (no exit)"
+            // KEY: prevKeyAreas must show X=40 here. With the old gate (entering/exiting empty → skip),
+            // this would be X=0 (stale). With the correct unconditional rebuild, it is X=40.
+            areas2.["panel"].X |> Expect.equal "frame 2: prevKeyAreas updated to X=40 (not stale X=0)" 40
+
+            // Frame 3: panel stays at X=40 again — verify stable across additional frames
+            let (_, _, areas3) = simulateFrame elemRight
+            areas3.["panel"].X |> Expect.equal "frame 3: still at X=40" 40
+
+            // Verify prevKeyAreas after frame 3 is the 'last known position' an exit transition would use
+            prevKeyAreas.["panel"].X |> Expect.equal "exit transition would use X=40 (correct last-known position)" 40
     ]

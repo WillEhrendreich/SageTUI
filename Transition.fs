@@ -1,5 +1,13 @@
 namespace SageTUI
 
+/// Kind-specific runtime payload for an active transition.
+/// DissolvePayload carries the pre-computed Fisher-Yates shuffle order (computed
+/// once at transition start) so applyDissolve never allocates per-frame.
+/// NoPayload is used for all other transition kinds that need no extra data.
+type TransitionPayload =
+  | DissolvePayload of order: int array
+  | NoPayload
+
 type ActiveTransition = {
   Key: string
   Transition: Transition
@@ -8,10 +16,10 @@ type ActiveTransition = {
   Easing: Easing
   SnapshotBefore: PackedCell array
   Area: Area
-  /// Pre-computed shuffle order for Dissolve transitions — computed once when the
-  /// transition starts to avoid allocating a fresh int array every frame.
-  /// None for all other transition kinds.
-  DissolveOrder: int array option
+  /// Kind-specific payload. For Dissolve transitions: DissolvePayload with the
+  /// pre-computed shuffle order (avoids per-frame O(N) array allocation).
+  /// For all other kinds: NoPayload.
+  Payload: TransitionPayload
 }
 
 module ActiveTransition =
@@ -145,8 +153,4 @@ module Reconcile =
       oldKeys
       |> Map.filter (fun k _ -> not (Map.containsKey k newKeys))
       |> Map.toList
-    let staying =
-      newKeys
-      |> Map.filter (fun k _ -> Map.containsKey k oldKeys)
-      |> Map.toList
-    (entering, exiting, staying)
+    (entering, exiting)

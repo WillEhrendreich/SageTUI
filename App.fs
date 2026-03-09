@@ -209,7 +209,7 @@ module App =
         // keyed areas; enters use the current frame's keyed areas after rendering.
         let nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         let newKeyed = Reconcile.findKeyedElements elem
-        let (entering, exiting, _) = Reconcile.reconcile prevKeyedElements newKeyed
+        let (entering, exiting) = Reconcile.reconcile prevKeyedElements newKeyed
 
         // Capture snapshots for exiting elements and start exit transitions
         for (key, oldElem) in exiting do
@@ -225,10 +225,10 @@ module App =
                 Easing = Ease.cubicInOut
                 SnapshotBefore = snapshot
                 Area = area
-                DissolveOrder =
+                Payload =
                   match exitTransition with
-                  | Dissolve _ -> Some (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (area.Width * area.Height))
-                  | _ -> None }
+                  | Dissolve _ -> DissolvePayload (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (area.Width * area.Height))
+                  | _ -> NoPayload }
               :: activeTransitions
           | _ -> ()
 
@@ -276,10 +276,10 @@ module App =
                 Easing = Ease.cubicInOut
                 SnapshotBefore = Array.create (width * height) PackedCell.empty
                 Area = transArea
-                DissolveOrder =
+                Payload =
                   match enterTransition with
-                  | Dissolve _ -> Some (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (transArea.Width * transArea.Height))
-                  | _ -> None }
+                  | Dissolve _ -> DissolvePayload (TransitionFx.fisherYatesShuffle (key.GetHashCode()) (transArea.Width * transArea.Height))
+                  | _ -> NoPayload }
               :: activeTransitions
           | _ -> ()
 
@@ -294,14 +294,14 @@ module App =
           | Wipe(dir, _) ->
             TransitionFx.applyWipe t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
           | Dissolve _ ->
-            // DissolveOrder is always Some for Dissolve — computed once at transition start.
-            // None here means a construction site failed to initialise it — fail loudly
+            // Payload is always DissolvePayload for Dissolve — computed once at transition start.
+            // NoPayload here means a construction site failed to initialise it — fail loudly
             // instead of silently re-enabling the eliminated per-frame O(N) allocation.
-            let order =
-              match at.DissolveOrder with
-              | Some o -> o
-              | None -> failwith "DissolveOrder must be Some for Dissolve transitions — invariant violated at construction site"
-            TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+            match at.Payload with
+            | DissolvePayload order ->
+              TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+            | NoPayload ->
+              failwith (sprintf "Key '%s': Dissolve transition has NoPayload — DissolvePayload must be set at construction site" at.Key)
           | _ -> ())
 
         // Remove completed transitions

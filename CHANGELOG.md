@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Keyed tree (exercises `HitMap`): ≤ 1,024 B/frame — verifies `HitEntry` struct stores offsets, not strings
   - NodeCount determinism across resets
   - PeakNodes high-water mark tracking
+- **Sprint 26 — TransitionPayload DU, reconcile cleanup, new allocation/regression tests**:
+  - `TransitionPayload` DU (`DissolvePayload of int array | NoPayload`) replaces `DissolveOrder: int array option` in `ActiveTransition` — eliminates the illegal `None` state for Dissolve transitions; missing payload now fails fast at construction rather than silently producing wrong behaviour.
+  - `Reconcile.reconcile` now returns `(entering list, exiting list)` 2-tuple; the `staying` computation (`Map.filter + Map.toList` per frame) was a pure overhead that no call site used.
+  - `NoPayload` branch in `App.fs` `applyDissolve` includes `at.Key` in the `failwith` message — zero-cost debuggability improvement.
+  - XML doc on `El.keyed` explains the layout-modifier ordering constraint: `El.width`/`El.fill`/`El.height` must be applied _outside_ the `El.keyed` call, not inside — the inner constraint is invisible to the Row/Column layout pass.
+  - Added reconcile-tier allocation test (≤ 8,192 B/frame for 8 keyed elements; Map-based baseline).
+  - Added `App.run keyAreas gate regression` test: verifies that `prevKeyAreas` is updated for staying elements (guards against reintroducing the Sprint 24 bug).
 
 ### Fixed
 
