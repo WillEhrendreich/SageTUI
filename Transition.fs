@@ -125,7 +125,7 @@ module TransitionDuration =
     match t with
     | Fade d | ColorMorph d | Dissolve d | Grow d -> int d
     | Wipe(_, d) | SlideIn(_, d) -> int d
-    | Sequence ts -> ts |> List.sumBy get
+    | Sequence ts -> ts |> List.sumBy get  // Duration is pre-computed for when Sequence is implemented; returns 0 for empty list
     | Custom _ -> 200
 
 module Reconcile =

@@ -302,7 +302,7 @@ module El =
     ResponsiveH breakpoints
 
   /// Memoize a view function: returns cached Element when input equals the previous input.
-  /// are compared correctly. Declare at module level to persist the cache across renders.
+  /// Declare at module level to persist the cache across renders.
   /// Use at module level: `let lazyCounter = El.lazy' Counter.view`
   ///
   /// Requires `'a : equality` — if your model type contains functions or [<NoEquality>] types,
