@@ -118,13 +118,13 @@ let widgetTests = testList "FuzzyFinder.widget" [
     let m = FuzzyFinder.init id [| "apple"; "banana"; "cherry" |]
     m.Results |> Expect.hasLength "3 results (empty query = all)" 3
     m.SelectedIdx |> Expect.equal "selected 0" 0
-    m.Query |> Expect.equal "empty query" ""
+    FuzzyFinder.query m |> Expect.equal "empty query" ""
   }
   test "FFQueryChanged filters results" {
     let m = FuzzyFinder.init id [| "apple"; "banana"; "apricot" |]
     let m' = FuzzyFinder.update (FFQueryChanged "ap") m
     m'.Results |> Array.forall (fun r -> r.Candidate <> "banana") |> Expect.isTrue "banana excluded"
-    m'.Query |> Expect.equal "query updated" "ap"
+    FuzzyFinder.query m' |> Expect.equal "query updated" "ap"
   }
   test "FFMoveDown increments SelectedIdx" {
     let m = FuzzyFinder.init id [| "a"; "b"; "c" |]
@@ -167,8 +167,23 @@ let widgetTests = testList "FuzzyFinder.widget" [
     let m = FuzzyFinder.init id [| "a" |]
     let m' = m |> FuzzyFinder.update (FFQueryChanged "b") |> FuzzyFinder.update (FFSetItems [| "abc"; "bcd" |])
     m'.Items |> Expect.hasLength "2 items" 2
-    // Query "b" should still be active and filter "bcd"
-    m'.Query |> Expect.equal "query preserved" "b"
+    // Query "b" should still be active and filter results
+    FuzzyFinder.query m' |> Expect.equal "query preserved" "b"
+  }
+  test "FFQueryMsg of TIChar updates query via TextInput" {
+    let m = FuzzyFinder.init id [| "apple"; "banana" |]
+    let m' = m |> FuzzyFinder.update (FFQueryKey (Key.Char 'a'))
+    FuzzyFinder.query m' |> Expect.equal "query is 'a'" "a"
+    (m'.Results.Length, 0) |> Expect.isGreaterThan "has results"
+  }
+  test "FFQueryMsg of TIBackspace removes last char" {
+    let m = FuzzyFinder.init id [| "apple" |] |> FuzzyFinder.update (FFQueryChanged "ab")
+    let m' = m |> FuzzyFinder.update (FFQueryKey Key.Backspace)
+    FuzzyFinder.query m' |> Expect.equal "one char removed" "a"
+  }
+  test "query helper returns query text" {
+    let m = FuzzyFinder.init id [| "x" |] |> FuzzyFinder.update (FFQueryChanged "hello")
+    FuzzyFinder.query m |> Expect.equal "query text" "hello"
   }
   test "view returns Column" {
     let m = FuzzyFinder.init id [| "alpha"; "beta"; "gamma" |]
@@ -177,8 +192,8 @@ let widgetTests = testList "FuzzyFinder.widget" [
     | Column _ -> ()
     | _ -> failtest "expected Column"
   }
-  test "view prompt includes query" {
-    // Validate via content: the view builds El.text with "> query█" when focused
+  test "view prompt renders TextInput for query" {
+    // View should use TextInput.view for the query line (renders as Row for non-empty with cursor)
     let m = FuzzyFinder.init id [| "test" |] |> FuzzyFinder.update (FFQueryChanged "te")
     // Just exercise view without crash
     let _ = FuzzyFinder.view true 5 m

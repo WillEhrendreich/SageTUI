@@ -264,6 +264,45 @@ let selectionTests = testList "TextEditor.Selection" [
     m'.Col |> Expect.equal "at word end" 5
     m'.SelectionAnchor |> Expect.equal "anchor at (0,0)" (Some (0, 0))
   }
+  // ── boundary / degenerate-anchor tests ───────────────────────────────────
+  test "TESelectLeft at Col=0 does not change model (no degenerate anchor)" {
+    let m = mk "hello"  // cursor at Col=0
+    let m' = TextEditor.update TESelectLeft m
+    m'.Col |> Expect.equal "col unchanged" 0
+    m'.SelectionAnchor |> Expect.equal "no anchor created" None
+  }
+  test "TESelectRight at end-of-line does not change model (no degenerate anchor)" {
+    let m = { mk "hello" with Col = 5 }  // cursor at end
+    let m' = TextEditor.update TESelectRight m
+    m'.Col |> Expect.equal "col unchanged" 5
+    m'.SelectionAnchor |> Expect.equal "no anchor created" None
+  }
+  test "TESelectUp at row 0 does not change model (no degenerate anchor)" {
+    let m = mk "hello"  // single-line, already at row 0
+    let m' = TextEditor.update TESelectUp m
+    m'.Row |> Expect.equal "row unchanged" 0
+    m'.SelectionAnchor |> Expect.equal "no anchor created" None
+  }
+  test "TESelectDown at last row does not change model (no degenerate anchor)" {
+    let m = { mk "abc\ndef" with Row = 1; Col = 0 }  // already at last row
+    let m' = TextEditor.update TESelectDown m
+    m'.Row |> Expect.equal "row unchanged" 1
+    m'.SelectionAnchor |> Expect.equal "no anchor created" None
+  }
+  test "TESelectAll then Backspace deletes all content" {
+    let m = mk "hello world"
+    let m' = m |> TextEditor.update TESelectAll |> TextEditor.update TEBackspace
+    m'.Lines |> Expect.hasLength "one empty line" 1
+    m'.Lines.[0] |> Expect.equal "empty" ""
+    m'.Col |> Expect.equal "col at 0" 0
+    m'.SelectionAnchor |> Expect.equal "anchor cleared" None
+  }
+  test "TESelectAll then InsertChar replaces all content" {
+    let m = mk "hello world"
+    let m' = m |> TextEditor.update TESelectAll |> TextEditor.update (TEInsertChar 'X')
+    m'.Lines |> Expect.hasLength "one line" 1
+    m'.Lines.[0] |> Expect.equal "replaced" "X"
+  }
 ]
 
 // ── paste ────────────────────────────────────────────────────────────────────
@@ -312,7 +351,58 @@ let scrollTests = testList "TextEditor.Scroll" [
   }
 ]
 
-// ── view ─────────────────────────────────────────────────────────────────────
+// ── undo / redo ──────────────────────────────────────────────────────────────
+
+let undoTests = testList "TextEditor.Undo" [
+  test "updateWithUndo commits text edit to history" {
+    let um = TextEditor.withUndo { mk "hello" with Col = 5 }
+    let um' = TextEditor.updateWithUndo (TEInsertChar '!') um
+    um' |> Undoable.canUndo |> Expect.isTrue "can undo after edit"
+    um'.Present.Lines.[0] |> Expect.equal "text changed" "hello!"
+  }
+  test "updateWithUndo TEUndo restores previous state" {
+    let um = TextEditor.withUndo { mk "hello" with Col = 5 }
+    let um' = TextEditor.updateWithUndo (TEInsertChar '!') um
+    let um'' = TextEditor.updateWithUndo TEUndo um'
+    um''.Present.Lines.[0] |> Expect.equal "restored" "hello"
+    um'' |> Undoable.canUndo |> Expect.isFalse "no more history"
+  }
+  test "updateWithUndo TERedo restores undone state" {
+    let um = TextEditor.withUndo { mk "hello" with Col = 5 }
+    let um' = um |> TextEditor.updateWithUndo (TEInsertChar '!')
+                 |> TextEditor.updateWithUndo TEUndo
+    let um'' = TextEditor.updateWithUndo TERedo um'
+    um''.Present.Lines.[0] |> Expect.equal "redone" "hello!"
+  }
+  test "updateWithUndo does not commit cursor moves" {
+    let um = TextEditor.withUndo (mk "hello")
+    let um' = TextEditor.updateWithUndo TEMoveRight um
+    um' |> Undoable.canUndo |> Expect.isFalse "cursor move is not undoable"
+  }
+  test "updateWithUndo does not commit selection messages" {
+    let um = TextEditor.withUndo (mk "hello")
+    let um' = TextEditor.updateWithUndo TESelectAll um
+    um' |> Undoable.canUndo |> Expect.isFalse "selection is not undoable"
+  }
+  test "updateWithUndo TEBackspace commits and is undoable" {
+    let um = TextEditor.withUndo { mk "hello" with Col = 5 }
+    let um' = TextEditor.updateWithUndo TEBackspace um
+    um'.Present.Lines.[0] |> Expect.equal "char deleted" "hell"
+    um' |> Undoable.canUndo |> Expect.isTrue "backspace is undoable"
+    let um'' = TextEditor.updateWithUndo TEUndo um'
+    um''.Present.Lines.[0] |> Expect.equal "restored" "hello"
+  }
+  test "updateWithUndo multiline: newline commit and undo" {
+    let um = TextEditor.withUndo { mk "ab" with Col = 1 }
+    let um' = TextEditor.updateWithUndo TENewline um
+    um'.Present.Lines |> Expect.hasLength "two lines" 2
+    let um'' = TextEditor.updateWithUndo TEUndo um'
+    um''.Present.Lines |> Expect.hasLength "one line restored" 1
+    um''.Present.Lines.[0] |> Expect.equal "restored" "ab"
+  }
+]
+
+
 
 let viewTests = testList "TextEditor.view" [
   test "view returns Column element" {
@@ -415,6 +505,7 @@ let allTextEditorTests = testList "TextEditor" [
   pasteTests
   setContentTests
   scrollTests
+  undoTests
   viewTests
 ]
 

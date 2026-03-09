@@ -388,10 +388,17 @@ module FocusRing =
     | n -> { ring with Index = (ring.Index - 1 + n) % n }
 
   /// Return true if the given item is the currently focused one.
+  /// Note: requires structural equality on 'a. For [<NoEquality>] types (e.g. Element),
+  /// use isFocusedAt instead.
   let isFocused (item: 'a) (ring: FocusRing<'a>) =
     match current ring with
     | Some c -> c = item
     | None -> false
+
+  /// Return true if the item at the given 0-based index is currently focused.
+  /// Safe for any type, including [<NoEquality>] types like Element.
+  let isFocusedAt (index: int) (ring: FocusRing<'a>) =
+    ring.Items.Length > 0 && ring.Index = index
 
 /// Dropdown selector widget with open/closed state and keyboard navigation.
 type SelectModel<'a> = {
@@ -591,6 +598,8 @@ type VirtualListConfig<'row> = {
   SelectionColor: Color
   /// Render function for each row. The bool is true when the row is selected.
   RenderRow: bool -> 'row -> Element
+  /// When true, renders a scrollbar column to the right of the list. Default: false.
+  ShowScrollbar: bool
 }
 
 module VirtualList =
@@ -598,7 +607,8 @@ module VirtualList =
   /// The render function receives `selected: bool` allowing custom selection styling.
   let create (renderRow: bool -> 'row -> Element) : VirtualListConfig<'row> =
     { SelectionColor = Color.Named(BaseColor.Blue, Intensity.Normal)
-      RenderRow = renderRow }
+      RenderRow = renderRow
+      ShowScrollbar = false }
 
   /// Create a VirtualList model from an array of items, with nothing selected.
   let ofArray (viewportHeight: int) (items: 'row array) : VirtualListModel<'row> =
@@ -683,26 +693,50 @@ module VirtualList =
       | true -> Some m.Items[i]
       | false -> None
 
+  /// Update the ViewportHeight, clamping to at least 1. Calls ensureVisible to keep selection on screen.
+  let resize (newHeight: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+    { m with ViewportHeight = max 1 newHeight } |> ensureVisible
+
+  // Render a scrollbar column for the given scroll state.
+  let private renderScrollbar (total: int) (vh: int) (offset: int) : Element =
+    if total <= vh then
+      El.column [ for _ in 0 .. vh - 1 -> El.text " " ]
+    else
+      let thumbHeight = max 1 (vh * vh / total)
+      let maxOffset = total - vh
+      let thumbTop = (offset * (vh - thumbHeight)) / (max 1 maxOffset)
+      El.column [
+        for i in 0 .. vh - 1 ->
+          match i >= thumbTop && i < thumbTop + thumbHeight with
+          | true  -> El.text "▓"
+          | false -> El.text "│" ]
+
   /// Render only the visible window of items, padded to ViewportHeight with empty rows.
   /// Always produces exactly ViewportHeight rows to prevent layout shifts.
   /// The RenderRow function receives the selection state as a bool.
   let view (config: VirtualListConfig<'row>) (m: VirtualListModel<'row>) : Element =
     let total = m.Items.Length
     let vh = max 1 m.ViewportHeight
-    match total with
-    | 0 ->
-      El.column [ for _ in 1 .. vh -> El.empty ]
-    | _ ->
-      let offset = max 0 (min m.ScrollOffset (total - 1))
-      let visibleCount = min vh (total - offset)
-      let rows =
-        [ for vi in 0 .. visibleCount - 1 do
-            let i = offset + vi
-            let selected = m.SelectedIndex = Some i
-            yield config.RenderRow selected m.Items[i]
-          for _ in visibleCount .. vh - 1 do
-            yield El.empty ]
-      El.column rows
+    let listContent =
+      match total with
+      | 0 ->
+        El.column [ for _ in 1 .. vh -> El.empty ]
+      | _ ->
+        let offset = max 0 (min m.ScrollOffset (total - 1))
+        let visibleCount = min vh (total - offset)
+        let rows =
+          [ for vi in 0 .. visibleCount - 1 do
+              let i = offset + vi
+              let selected = m.SelectedIndex = Some i
+              yield config.RenderRow selected m.Items[i]
+            for _ in visibleCount .. vh - 1 do
+              yield El.empty ]
+        El.column rows
+    match config.ShowScrollbar with
+    | false -> listContent
+    | true  ->
+      let offset = max 0 m.ScrollOffset
+      El.row [ listContent; renderScrollbar total vh offset ]
 
   /// Handle keyboard events for navigation: Up/Down/PageUp/PageDown/Home/End.
   /// Returns the updated model, or the same model for unhandled events.
@@ -753,6 +787,7 @@ module VirtualTable =
       |> El.row
     let listCfg : VirtualListConfig<'a> = {
       SelectionColor = config.SelectionColor
+      ShowScrollbar = false
       RenderRow = fun selected row ->
         let cols =
           config.Columns
@@ -1376,6 +1411,8 @@ type TextEditorMsg =
   | TESelectLeft    | TESelectRight | TESelectUp | TESelectDown
   | TESelectWordLeft | TESelectWordRight
   | TESelectAll
+  | TEUndo
+  | TERedo
   | TECut
   | TECopy
   | TEPaste of string
@@ -1550,24 +1587,40 @@ module TextEditor =
       if m'.Col = line.Length && m'.Row < m'.Lines.Length - 1 then setPos (m'.Row + 1) 0 m'
       else setPos m'.Row (nextWordBoundary line m'.Col) m'
     | TESelectLeft ->
-      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
       let newCol = max 0 (m'.Col - 1)
-      { m' with Col = newCol; SelectionAnchor = Some anchor }
+      // Intentionally clamped at line start (no cross-line selection).
+      // If there's no movement, don't create a degenerate anchor.
+      match newCol = m'.Col with
+      | true -> m'
+      | false ->
+        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+        { m' with Col = newCol; SelectionAnchor = Some anchor }
     | TESelectRight ->
-      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
       let line = currentLine m'
       let newCol = min line.Length (m'.Col + 1)
-      { m' with Col = newCol; SelectionAnchor = Some anchor }
+      // Intentionally clamped at line end (no cross-line selection).
+      // If there's no movement, don't create a degenerate anchor.
+      match newCol = m'.Col with
+      | true -> m'
+      | false ->
+        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+        { m' with Col = newCol; SelectionAnchor = Some anchor }
     | TESelectUp ->
-      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
       let newRow = max 0 (m'.Row - 1)
       let newCol = clampCol m'.Lines.[newRow] m'.Col
-      { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
+      match (newRow, newCol) = (m'.Row, m'.Col) with
+      | true -> m'
+      | false ->
+        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+        { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
     | TESelectDown ->
-      let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
       let newRow = min (m'.Lines.Length - 1) (m'.Row + 1)
       let newCol = clampCol m'.Lines.[newRow] m'.Col
-      { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
+      match (newRow, newCol) = (m'.Row, m'.Col) with
+      | true -> m'
+      | false ->
+        let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
+        { m' with Row = newRow; Col = newCol; SelectionAnchor = Some anchor }
     | TESelectWordLeft ->
       let anchor = match m'.SelectionAnchor with Some a -> a | None -> (m'.Row, m'.Col)
       let newRow, newCol =
@@ -1588,6 +1641,8 @@ module TextEditor =
       { m' with Row = lastRow; Col = m'.Lines.[lastRow].Length; SelectionAnchor = Some (0, 0) }
     | TECopy  -> m'  // caller reads selectedText m
     | TECut   -> m'  // selection already deleted above
+    | TEUndo  -> m'  // no-op in stateless update; use TextEditor.updateWithUndo for history
+    | TERedo  -> m'  // no-op in stateless update; use TextEditor.updateWithUndo for history
     | TEPaste text ->
       let toInsert = text.Split('\n')
       match toInsert with
@@ -1617,6 +1672,28 @@ module TextEditor =
       elif m.Row >= m.ScrollTop + height then m.Row - height + 1
       else m.ScrollTop
     { m with ScrollTop = top }
+
+  /// Wrap a TextEditorModel in an UndoableModel for undo/redo support.
+  let withUndo (m: TextEditorModel) : UndoableModel<TextEditorModel> = Undoable.init m
+
+  /// Update an UndoableModel<TextEditorModel> with a TextEditorMsg.
+  /// Text-modifying messages (Insert, Delete, Backspace, Newline, Paste, Cut, SetContent)
+  /// are committed to the undo stack. TEUndo and TERedo navigate the history.
+  /// Selection and cursor messages update Present without touching the stack.
+  let updateWithUndo (msg: TextEditorMsg) (um: UndoableModel<TextEditorModel>) : UndoableModel<TextEditorModel> =
+    match msg with
+    | TEUndo -> Undoable.undo um
+    | TERedo -> Undoable.redo um
+    | _ ->
+      let newPresent = update msg um.Present
+      let isTextModifying =
+        match msg with
+        | TEInsertChar _ | TENewline | TEBackspace | TEDelete
+        | TEPaste _ | TESetContent _ | TECut -> true
+        | _ -> false
+      match isTextModifying with
+      | true  -> Undoable.commit newPresent um
+      | false -> { um with Present = newPresent }
 
   /// Render the editor into an Element.
   /// `focused` controls cursor visibility; `height` is the number of visible rows.
@@ -1689,6 +1766,8 @@ type FuzzyMatch = {
 /// Message type for the FuzzyFinder widget.
 type FuzzyFinderMsg<'item> =
   | FFQueryChanged of string
+  | FFQueryKey of Key
+  | FFQueryEvent of TerminalEvent
   | FFMoveUp
   | FFMoveDown
   | FFSelect
@@ -1700,7 +1779,8 @@ type FuzzyFinderModel<'item> = {
   Items       : 'item array
   /// Function to get the string to match against for each item.
   ToString    : 'item -> string
-  Query       : string
+  /// The query input model (supports cursor, selection, word movement).
+  QueryInput  : TextInputModel
   Results     : FuzzyMatch array
   SelectedIdx : int
 }
@@ -1779,7 +1859,10 @@ module FuzzyFinder =
   let init (toString: 'item -> string) (items: 'item array) : FuzzyFinderModel<'item> =
     let candidates = items |> Array.map toString
     let results = matchAll "" candidates |> Array.mapi (fun i m -> { m with Score = float -i })
-    { Items = items; ToString = toString; Query = ""; Results = results; SelectedIdx = 0 }
+    { Items = items; ToString = toString; QueryInput = TextInput.empty; Results = results; SelectedIdx = 0 }
+
+  /// Get the current query text.
+  let query (m: FuzzyFinderModel<'item>) : string = m.QueryInput.Text
 
   /// Get the currently selected item, if any.
   /// Uses the OriginalIndex stored in the result for correct lookup even with duplicate display strings.
@@ -1792,21 +1875,27 @@ module FuzzyFinder =
       | true  -> Some m.Items.[origIdx]
       | false -> None
 
-  let private requery (query: string) (m: FuzzyFinderModel<'item>) =
+  let private requery (queryInput: TextInputModel) (m: FuzzyFinderModel<'item>) =
     let candidates = m.Items |> Array.map m.ToString
-    let results = matchAll query candidates
-    { m with Query = query; Results = results; SelectedIdx = 0 }
+    let results = matchAll queryInput.Text candidates
+    { m with QueryInput = queryInput; Results = results; SelectedIdx = 0 }
 
   /// Update the FuzzyFinder model.
   let update (msg: FuzzyFinderMsg<'item>) (m: FuzzyFinderModel<'item>) : FuzzyFinderModel<'item> =
     match msg with
-    | FFQueryChanged q -> requery q m
+    | FFQueryChanged q -> requery (TextInput.ofString q) m
+    | FFQueryKey key   ->
+      let qi' = TextInput.handleKey key m.QueryInput
+      requery qi' m
+    | FFQueryEvent evt ->
+      let qi' = TextInput.handleEvent evt m.QueryInput
+      requery qi' m
     | FFMoveUp         -> { m with SelectedIdx = max 0 (m.SelectedIdx - 1) }
     | FFMoveDown       -> { m with SelectedIdx = min (m.Results.Length - 1) (m.SelectedIdx + 1) }
     | FFSelect | FFCancel -> m  // caller handles side effects
     | FFSetItems items ->
       let m' = { m with Items = items }
-      requery m.Query m'
+      requery m'.QueryInput m'
 
   /// Create a Cmd that runs a fuzzy search asynchronously on a thread pool thread.
   /// Wraps result in `toMsg` so it can be dispatched to your TEA program.
@@ -1827,9 +1916,9 @@ module FuzzyFinder =
   /// `focused` drives cursor display on the query input.
   /// `height` is the number of result rows to show.
   let view (focused: bool) (height: int) (m: FuzzyFinderModel<'item>) : Element =
-    let promptInput =
-      let cursor = match focused with true -> "█" | false -> ""
-      El.text ("> " + m.Query + cursor)
+    let promptPrefix = El.text "> "
+    let queryEl = TextInput.view focused m.QueryInput
+    let promptInput = El.row [ promptPrefix; queryEl ]
     let resultRows =
       m.Results
       |> Array.truncate height

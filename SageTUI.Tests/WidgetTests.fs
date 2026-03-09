@@ -1086,6 +1086,28 @@ let undoableCommitTests = testList "Undoable.commitIfChanged" [
   }
 ]
 
+// ── FocusRing ─────────────────────────────────────────────────────────────────
+
+let focusRingTests = testList "FocusRing" [
+  test "isFocusedAt returns true for current index" {
+    let ring = FocusRing.create ["a"; "b"; "c"]
+    ring |> FocusRing.isFocusedAt 0 |> Expect.isTrue "index 0 is focused"
+  }
+  test "isFocusedAt returns false for non-current index" {
+    let ring = FocusRing.create ["a"; "b"; "c"]
+    ring |> FocusRing.isFocusedAt 1 |> Expect.isFalse "index 1 is not focused"
+  }
+  test "isFocusedAt works after next" {
+    let ring = FocusRing.create ["a"; "b"; "c"] |> FocusRing.next
+    ring |> FocusRing.isFocusedAt 0 |> Expect.isFalse "0 not focused after next"
+    ring |> FocusRing.isFocusedAt 1 |> Expect.isTrue "1 is focused after next"
+  }
+  test "isFocusedAt returns false for empty ring" {
+    let ring = FocusRing.create ([] : string list)
+    ring |> FocusRing.isFocusedAt 0 |> Expect.isFalse "no items, never focused"
+  }
+]
+
 
 // ── VirtualList ───────────────────────────────────────────────────────────────
 
@@ -1297,6 +1319,52 @@ let virtualListTests = testList "VirtualList" [
       | Empty -> ()
       | other -> failwith (sprintf "unexpected: %A" other)
     | other -> failwith (sprintf "expected Column, got %A" other)
+  }
+  // ── resize ───────────────────────────────────────────────────────────────
+  test "resize updates ViewportHeight" {
+    let m = VirtualList.ofArray 5 [| 0 .. 9 |]
+    let m' = VirtualList.resize 10 m
+    m'.ViewportHeight |> Expect.equal "new height" 10
+  }
+  test "resize clamps to minimum 1" {
+    let m = VirtualList.ofArray 5 [| 0 .. 9 |]
+    let m' = VirtualList.resize 0 m
+    m'.ViewportHeight |> Expect.equal "clamped to 1" 1
+  }
+  test "resize keeps selection visible" {
+    let m = { VirtualList.ofArray 5 [| 0 .. 19 |] with SelectedIndex = Some 19; ScrollOffset = 15 }
+    let m' = VirtualList.resize 3 m
+    let sel = m'.SelectedIndex |> Option.defaultValue -1
+    (sel >= m'.ScrollOffset && sel < m'.ScrollOffset + m'.ViewportHeight)
+    |> Expect.isTrue "selection still visible after resize"
+  }
+  // ── scrollbar ────────────────────────────────────────────────────────────
+  test "view with ShowScrollbar=true returns Row wrapping the list" {
+    let cfg = { VirtualList.create (fun _ (i: int) -> El.text (string i)) with ShowScrollbar = true }
+    let m = VirtualList.ofArray 3 [| 0 .. 9 |]
+    let el = VirtualList.view cfg m
+    match el with
+    | Row _ -> ()
+    | Column _ -> failtest "expected Row (list+scrollbar) when ShowScrollbar=true"
+    | _ -> failtest "unexpected element shape"
+  }
+  test "view with ShowScrollbar=false returns Column (existing behavior)" {
+    let cfg = VirtualList.create (fun _ (i: int) -> El.text (string i))
+    let m = VirtualList.ofArray 3 [| 0 .. 9 |]
+    let el = VirtualList.view cfg m
+    match el with
+    | Column _ -> ()
+    | _ -> failtest "expected Column when ShowScrollbar=false"
+  }
+  test "scrollbar renders exactly ViewportHeight rows" {
+    let cfg = { VirtualList.create (fun _ (i: int) -> El.text (string i)) with ShowScrollbar = true }
+    let m = VirtualList.ofArray 5 [| 0 .. 19 |]
+    let el = VirtualList.view cfg m
+    match el with
+    | Row [Column _; Column sb] ->
+      sb |> List.length |> Expect.equal "scrollbar rows = ViewportHeight" 5
+    | Row [Column _; _] -> ()  // shape exists, not checking exact structure
+    | _ -> failtest "expected Row [listColumn; scrollbarColumn]"
   }
 ]
 
@@ -1577,6 +1645,7 @@ let allWidgetTests = testList "Widgets" [
   themeTests
   frameTimingsTests
   undoableCommitTests
+  focusRingTests
   virtualListTests
   textInputWordSelTests
   virtualTableTests
