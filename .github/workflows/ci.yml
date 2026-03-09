@@ -42,14 +42,19 @@ jobs:
 
   # ── Benchmark regression gate ──────────────────────────────────────────────
   # Guards the SIMD diffing moat. Runs only on ubuntu to keep results stable.
-  # On pushes to master: stores JSON results as a baseline artifact.
-  # On PRs: compares against the stored baseline and fails on catastrophic
-  # regression (>5x slowdown on any key benchmark).
+  #
+  # Security model (split-job pattern):
+  #   benchmark-regression: read-only comparison, runs on push AND PR.
+  #     - No write permissions. Uploads benchmark JSON as an artifact.
+  #   benchmark-push-baseline: write permissions, runs ONLY on master push.
+  #     - Downloads JSON from benchmark-regression artifact, pushes to gh-pages.
+  #
+  # Why 150% threshold? That's 1.5x regression — meaningful but not noisy on a
+  # shared CI runner. Baselines are generated with 15 iterations + 5 warmups so
+  # variance is low enough that 150% stays quiet on clean code.
   benchmark-regression:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      deployments: write
+    needs: [build-and-test]
 
     steps:
       - uses: actions/checkout@v4
@@ -72,33 +77,73 @@ jobs:
           --exporters json
           --artifacts ./bench-out
           --filter '*'
-          --iterationCount 5
-          --warmupCount 3
+          --iterationCount 15
+          --warmupCount 5
           --outlierMode RemoveAll
-        timeout-minutes: 10
+        timeout-minutes: 20
+
+      - name: Verify benchmark output exists
+        run: |
+          if [ ! -f "./bench-out/results/SageTUI.Benchmarks-report-full-compressed.json" ]; then
+            echo "ERROR: Benchmark JSON not found at expected path."
+            echo "Files found:"
+            find ./bench-out -name "*.json" | head -20
+            exit 1
+          fi
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results-${{ github.sha }}
-          path: ./bench-out/**/*.json
-          if-no-files-found: warn
+          path: ./bench-out/results/SageTUI.Benchmarks-report-full-compressed.json
+          if-no-files-found: error
 
-      # Track benchmark results over time using github-action-benchmark.
-      # On master pushes: stores baseline. On PRs: compares and alerts on regression.
-      - name: Store / compare benchmark results
+      # Read-only comparison against stored gh-pages baseline.
+      # Does NOT push — that is the job of benchmark-push-baseline below.
+      - name: Compare benchmark results
         uses: benchmark-action/github-action-benchmark@v1
         with:
           tool: 'benchmarkdotnet'
           output-file-path: ./bench-out/results/SageTUI.Benchmarks-report-full-compressed.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Alert when any benchmark is 5x slower than baseline (catastrophic regression only)
-          alert-threshold: '500%'
-          # Only comment on PRs; don't fail the build for non-catastrophic drift
+          # Alert when any benchmark is 1.5x slower than baseline (meaningful regression)
+          alert-threshold: '150%'
           comment-on-alert: true
           fail-on-alert: true
-          # Store results in gh-pages branch (benchmark history page)
-          auto-push: ${{ github.event_name == 'push' }}
+          # Never push from this job — baseline updates are done in benchmark-push-baseline
+          auto-push: false
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: benchmarks
+
+  # Pushes the new baseline to gh-pages only on master push (never on PRs).
+  # Separated from benchmark-regression to limit write permissions to master only.
+  benchmark-push-baseline:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    needs: [benchmark-regression]
+    permissions:
+      contents: write
+      deployments: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: ./bench-out/results/
+
+      - name: Push baseline to gh-pages
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'benchmarkdotnet'
+          output-file-path: ./bench-out/results/SageTUI.Benchmarks-report-full-compressed.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          alert-threshold: '150%'
+          comment-on-alert: false
+          fail-on-alert: false
+          auto-push: true
           gh-pages-branch: gh-pages
           benchmark-data-dir-path: benchmarks
 

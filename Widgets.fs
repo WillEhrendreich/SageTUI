@@ -366,6 +366,42 @@ module TextInput =
     | false ->
       view focused model
 
+  /// Render the text input with cursor and selection colors from a `Theme`.
+  /// When focused, cursor is painted with `theme.Primary`; selected text with `theme.Accent`.
+  /// Delegates to the standard view for all layout logic — only color is affected.
+  let viewThemed (theme: Theme) (focused: bool) (model: TextInputModel) : Element =
+    match focused with
+    | false -> view false model
+    | true  ->
+      let text = model.Text
+      match selectionRange model with
+      | Some (lo, hi) ->
+        let before = match lo > 0              with true -> text.[..lo - 1]       | false -> ""
+        let sel    = text.[lo..hi - 1]
+        let after  = match hi < text.Length    with true -> text.[hi..]           | false -> ""
+        El.row [
+          if before <> "" then yield El.text before
+          yield El.text sel |> El.fg theme.Accent |> El.reverse
+          if after  <> "" then yield El.text after ]
+      | None ->
+        let cur  = match model.Cursor < text.Length with true -> string text.[model.Cursor] | false -> " "
+        let pre  = match model.Cursor > 0            with true -> text.[..model.Cursor - 1] | false -> ""
+        let post = match model.Cursor + 1 < text.Length with true -> text.[model.Cursor + 1..] | false -> ""
+        El.row [
+          if pre  <> "" then yield El.text pre
+          yield El.text cur |> El.fg theme.Primary |> El.reverse
+          if post <> "" then yield El.text post ]
+
+  /// Render with a themed placeholder and themed cursor/selection.
+  let viewWithPlaceholderThemed (theme: Theme) (placeholder: string) (focused: bool) (model: TextInputModel) : Element =
+    match model.Text.Length = 0 with
+    | true ->
+      match focused with
+      | true  -> El.row [ El.text placeholder |> El.fg theme.TextDim; El.text " " |> El.fg theme.Primary |> El.reverse ]
+      | false -> El.text placeholder |> El.fg theme.TextDim
+    | false ->
+      viewThemed theme focused model
+
 /// Tracks which item in a list currently has keyboard focus, with wrap-around navigation.
 type FocusRing<'a> = {
   Items: 'a list
@@ -515,6 +551,13 @@ module ProgressBar =
       El.row [ barEl; El.text label ]
     | false -> barEl
 
+  /// Apply a `Theme` to a `ProgressBarConfig` — sets `FilledColor` to `theme.Primary`
+  /// and `EmptyColor` to `theme.TextDim`. All other config fields are preserved.
+  let withTheme (theme: Theme) (config: ProgressBarConfig) : ProgressBarConfig =
+    { config with
+        FilledColor = Some theme.Primary
+        EmptyColor  = Some theme.TextDim }
+
 /// Configuration for the Tabs widget.
 type TabsConfig<'a> = {
   Items: 'a list
@@ -546,7 +589,12 @@ module Tabs =
         | None -> el)
     |> El.row
 
-/// A single column definition for the Table widget.
+  /// Apply a `Theme` to a `TabsConfig` — sets `ActiveColor` to `theme.Primary`
+  /// and `InactiveColor` to `theme.TextDim`. All other fields are preserved.
+  let withTheme (theme: Theme) (config: TabsConfig<'a>) : TabsConfig<'a> =
+    { config with
+        ActiveColor   = Some theme.Primary
+        InactiveColor = Some theme.TextDim }
 type TableColumn<'a> = {
   /// Column header text.
   Header: string
@@ -618,6 +666,11 @@ module VirtualList =
     { SelectionColor = Color.Named(BaseColor.Blue, Intensity.Normal)
       RenderRow = renderRow
       ShowScrollbar = false }
+
+  /// Apply a `Theme` to a `VirtualListConfig` — sets `SelectionColor` to `theme.Primary`.
+  /// All other config fields are preserved.
+  let withTheme (theme: Theme) (config: VirtualListConfig<'row>) : VirtualListConfig<'row> =
+    { config with SelectionColor = theme.Primary }
 
   /// Create a VirtualList model from an array of items, with nothing selected.
   let ofArray (viewportHeight: int) (items: 'row array) : VirtualListModel<'row> =
@@ -891,6 +944,16 @@ module Checkbox =
     let el = El.text (sprintf "%s %s" box label)
     match focused with true -> el |> El.bold | false -> el
 
+  /// Render a themed checkbox. The box character is colored using `theme.Accent` when
+  /// checked, `theme.TextDim` when unchecked. Label uses `theme.TextFg`. Bold when focused.
+  let viewThemed (theme: Theme) (label: string) (focused: bool) (checked': bool) : Element =
+    let boxStr = match checked' with true -> "[✓]" | false -> "[ ]"
+    let boxColor = match checked' with true -> theme.Accent | false -> theme.TextDim
+    let boxEl  = El.text boxStr |> El.fg boxColor
+    let lblEl  = El.text (sprintf " %s" label) |> El.fg theme.TextFg
+    let el = El.row [ boxEl; lblEl ]
+    match focused with true -> el |> El.bold | false -> el
+
 module Toggle =
   /// Toggle a boolean value. Convenience helper equivalent to `not value`.
   let toggle (value: bool) = not value
@@ -899,6 +962,15 @@ module Toggle =
   let view (onLabel: string) (offLabel: string) (focused: bool) (value: bool) =
     let display = match value with true -> sprintf "● %s" onLabel | false -> sprintf "○ %s" offLabel
     let el = El.text display
+    match focused with true -> el |> El.bold | false -> el
+
+  /// Render a themed toggle. `●` (on) uses `theme.Success`; `○` (off) uses `theme.TextDim`. Bold when focused.
+  let viewThemed (theme: Theme) (onLabel: string) (offLabel: string) (focused: bool) (value: bool) : Element =
+    let symbol, color, lbl =
+      match value with
+      | true  -> "●", theme.Success, onLabel
+      | false -> "○", theme.TextDim, offLabel
+    let el = El.row [ El.text symbol |> El.fg color; El.text (sprintf " %s" lbl) |> El.fg theme.TextFg ]
     match focused with true -> el |> El.bold | false -> el
 
 /// State model for the RadioGroup widget.
@@ -1158,12 +1230,15 @@ module TreeView =
 
 /// Type-safe field identifier. Prevents mixing up field IDs with arbitrary strings.
 /// Use `FieldId "myField"` at the definition site; compare with structural equality.
-[<Struct>]
+/// NOTE: Prefer `FieldId.create` over the `FieldId` constructor directly when the value
+/// originates from external input — `create` validates against null.
 type FieldId = FieldId of string
 
 module FieldId =
-  /// Construct a `FieldId` from a raw string.
-  let create (s: string) = FieldId s
+  /// Construct a `FieldId` from a raw string. Raises ArgumentNullException for null input.
+  let create (s: string) =
+    if s = null then invalidArg (nameof s) "FieldId cannot wrap null"
+    FieldId s
   /// Extract the raw string value from a `FieldId`.
   let value (FieldId s) = s
 

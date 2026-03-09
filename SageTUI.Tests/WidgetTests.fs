@@ -1089,6 +1089,159 @@ let themeTests = testList "Theme" [
   }
 ]
 
+// ── Themed widget integration tests ──────────────────────────────────────────
+
+let themedWidgetTests = testList "ThemedWidgets" [
+
+  // ── ProgressBar.withTheme ──────────────────────────────────────────────────
+
+  test "ProgressBar.withTheme applies primary as FilledColor" {
+    let config = ProgressBar.defaults |> ProgressBar.withTheme Theme.nord
+    config.FilledColor |> Expect.equal "FilledColor = nord Primary" (Some Theme.nord.Primary)
+  }
+
+  test "ProgressBar.withTheme applies TextDim as EmptyColor" {
+    let config = ProgressBar.defaults |> ProgressBar.withTheme Theme.nord
+    config.EmptyColor |> Expect.equal "EmptyColor = nord TextDim" (Some Theme.nord.TextDim)
+  }
+
+  test "ProgressBar.withTheme preserves other fields" {
+    let orig = { ProgressBar.defaults with Width = 40; ShowLabel = false; FilledChar = '#'; EmptyChar = '-' }
+    let themed = orig |> ProgressBar.withTheme Theme.dark
+    themed.Width     |> Expect.equal "Width preserved"     40
+    themed.ShowLabel |> Expect.equal "ShowLabel preserved" false
+    themed.FilledChar |> Expect.equal "FilledChar preserved" '#'
+    themed.EmptyChar  |> Expect.equal "EmptyChar preserved"  '-'
+  }
+
+  test "ProgressBar.withTheme view renders without error" {
+    let elem =
+      { ProgressBar.defaults with Percent = 0.6 }
+      |> ProgressBar.withTheme Theme.catppuccin
+      |> ProgressBar.view
+    // Element has [<NoEquality>]; verify it renders as a non-empty Row or Text
+    match elem with
+    | Empty -> failwith "expected non-empty element"
+    | _ -> ()
+  }
+
+  // ── TextInput.viewThemed ──────────────────────────────────────────────────
+
+  test "TextInput.viewThemed unfocused returns Text element" {
+    let m = { TextInput.empty with Text = "hello"; Cursor = 5 }
+    // Unfocused view just returns the text, no selection/cursor markup
+    match TextInput.viewThemed Theme.dark false m with
+    | Text(t, _) -> t |> Expect.equal "text content" "hello"
+    | other      -> failwithf "expected Text, got %A" other
+  }
+
+  test "TextInput.viewThemed focused returns a Row element" {
+    let m = { TextInput.empty with Text = "hi"; Cursor = 0 }
+    match TextInput.viewThemed Theme.nord true m with
+    | Row _ -> ()
+    | other -> failwithf "expected Row, got %A" other
+  }
+
+  test "TextInput.viewWithPlaceholderThemed empty unfocused shows placeholder" {
+    let m = TextInput.empty
+    match TextInput.viewWithPlaceholderThemed Theme.dark "Type here" false m with
+    | Styled(_, inner) ->
+      match inner with
+      | Text(t, _) -> t |> Expect.equal "placeholder text" "Type here"
+      | _ -> ()
+    | Text(t, _) -> t |> Expect.equal "placeholder text" "Type here"
+    | _ -> ()
+  }
+
+  test "TextInput.viewWithPlaceholderThemed non-empty is a Row when focused" {
+    let m = { TextInput.empty with Text = "abc"; Cursor = 1 }
+    // Non-empty → delegates to viewThemed → should be a Row (cursor markup)
+    match TextInput.viewWithPlaceholderThemed Theme.dark "placeholder" true m with
+    | Row _ -> ()
+    | other -> failwithf "expected Row (from viewThemed), got %A" other
+  }
+
+  // ── Checkbox.viewThemed ──────────────────────────────────────────────────
+
+  test "Checkbox.viewThemed checked unfocused returns a Row" {
+    match Checkbox.viewThemed Theme.nord "Accept" false true with
+    | Row _ -> ()
+    | other -> failwithf "expected Row, got %A" other
+  }
+
+  test "Checkbox.viewThemed unfocused is not Styled (no bold wrapper)" {
+    let el = Checkbox.viewThemed Theme.dark "Label" false false
+    match el with
+    | Styled _ -> failwith "unfocused should not be wrapped in Styled"
+    | _ -> ()
+  }
+
+  test "Checkbox.viewThemed focused is Styled (bold wrapper)" {
+    let el = Checkbox.viewThemed Theme.dark "Label" true false
+    match el with
+    | Styled _ -> ()
+    | _ -> failwith "focused should be wrapped in Styled (bold)"
+  }
+
+  // ── Toggle.viewThemed ──────────────────────────────────────────────────────
+
+  test "Toggle.viewThemed unfocused is not Styled (no bold wrapper)" {
+    let el = Toggle.viewThemed Theme.dark "On" "Off" false true
+    match el with
+    | Styled _ -> failwith "unfocused should not be wrapped in Styled"
+    | _ -> ()
+  }
+
+  test "Toggle.viewThemed focused is Styled (bold wrapper)" {
+    let el = Toggle.viewThemed Theme.dark "On" "Off" true false
+    match el with
+    | Styled _ -> ()
+    | _ -> failwith "focused should be wrapped in Styled (bold)"
+  }
+
+  test "Toggle.viewThemed returns a Row element (unfocused)" {
+    match Toggle.viewThemed Theme.nord "Yes" "No" false true with
+    | Row _ -> ()
+    | other -> failwithf "expected Row, got %A" other
+  }
+
+  // ── Tabs.withTheme ────────────────────────────────────────────────────────
+
+  test "Tabs.withTheme applies primary as ActiveColor" {
+    let cfg = { Items = ["A";"B"]; ActiveIndex = 0; ToString = id; ActiveColor = None; InactiveColor = None }
+    let themed = Tabs.withTheme Theme.dracula cfg
+    themed.ActiveColor |> Expect.equal "ActiveColor = dracula Primary" (Some Theme.dracula.Primary)
+  }
+
+  test "Tabs.withTheme applies TextDim as InactiveColor" {
+    let cfg = { Items = ["A";"B"]; ActiveIndex = 0; ToString = id; ActiveColor = None; InactiveColor = None }
+    let themed = Tabs.withTheme Theme.dracula cfg
+    themed.InactiveColor |> Expect.equal "InactiveColor = dracula TextDim" (Some Theme.dracula.TextDim)
+  }
+
+  test "Tabs.withTheme preserves items and activeIndex" {
+    let cfg = { Items = [1;2;3]; ActiveIndex = 2; ToString = string; ActiveColor = None; InactiveColor = None }
+    let themed = Tabs.withTheme Theme.catppuccin cfg
+    themed.Items       |> Expect.equal "Items preserved"       [1;2;3]
+    themed.ActiveIndex |> Expect.equal "ActiveIndex preserved" 2
+  }
+
+  // ── VirtualList.withTheme ─────────────────────────────────────────────────
+
+  test "VirtualList.withTheme sets SelectionColor to theme Primary" {
+    let cfg = VirtualList.create (fun _ row -> El.text (string row))
+    let themed = VirtualList.withTheme Theme.nord cfg
+    themed.SelectionColor |> Expect.equal "SelectionColor = nord Primary" Theme.nord.Primary
+  }
+
+  test "VirtualList.withTheme preserves RenderRow and ShowScrollbar" {
+    let renderFn = fun _ (row: string) -> El.text row
+    let cfg = { (VirtualList.create renderFn) with ShowScrollbar = true }
+    let themed = VirtualList.withTheme Theme.dark cfg
+    themed.ShowScrollbar |> Expect.equal "ShowScrollbar preserved" true
+  }
+]
+
 
 
 // ── Sub.frameTimings / FrameTimingsSub ───────────────────────────────────────
@@ -1809,6 +1962,7 @@ let allWidgetTests = testList "Widgets" [
   formTests
   textFormTests
   themeTests
+  themedWidgetTests
   frameTimingsTests
   undoableCommitTests
   focusRingTests
