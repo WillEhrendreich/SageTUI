@@ -1,4 +1,4 @@
-﻿module FuzzyFinderTests
+module FuzzyFinderTests
 
 open Expecto
 open Expecto.Flip
@@ -172,7 +172,7 @@ let widgetTests = testList "FuzzyFinder.widget" [
   }
   test "FFQueryMsg of TIChar updates query via TextInput" {
     let m = FuzzyFinder.init id [| "apple"; "banana" |]
-    let m' = m |> FuzzyFinder.update (FFQueryKey (Key.Char 'a'))
+    let m' = m |> FuzzyFinder.update (FFQueryKey (Key.Char (System.Text.Rune 'a')))
     FuzzyFinder.query m' |> Expect.equal "query is 'a'" "a"
     (m'.Results.Length, 0) |> Expect.isGreaterThan "has results"
   }

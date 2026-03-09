@@ -20,8 +20,8 @@ type PendingDelay<'msg> = {
 /// Example:
 ///   let app =
 ///     TestHarness.init 80 24 myProgram
-///     |> TestHarness.pressKey (Key.Char 'j')
-///     |> TestHarness.pressKey (Key.Char 'j')
+///     |> TestHarness.pressKey (Key.Char (Text.Rune 'j'))
+///     |> TestHarness.pressKey (Key.Char (Text.Rune 'j'))
 ///   app.Model |> Expect.equal "should be 2" 2
 ///   TestHarness.render app |> Expect.stringContains "rendered" "Count: 2"
 type TestApp<'model, 'msg> = {
@@ -166,7 +166,7 @@ module TestHarness =
 
   /// Simulate typing a string character by character (no modifiers).
   let typeText (text: string) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
-    text |> Seq.fold (fun app c -> pressKey (Key.Char c) app) app
+    text |> Seq.fold (fun app c -> pressKey (Key.Char (Text.Rune c)) app) app
 
   /// Directly send a message to Update, bypassing subscriptions.
   /// Useful for testing Update logic in isolation.
@@ -378,7 +378,7 @@ module TestHarness =
 ///
 /// Usage at the end of a pipeline:
 ///   TestHarness.init 80 24 myProgram
-///   |> TestHarness.pressKey (Key.Char 'j')
+///   |> TestHarness.pressKey (Key.Char (Text.Rune 'j'))
 ///   |> TuiExpect.viewContains "shows item 2" "Item 2"
 ///   |> TuiExpect.modelSatisfies "selection advanced" (fun m -> m.Selected = 1)
 module TuiExpect =

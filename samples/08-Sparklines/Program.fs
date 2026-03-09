@@ -309,17 +309,17 @@ let view model =
 
 let keyBindings =
   Keys.bind [
-    Key.Char 'q', Quit
-    Key.Char 'Q', Quit
+    Key.Char (System.Text.Rune 'q'), Quit
+    Key.Char (System.Text.Rune 'Q'), Quit
     Key.Escape, Quit
-    Key.Char 'p', TogglePause
-    Key.Char 'P', TogglePause
-    Key.Char 'r', Reset
-    Key.Char 'R', Reset
-    Key.Char '1', Focus 0
-    Key.Char '2', Focus 1
-    Key.Char '3', Focus 2
-    Key.Char '4', Focus 3
+    Key.Char (System.Text.Rune 'p'), TogglePause
+    Key.Char (System.Text.Rune 'P'), TogglePause
+    Key.Char (System.Text.Rune 'r'), Reset
+    Key.Char (System.Text.Rune 'R'), Reset
+    Key.Char (System.Text.Rune '1'), Focus 0
+    Key.Char (System.Text.Rune '2'), Focus 1
+    Key.Char (System.Text.Rune '3'), Focus 2
+    Key.Char (System.Text.Rune '4'), Focus 3
   ]
 
 let subscribe _model =

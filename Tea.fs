@@ -188,11 +188,11 @@ module Keys =
   /// Unmatched keys are ignored.
   ///
   /// IMPORTANT — call at module/let level, NOT inside the Subscribe lambda:
-  ///   let keyBindings = Keys.bind [ Key.Char 'q', Quit ]           // ✅ allocated once
+  ///   let keyBindings = Keys.bind [ Key.Char (Text.Rune 'q'), Quit ]           // ✅ allocated once
   ///   Subscribe = fun _ -> [ keyBindings ]
   ///
   /// Calling Keys.bind inside Subscribe allocates a new Dictionary on every model update:
-  ///   Subscribe = fun _ -> [ Keys.bind [ Key.Char 'q', Quit ] ]    // ⚠️ allocs every update
+  ///   Subscribe = fun _ -> [ Keys.bind [ Key.Char (Text.Rune 'q'), Quit ] ]    // ⚠️ allocs every update
   let bind (bindings: (Key * 'msg) list) : Sub<'msg> =
     let lookup = System.Collections.Generic.Dictionary(bindings.Length)
     for (k, msg) in bindings do
@@ -205,7 +205,7 @@ module Keys =
   /// Create a KeySub from key+modifier bindings. Uses O(1) Dictionary lookup.
   ///
   /// IMPORTANT — call at module/let level, NOT inside the Subscribe lambda:
-  ///   let keyBindings = Keys.bindWithMods [ (Key.Char 's', Modifiers.Ctrl), Save ]  // ✅ allocated once
+  ///   let keyBindings = Keys.bindWithMods [ (Key.Char (Text.Rune 's'), Modifiers.Ctrl), Save ]  // ✅ allocated once
   ///   Subscribe = fun _ -> [ keyBindings ]
   ///
   /// Calling Keys.bindWithMods inside Subscribe allocates a new Dictionary on every model update:

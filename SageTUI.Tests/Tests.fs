@@ -1763,8 +1763,8 @@ let cmdTests = testList "Cmd" [
 
 let inputTypeTests = testList "Input types" [
   testCase "Key.Char roundtrip" <| fun () ->
-    match Char 'a' with
-    | Char c -> c |> Expect.equal "a" 'a'
+    match Char (System.Text.Rune 'a') with
+    | Char r -> r |> Expect.equal "a" (System.Text.Rune 'a')
     | _ -> failwith "expected Char"
 
   testCase "Key.F number" <| fun () ->
@@ -1780,7 +1780,7 @@ let inputTypeTests = testList "Input types" [
 
   testCase "TerminalEvent variants" <| fun () ->
     let events: TerminalEvent list = [
-      KeyPressed(Char 'x', Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'x'), Modifiers.None)
       Resized(80, 24)
       FocusGained
       FocusLost
@@ -1818,16 +1818,16 @@ let testBackendTests = testList "TestBackend" [
     getOutput() |> Expect.equal "recorded" "hello world"
 
   testCase "replays events in order" <| fun () ->
-    let events = [KeyPressed(Char 'a', Modifiers.None); KeyPressed(Char 'b', Modifiers.None)]
+    let events = [KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.None); KeyPressed(Key.Char (System.Text.Rune 'b'), Modifiers.None)]
     let backend, _ = TestBackend.create 10 5 events
     let e1 = backend.PollEvent 0
     let e2 = backend.PollEvent 0
     let e3 = backend.PollEvent 0
     match e1 with
-    | Some(KeyPressed(Char 'a', _)) -> ()
+    | Some(KeyPressed(KeyChar 'a', _)) -> ()
     | _ -> failwith "expected 'a'"
     match e2 with
-    | Some(KeyPressed(Char 'b', _)) -> ()
+    | Some(KeyPressed(KeyChar 'b', _)) -> ()
     | _ -> failwith "expected 'b'"
     e3 |> Expect.isNone "no more events"
 
@@ -1985,13 +1985,13 @@ let subTests = testList "Sub" [
   testCase "KeySub handler" <| fun () ->
     let handler (key, _mods) =
       match key with
-      | Char 'q' -> Some "quit"
+      | KeyChar 'q' -> Some "quit"
       | _ -> None
     let sub = KeySub handler
     match sub with
     | KeySub h ->
-      h (Char 'q', Modifiers.None) |> Expect.equal "quit" (Some "quit")
-      h (Char 'a', Modifiers.None) |> Expect.equal "none" None
+      h (Key.Char (System.Text.Rune 'q'), Modifiers.None) |> Expect.equal "quit" (Some "quit")
+      h (Key.Char (System.Text.Rune 'a'), Modifiers.None) |> Expect.equal "none" None
     | _ -> failwith "expected KeySub"
 
   testCase "TimerSub stores interval" <| fun () ->
@@ -2283,9 +2283,9 @@ let private counterProgram2 : Program<int, CounterMsg2> = {
   Subscribe = fun _ -> [
     KeySub (fun (key, _) ->
       match key with
-      | Key.Char 'j' -> Some Inc2
-      | Key.Char 'k' -> Some Dec2
-      | Key.Char 'q' -> Some Quit2
+      | KeyChar 'j' -> Some Inc2
+      | KeyChar 'k' -> Some Dec2
+      | KeyChar 'q' -> Some Quit2
       | _ -> None)
   ]
 }
@@ -2308,10 +2308,10 @@ let appRunTests = testList "App.run" [
 
   testCase "counter increments on 'j' and quits on 'q'" <| fun () ->
     let events = [
-      KeyPressed(Key.Char 'j', Modifiers.None)
-      KeyPressed(Key.Char 'j', Modifiers.None)
-      KeyPressed(Key.Char 'j', Modifiers.None)
-      KeyPressed(Key.Char 'q', Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'j'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'j'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'j'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'q'), Modifiers.None)
     ]
     let backend, getOutput = TestBackend.create 20 3 events
     App.runWithBackend backend counterProgram2
@@ -2321,9 +2321,9 @@ let appRunTests = testList "App.run" [
 
   testCase "counter decrements on 'k'" <| fun () ->
     let events = [
-      KeyPressed(Key.Char 'k', Modifiers.None)
-      KeyPressed(Key.Char 'k', Modifiers.None)
-      KeyPressed(Key.Char 'q', Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'k'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'k'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'q'), Modifiers.None)
     ]
     let backend, getOutput = TestBackend.create 20 3 events
     App.runWithBackend backend counterProgram2
@@ -2331,7 +2331,7 @@ let appRunTests = testList "App.run" [
     output.Contains("Count:") |> Expect.isTrue "has count output"
 
   testCase "immediate quit produces minimal output" <| fun () ->
-    let events = [KeyPressed(Key.Char 'q', Modifiers.None)]
+    let events = [KeyPressed(Key.Char (System.Text.Rune 'q'), Modifiers.None)]
     let backend, getOutput = TestBackend.create 10 1 events
     App.runWithBackend backend counterProgram2
     let output = getOutput()
@@ -2339,7 +2339,7 @@ let appRunTests = testList "App.run" [
     output.Contains(Ansi.leaveAltScreen) |> Expect.isTrue "left alt"
 
   testCase "no events except quit terminates" <| fun () ->
-    let events = [KeyPressed(Key.Char 'q', Modifiers.None)]
+    let events = [KeyPressed(Key.Char (System.Text.Rune 'q'), Modifiers.None)]
     let backend, _ = TestBackend.create 10 1 events
     App.runWithBackend backend counterProgram2
 ]
@@ -2429,13 +2429,13 @@ let cmdExtendedTests = testList "Cmd extended" [
 
   testCase "Sub.map transforms KeySub messages" <| fun () ->
     let inner : Sub<int> = KeySub(fun (k, _) ->
-      match k with Key.Char 'a' -> Some 1 | _ -> None)
+      match k with KeyChar 'a' -> Some 1 | _ -> None)
     let outer : Sub<string> = Sub.map (sprintf "val:%d") inner
     match outer with
     | KeySub handler ->
-      handler(Key.Char 'a', Modifiers.None)
+      handler(Key.Char (System.Text.Rune 'a'), Modifiers.None)
       |> Expect.equal "mapped a" (Some "val:1")
-      handler(Key.Char 'b', Modifiers.None)
+      handler(Key.Char (System.Text.Rune 'b'), Modifiers.None)
       |> Expect.isNone "b stays None"
     | _ -> failwith "expected KeySub"
 
@@ -2459,40 +2459,40 @@ let cmdExtendedTests = testList "Cmd extended" [
 
 let keysBindTests = testList "Keys.bind" [
   testCase "bind matches registered keys" <| fun () ->
-    let sub = Keys.bind [ Key.Char 'q', "quit"; Key.Escape, "esc" ]
+    let sub = Keys.bind [ Key.Char (System.Text.Rune 'q'), "quit"; Key.Escape, "esc" ]
     match sub with
     | KeySub handler ->
-      handler (Key.Char 'q', Modifiers.None) |> Expect.equal "q→quit" (Some "quit")
+      handler (Key.Char (System.Text.Rune 'q'), Modifiers.None) |> Expect.equal "q→quit" (Some "quit")
       handler (Key.Escape, Modifiers.None) |> Expect.equal "esc→esc" (Some "esc")
     | _ -> failwith "expected KeySub"
 
   testCase "bind ignores unregistered keys" <| fun () ->
-    let sub = Keys.bind [ Key.Char 'q', "quit" ]
+    let sub = Keys.bind [ Key.Char (System.Text.Rune 'q'), "quit" ]
     match sub with
     | KeySub handler ->
-      handler (Key.Char 'x', Modifiers.None) |> Expect.equal "x→None" None
+      handler (Key.Char (System.Text.Rune 'x'), Modifiers.None) |> Expect.equal "x→None" None
       handler (Key.Enter, Modifiers.None) |> Expect.equal "enter→None" None
     | _ -> failwith "expected KeySub"
 
   testCase "bind ignores modifiers" <| fun () ->
-    let sub = Keys.bind [ Key.Char 'q', "quit" ]
+    let sub = Keys.bind [ Key.Char (System.Text.Rune 'q'), "quit" ]
     match sub with
     | KeySub handler ->
-      handler (Key.Char 'q', Modifiers.Ctrl) |> Expect.equal "ctrl+q→quit" (Some "quit")
+      handler (Key.Char (System.Text.Rune 'q'), Modifiers.Ctrl) |> Expect.equal "ctrl+q→quit" (Some "quit")
     | _ -> failwith "expected KeySub"
 
   testCase "bindWithMods matches exact modifier" <| fun () ->
     let sub = Keys.bindWithMods [
-      (Key.Char 'c', Modifiers.Ctrl), "copy"
-      (Key.Char 'v', Modifiers.Ctrl), "paste"
-      (Key.Char 'q', Modifiers.None), "quit"
+      (Key.Char (System.Text.Rune 'c'), Modifiers.Ctrl), "copy"
+      (Key.Char (System.Text.Rune 'v'), Modifiers.Ctrl), "paste"
+      (Key.Char (System.Text.Rune 'q'), Modifiers.None), "quit"
     ]
     match sub with
     | KeySub handler ->
-      handler (Key.Char 'c', Modifiers.Ctrl) |> Expect.equal "ctrl+c→copy" (Some "copy")
-      handler (Key.Char 'c', Modifiers.None) |> Expect.equal "c→None" None
-      handler (Key.Char 'q', Modifiers.None) |> Expect.equal "q→quit" (Some "quit")
-      handler (Key.Char 'q', Modifiers.Ctrl) |> Expect.equal "ctrl+q→None" None
+      handler (Key.Char (System.Text.Rune 'c'), Modifiers.Ctrl) |> Expect.equal "ctrl+c→copy" (Some "copy")
+      handler (Key.Char (System.Text.Rune 'c'), Modifiers.None) |> Expect.equal "c→None" None
+      handler (Key.Char (System.Text.Rune 'q'), Modifiers.None) |> Expect.equal "q→quit" (Some "quit")
+      handler (Key.Char (System.Text.Rune 'q'), Modifiers.Ctrl) |> Expect.equal "ctrl+q→None" None
     | _ -> failwith "expected KeySub"
 
   testCase "bind works in full TEA program" <| fun () ->
@@ -2507,13 +2507,13 @@ let keysBindTests = testList "Keys.bind" [
         | _ -> (model, Cmd.none)
       View = fun model -> El.text (sprintf "%d" model)
       Subscribe = fun _ -> [
-        Keys.bind [ Key.Char 'j', "inc" ]
+        Keys.bind [ Key.Char (System.Text.Rune 'j'), "inc" ]
       ]
     }
     let events = [
-      TerminalEvent.KeyPressed(Key.Char 'j', Modifiers.None)
-      TerminalEvent.KeyPressed(Key.Char 'j', Modifiers.None)
-      TerminalEvent.KeyPressed(Key.Char 'j', Modifiers.None)
+      TerminalEvent.KeyPressed(Key.Char (System.Text.Rune 'j'), Modifiers.None)
+      TerminalEvent.KeyPressed(Key.Char (System.Text.Rune 'j'), Modifiers.None)
+      TerminalEvent.KeyPressed(Key.Char (System.Text.Rune 'j'), Modifiers.None)
     ]
     let backend, _ = TestBackend.create 20 1 events
     App.runWithBackend backend prog
@@ -2579,7 +2579,7 @@ let programMapTests = testList "Program.map" [
       Update = fun _ m -> (m, Cmd.none)
       View = fun _ -> El.empty
       Subscribe = fun _ -> [
-        Keys.bind [ Key.Char 'j', "inc" ]
+        Keys.bind [ Key.Char (System.Text.Rune 'j'), "inc" ]
       ]
     }
     let mapped =
@@ -2592,7 +2592,7 @@ let programMapTests = testList "Program.map" [
     subs |> Expect.hasLength "one sub" 1
     match subs[0] with
     | KeySub handler ->
-      handler (Key.Char 'j', Modifiers.None)
+      handler (Key.Char (System.Text.Rune 'j'), Modifiers.None)
       |> Expect.equal "msg wrapped" (Some "child:inc")
     | _ -> failwith "expected KeySub"
 ]
@@ -2630,14 +2630,14 @@ let eventDispatchTests = testList "Event dispatch" [
       Subscribe = fun _ -> [
         KeySub (fun (key, _) ->
           match key with
-          | Key.Char 'q' -> Some "quit"
+          | KeyChar 'q' -> Some "quit"
           | _ -> None)
       ]
     }
     let events = [
-      KeyPressed(Key.Char 'x', Modifiers.None)
-      KeyPressed(Key.Char 'y', Modifiers.None)
-      KeyPressed(Key.Char 'q', Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'x'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'y'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'q'), Modifiers.None)
     ]
     let backend, _ = TestBackend.create 10 1 events
     App.runWithBackend backend prog
@@ -2654,13 +2654,13 @@ let eventDispatchTests = testList "Event dispatch" [
         ResizeSub (fun (w, h) -> sprintf "%dx%d" w h)
         KeySub (fun (key, _) ->
           match key with
-          | Key.Char 'q' -> Some "quit"
+          | KeyChar 'q' -> Some "quit"
           | _ -> None)
       ]
     }
     let events = [
       Resized(120, 50)
-      KeyPressed(Key.Char 'q', Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'q'), Modifiers.None)
     ]
     let backend, _ = TestBackend.create 20 1 events
     App.runWithBackend backend prog
@@ -3203,14 +3203,14 @@ let textInputBasicTests = testList "TextInput.basic" [
     m.Text |> Expect.equal "text" "hello"
     m.Cursor |> Expect.equal "cursor" 5
   testCase "typing a char inserts at cursor" <| fun () ->
-    let m = TextInput.empty |> TextInput.handleKey (Key.Char 'a')
+    let m = TextInput.empty |> TextInput.handleKey (Key.Char (System.Text.Rune 'a'))
     m.Text |> Expect.equal "text" "a"
     m.Cursor |> Expect.equal "cursor" 1
   testCase "typing multiple chars" <| fun () ->
     let m =
       TextInput.empty
-      |> TextInput.handleKey (Key.Char 'h')
-      |> TextInput.handleKey (Key.Char 'i')
+      |> TextInput.handleKey (Key.Char (System.Text.Rune 'h'))
+      |> TextInput.handleKey (Key.Char (System.Text.Rune 'i'))
     m.Text |> Expect.equal "text" "hi"
     m.Cursor |> Expect.equal "cursor" 2
 ]
@@ -3254,7 +3254,7 @@ let textInputNavTests = testList "TextInput.nav" [
 
 let textInputInsertTests = testList "TextInput.insert" [
   testCase "insert in middle" <| fun () ->
-    let m = { Text = "ac"; Cursor = 1; SelectionAnchor = None } |> TextInput.handleKey (Key.Char 'b')
+    let m = { Text = "ac"; Cursor = 1; SelectionAnchor = None } |> TextInput.handleKey (Key.Char (System.Text.Rune 'b'))
     m.Text |> Expect.equal "text" "abc"
     m.Cursor |> Expect.equal "cursor" 2
 ]

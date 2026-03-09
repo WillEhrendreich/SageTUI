@@ -415,13 +415,13 @@ let view model =
 let keyBindings =
   Keys.bind [
     Key.Right, NextContent
-    Key.Char 'l', NextContent
+    Key.Char (System.Text.Rune 'l'), NextContent
     Key.Left, PrevContent
-    Key.Char 'h', PrevContent
-    Key.Char 'a', CycleAnim
-    Key.Char ' ', ToggleAuto
-    Key.Char 'q', Quit
-    Key.Char 'Q', Quit
+    Key.Char (System.Text.Rune 'h'), PrevContent
+    Key.Char (System.Text.Rune 'a'), CycleAnim
+    Key.Char (System.Text.Rune ' '), ToggleAuto
+    Key.Char (System.Text.Rune 'q'), Quit
+    Key.Char (System.Text.Rune 'Q'), Quit
     Key.Escape, Quit
   ]
 

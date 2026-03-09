@@ -252,8 +252,8 @@ let view model =
 
 let keyBindings =
   Keys.bind [
-    Key.Char 'q', Quit
-    Key.Char 'Q', Quit
+    Key.Char (System.Text.Rune 'q'), Quit
+    Key.Char (System.Text.Rune 'Q'), Quit
     Key.Escape, Quit
   ]
 

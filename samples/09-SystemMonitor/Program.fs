@@ -400,7 +400,7 @@ let view model =
 
 let keyBindings =
   Keys.bind [
-    Key.Char 'q', Quit
+    Key.Char (System.Text.Rune 'q'), Quit
     Key.Escape, Quit
     Key.Up, ScrollUp
     Key.Down, ScrollDown

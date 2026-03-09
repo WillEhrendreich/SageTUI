@@ -834,8 +834,8 @@ let formTests = testList "Form" [
     let ctrlAField =
       Form.field (FieldId "search")
         (fun _ _ -> El.empty)
-        (fun evt _ -> match evt with KeyPressed(Key.Char 'a', m) when m = Modifiers.Ctrl -> Some () | _ -> None)
-    let result = Form.handleEvent [ctrlAField] (FieldId "search") (KeyPressed(Key.Char 'a', Modifiers.Ctrl)) ()
+        (fun evt _ -> match evt with KeyPressed(KeyChar 'a', m) when m = Modifiers.Ctrl -> Some () | _ -> None)
+    let result = Form.handleEvent [ctrlAField] (FieldId "search") (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.Ctrl)) ()
     result |> Expect.isSome "Ctrl+A handled"
   }
 ]
@@ -852,7 +852,7 @@ let textFormTests = testList "TextForm" [
     ]
 
   let typeStr (s: string) m =
-    s |> Seq.fold (fun acc c -> TextForm.update (TFKey (Key.Char c)) acc |> fst) m
+    s |> Seq.fold (fun acc c -> TextForm.update (TFKey (Key.Char (System.Text.Rune c))) acc |> fst) m
 
   test "init: focus on first field, not valid" {
     let f = mkForm ()
@@ -954,7 +954,7 @@ let textFormTests = testList "TextForm" [
     let (f2, _) = TextForm.update TFTabNext f
     let f3 = f2 |> typeStr "alice@example.com"
     let (submitting, _) = TextForm.update TFSubmit f3
-    let (after, _) = TextForm.update (TFKey (Key.Char 'X')) submitting
+    let (after, _) = TextForm.update (TFKey (Key.Char (System.Text.Rune 'X'))) submitting
     // Key events must not mutate state while Submitting
     after.Rows.[1].Input.Text |> Expect.equal "email unchanged" "alice@example.com"
   }
@@ -978,9 +978,9 @@ let textFormTests = testList "TextForm" [
   }
   test "TFEvent Ctrl+A selects all in focused field" {
     let m0 = TextForm.init [TextForm.field (FieldId "q") "Query"]
-    let m1 = TextForm.update (TFKey (Key.Char 'h')) m0 |> fst
-    let m2 = TextForm.update (TFKey (Key.Char 'i')) m1 |> fst
-    let m3 = TextForm.update (TFEvent (KeyPressed(Key.Char 'a', Modifiers.Ctrl))) m2 |> fst
+    let m1 = TextForm.update (TFKey (Key.Char (System.Text.Rune 'h'))) m0 |> fst
+    let m2 = TextForm.update (TFKey (Key.Char (System.Text.Rune 'i'))) m1 |> fst
+    let m3 = TextForm.update (TFEvent (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.Ctrl))) m2 |> fst
     m3.Rows.[0].Input.SelectionAnchor |> Expect.equal "anchor at 0" (Some 0)
     m3.Rows.[0].Input.Cursor |> Expect.equal "cursor at end" 2
   }
@@ -989,7 +989,7 @@ let textFormTests = testList "TextForm" [
     let errors = Map.ofList [(FieldId "name", "Already taken"); (FieldId "email", "Invalid format")]
     let (m', _) = TextForm.update (TFSetFieldErrors errors) m
     // Type into the focused (name) field — should clear "name" from TFFieldErrors
-    let (m'', _) = TextForm.update (TFKey (Key.Char 'A')) m'
+    let (m'', _) = TextForm.update (TFKey (Key.Char (System.Text.Rune 'A'))) m'
     match m''.Status with
     | TFFieldErrors remaining ->
       remaining |> Map.containsKey (FieldId "name")  |> Expect.isFalse "name error cleared"
@@ -1001,7 +1001,7 @@ let textFormTests = testList "TextForm" [
     let errors = Map.ofList [(FieldId "name", "Only error")]
     let (m', _) = TextForm.update (TFSetFieldErrors errors) m
     // Type into the focused (name) field — only remaining error — should become TFEditing
-    let (m'', _) = TextForm.update (TFKey (Key.Char 'A')) m'
+    let (m'', _) = TextForm.update (TFKey (Key.Char (System.Text.Rune 'A'))) m'
     m''.Status |> Expect.equal "status is TFEditing" TFEditing
   }
   test "TFSetFieldErrors clears row-level client errors preventing dual messages" {
@@ -1025,7 +1025,7 @@ let textFormTests = testList "TextForm" [
     let (m', _) = TextForm.update (TFSetFieldErrors errors) m
     m'.Status |> Expect.equal "status is TFFieldErrors" (TFFieldErrors errors)
     // After field errors, key events should still work (not blocked like Submitting)
-    let (m'', _) = TextForm.update (TFKey (Key.Char 'X')) m'
+    let (m'', _) = TextForm.update (TFKey (Key.Char (System.Text.Rune 'X'))) m'
     m''.Rows.[0].Input.Text |> Expect.equal "editing still works" "X"
   }
   test "TFSetFieldErrors view renders server error under matching field" {
@@ -1344,7 +1344,7 @@ let frameTimingsTests = testList "Sub.frameTimings" [
     // TestHarness scans subs to route key/resize events.
     // FrameTimingsSub must not crash the scan (catch-all | _ -> () handles it).
     let timingsSub = Sub.frameTimings GotTimings
-    let keySub = Keys.bind [ Key.Char 'q', OtherMsg ]
+    let keySub = Keys.bind [ Key.Char (System.Text.Rune 'q'), OtherMsg ]
     let prog : Program<int, TimingsMsg> =
       { Init    = fun () -> 0, Cmd.none
         Update  = fun msg m ->
@@ -1352,7 +1352,7 @@ let frameTimingsTests = testList "Sub.frameTimings" [
         View    = fun m -> El.text (string m)
         Subscribe = fun _ -> [ keySub; timingsSub ] }
     let app = TestHarness.init 80 24 prog
-    let app' = TestHarness.pressKey (Key.Char 'q') app
+    let app' = TestHarness.pressKey (Key.Char (System.Text.Rune 'q')) app
     app'.Model |> Expect.equal "key handled" 1
   }
 ]
@@ -1542,7 +1542,7 @@ let virtualListTests = testList "VirtualList" [
   }
   test "handleEvent unhandled key returns model unchanged" {
     let m = VirtualList.ofArray 5 [| 0 .. 4 |]
-    let result = VirtualList.handleEvent (KeyPressed(Key.Char 'x', Modifiers.None)) m
+    let result = VirtualList.handleEvent (KeyPressed(Key.Char (System.Text.Rune 'x'), Modifiers.None)) m
     result |> Expect.equal "unchanged" m
   }
   test "view produces Column with exactly ViewportHeight rows" {
@@ -1766,7 +1766,7 @@ let textInputWordSelTests = testList "TextInput word and selection" [
   }
   // ── handleKeyWithSelection ───────────────────────────────────────────────
   test "handleKeyWithSelection Char replaces selection" {
-    let m = tiSel "hello" 5 0 |> TextInput.handleKeyWithSelection (Key.Char 'X')
+    let m = tiSel "hello" 5 0 |> TextInput.handleKeyWithSelection (Key.Char (System.Text.Rune 'X'))
     m.Text   |> Expect.equal "text" "X"
     m.Cursor |> Expect.equal "cursor 1" 1
   }
@@ -1794,7 +1794,7 @@ let textInputWordSelTests = testList "TextInput word and selection" [
   }
   test "handleEvent Ctrl+A selects all" {
     let m = ti "hello" 2
-    let m' = TextInput.handleEvent (KeyPressed(Key.Char 'a', Modifiers.Ctrl)) m
+    let m' = TextInput.handleEvent (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.Ctrl)) m
     m'.SelectionAnchor |> Expect.equal "anchor 0" (Some 0)
     m'.Cursor          |> Expect.equal "cursor 5" 5
   }
@@ -1806,7 +1806,7 @@ let textInputWordSelTests = testList "TextInput word and selection" [
   }
   test "handleEvent plain key falls back to handleKeyWithSelection" {
     let m = ti "abc" 1
-    let m' = TextInput.handleEvent (KeyPressed(Key.Char 'X', Modifiers.None)) m
+    let m' = TextInput.handleEvent (KeyPressed(Key.Char (System.Text.Rune 'X'), Modifiers.None)) m
     m'.Text |> Expect.equal "text" "aXbc"
   }
   test "selectWordLeft extends selection by word" {

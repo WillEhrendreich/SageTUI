@@ -114,7 +114,7 @@ let view (model: ContactModel) : Element =
         |> El.bordered Rounded
         |> El.width 50
 
-let quitBinding = Keys.bind [ Key.Char 'q', Quit; Key.Escape, Quit ]
+let quitBinding = Keys.bind [ Key.Char (Text.Rune 'q'), Quit; Key.Escape, Quit ]
 
 // ── Section 6: Theme record shape ─────────────────────────────────────────────
 
@@ -181,7 +181,7 @@ let _cmdCancel : Cmd<DataMsg> = Cmd.cancel "my-fetch"
 
 type AppMsg2 = Key of Key * Modifiers | Tick | Resize of int * int | Quit2
 
-let _subKeyBind  : Sub<ContactMsg>  = Keys.bind [ Key.Char 'q', Quit; Key.Escape, Quit ]
+let _subKeyBind  : Sub<ContactMsg>  = Keys.bind [ Key.Char (Text.Rune 'q'), Quit; Key.Escape, Quit ]
 let _subKeySub   : Sub<AppMsg2>     = Sub.KeySub(fun (k, mods) -> Some (AppMsg2.Key(k, mods)))
 let _subTimerSub : Sub<AppMsg2>     = Sub.TimerSub("tick", System.TimeSpan.FromMilliseconds(1000.0), fun () -> Tick)
 let _subResizeSub: Sub<AppMsg2>     = Sub.ResizeSub(fun (w, h) -> Resize(w, h))  // no Some — returns 'msg directly

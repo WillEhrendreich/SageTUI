@@ -296,17 +296,17 @@ let view model =
 let keyBindings =
   Keys.bind [
     Key.Left, MoveLeft
-    Key.Char 'h', MoveLeft
+    Key.Char (System.Text.Rune 'h'), MoveLeft
     Key.Right, MoveRight
-    Key.Char 'l', MoveRight
+    Key.Char (System.Text.Rune 'l'), MoveRight
     Key.Up, MoveUp
-    Key.Char 'k', MoveUp
+    Key.Char (System.Text.Rune 'k'), MoveUp
     Key.Down, MoveDown
-    Key.Char 'j', MoveDown
-    Key.Char ' ', GrabOrDrop
+    Key.Char (System.Text.Rune 'j'), MoveDown
+    Key.Char (System.Text.Rune ' '), GrabOrDrop
     Key.Enter, GrabOrDrop
-    Key.Char 'q', Quit
-    Key.Char 'Q', Quit
+    Key.Char (System.Text.Rune 'q'), Quit
+    Key.Char (System.Text.Rune 'Q'), Quit
     Key.Escape, Quit
   ]
 

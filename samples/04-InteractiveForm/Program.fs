@@ -28,7 +28,7 @@ let isDemoMode = Environment.GetEnvironmentVariable("SAGETUI_DEMO_MODE") = "1"
 
 let private key k = Some (KeyInput(k, Modifiers.None))
 let private shiftKey k = Some (KeyInput(k, Modifiers.Shift))
-let private ch c = key (Key.Char c)
+let private ch (c: char) = key (Key.Char (System.Text.Rune c))
 let private tab () = key Key.Tab
 let private shiftTab () = shiftKey Key.Tab
 let private enter () = key Key.Enter

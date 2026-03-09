@@ -41,7 +41,7 @@ module Recording =
 
   let encodeKey (k: Key) : string =
     match k with
-    | Char c    -> sprintf "char:%c" c
+    | Char r    -> sprintf "char:%d" r.Value
     | Enter     -> "enter"
     | Escape    -> "escape"
     | Backspace -> "backspace"
@@ -60,7 +60,10 @@ module Recording =
     | "up"        -> Some Up     | "down"  -> Some Down    | "left"  -> Some Left  | "right" -> Some Right
     | "home"      -> Some Home   | "end"   -> Some End     | "pgup"  -> Some PageUp | "pgdn" -> Some PageDown
     | "ins"       -> Some Insert | "del"   -> Some Delete
-    | s when s.StartsWith("char:") && s.Length = 6 -> Some (Key.Char s.[5])
+    | s when s.StartsWith("char:") ->
+      match Int32.TryParse(s.[5..]) with
+      | true, n when Text.Rune.IsValid(n) -> Some (Key.Char (Text.Rune n))
+      | _ -> None
     | s when s.Length >= 2 && s.[0] = 'f' ->
       match Int32.TryParse(s.[1..]) with
       | true, n -> Some (F n)

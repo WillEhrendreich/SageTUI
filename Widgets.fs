@@ -1,5 +1,7 @@
 namespace SageTUI
 
+open InputHelpers
+
 type Theme = {
   Primary: Color
   Secondary: Color
@@ -156,10 +158,11 @@ module TextInput =
   /// All mutations clear any active selection. Plain movement clears selection anchor.
   let handleKey (key: Key) (model: TextInputModel) =
     match key with
-    | Key.Char c ->
+    | Key.Char r ->
       let before = match model.Cursor > 0 with true -> model.Text.[..model.Cursor - 1] | false -> ""
       let after = match model.Cursor < model.Text.Length with true -> model.Text.[model.Cursor..] | false -> ""
-      { Text = before + string c + after; Cursor = model.Cursor + 1; SelectionAnchor = None }
+      let s = r.ToString()
+      { Text = before + s + after; Cursor = model.Cursor + s.Length; SelectionAnchor = None }
     | Key.Backspace ->
       match model.Cursor > 0 with
       | true ->
@@ -318,7 +321,7 @@ module TextInput =
       { model with Cursor = 0; SelectionAnchor = Some (match model.SelectionAnchor with Some a -> a | None -> model.Cursor) }
     | KeyPressed(Key.End,   m) when m.HasFlag(Modifiers.Shift) ->
       { model with Cursor = model.Text.Length; SelectionAnchor = Some (match model.SelectionAnchor with Some a -> a | None -> model.Cursor) }
-    | KeyPressed(Key.Char 'a', m) when m.HasFlag(Modifiers.Ctrl) -> selectAll model
+    | KeyPressed(KeyChar 'a', m) when m.HasFlag(Modifiers.Ctrl) -> selectAll model
     | KeyPressed(Key.Backspace, m) when m.HasFlag(Modifiers.Ctrl) -> deleteWordLeft model
     | KeyPressed(key, _) -> handleKeyWithSelection key model
     | Pasted text -> handlePaste text model

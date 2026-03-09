@@ -255,12 +255,12 @@ let view model =
 
 let keyBindings =
   Keys.bind [
-    Key.Char '1', SwitchTab Base16
-    Key.Char '2', SwitchTab Palette256
-    Key.Char '3', SwitchTab TrueColor
-    Key.Char '4', SwitchTab TextStyles
-    Key.Char 'q', Quit
-    Key.Char 'Q', Quit
+    Key.Char (System.Text.Rune '1'), SwitchTab Base16
+    Key.Char (System.Text.Rune '2'), SwitchTab Palette256
+    Key.Char (System.Text.Rune '3'), SwitchTab TrueColor
+    Key.Char (System.Text.Rune '4'), SwitchTab TextStyles
+    Key.Char (System.Text.Rune 'q'), Quit
+    Key.Char (System.Text.Rune 'Q'), Quit
     Key.Escape, Quit
   ]
 

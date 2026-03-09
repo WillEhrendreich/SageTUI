@@ -221,15 +221,15 @@ let parseEscapeTests = testList "AnsiParser.parseEscape" [
 
   testCase "Alt+a (single char after ESC) produces Alt modifier" <| fun () ->
     AnsiParser.parseEscape "a"
-    |> Expect.equal "alt+a" (Some (KeyPressed(Key.Char 'a', Modifiers.Alt)))
+    |> Expect.equal "alt+a" (Some (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.Alt)))
 
   testCase "Alt+b produces Alt modifier" <| fun () ->
     AnsiParser.parseEscape "b"
-    |> Expect.equal "alt+b" (Some (KeyPressed(Key.Char 'b', Modifiers.Alt)))
+    |> Expect.equal "alt+b" (Some (KeyPressed(Key.Char (System.Text.Rune 'b'), Modifiers.Alt)))
 
   testCase "Alt+f produces Alt modifier (readline forward-word)" <| fun () ->
     AnsiParser.parseEscape "f"
-    |> Expect.equal "alt+f" (Some (KeyPressed(Key.Char 'f', Modifiers.Alt)))
+    |> Expect.equal "alt+f" (Some (KeyPressed(Key.Char (System.Text.Rune 'f'), Modifiers.Alt)))
 
   testCase "Alt+key via defaultValue does NOT produce bare Escape" <| fun () ->
     // This is the exact emitEscape→parseEscape→defaultValue path that was broken.
@@ -237,12 +237,12 @@ let parseEscapeTests = testList "AnsiParser.parseEscape" [
     let result =
       AnsiParser.parseEscape "a"
       |> Option.defaultValue (KeyPressed(Key.Escape, Modifiers.None))
-    result |> Expect.equal "no bare escape" (KeyPressed(Key.Char 'a', Modifiers.Alt))
+    result |> Expect.equal "no bare escape" (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.Alt))
 
   testProperty "all printable ASCII chars produce Alt+char when single" <| fun (c: char) ->
     let c = char ((int c % 94) + 33)  // printable ASCII 33-126
     match AnsiParser.parseEscape (string c) with
-    | Some (KeyPressed(Key.Char ch, Modifiers.Alt)) -> ch = c
+    | Some (KeyPressed(Key.Char ch, Modifiers.Alt)) -> ch = System.Text.Rune c
     | _ -> false
 
   // ── SGR mouse ─────────────────────────────────────────────────────────────
@@ -324,7 +324,7 @@ let mouseDispatchTests = testList "Mouse dispatch" [
     | [] -> failtest "expected mouse event"
 
   testCase "MouseSub not called for KeyPressed events" <| fun () ->
-    let events = [ KeyPressed(Key.Char 'a', Modifiers.None); KeyPressed(Key.Escape, Modifiers.None) ]
+    let events = [ KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.None); KeyPressed(Key.Escape, Modifiers.None) ]
     let backend, _ = TestBackend.create 80 24 events
     let mutable mouseCount = 0
     let program : Program<unit, bool> =

@@ -322,24 +322,21 @@ module Backend =
             | '\t' -> KeyPressed(Key.Tab,       Modifiers.None)
             | c when int c >= 1 && int c <= 26 ->
               // Ctrl-A (1) through Ctrl-Z (26): map to Char 'a'..'z' + Ctrl modifier
-              KeyPressed(Key.Char (char (int c + int 'a' - 1)), Modifiers.Ctrl)
+              KeyPressed(Key.Char (Text.Rune (char (int c + int 'a' - 1))), Modifiers.Ctrl)
             | c when Char.IsHighSurrogate(c) ->
-              // UTF-16 surrogate pair: read the low surrogate and reassemble into a scalar codepoint
+              // UTF-16 surrogate pair: read the low surrogate and reassemble into a Rune
               let next = tryReadChar escTimeoutMs
               match next > 0 && Char.IsLowSurrogate(char next) with
               | true ->
                 let mutable rune = Unchecked.defaultof<Text.Rune>
                 match Text.Rune.TryCreate(c, char next, &rune) with
-                | true ->
-                  // Rune fits in BMP if it's a single char; otherwise emit the first char of the string
-                  let s = rune.ToString()
-                  KeyPressed(Key.Char s.[0], Modifiers.None)
-                | false -> KeyPressed(Key.Char ' ', Modifiers.None)  // malformed pair
-              | false -> KeyPressed(Key.Char ' ', Modifiers.None)  // lone surrogate
+                | true  -> KeyPressed(Key.Char rune, Modifiers.None)  // correct Rune (may be supplementary)
+                | false -> KeyPressed(Key.Char (Text.Rune ' '), Modifiers.None)  // malformed pair
+              | false -> KeyPressed(Key.Char (Text.Rune ' '), Modifiers.None)  // lone surrogate
             | c when Char.IsLowSurrogate(c) ->
               // Orphaned low surrogate — should not appear without a prior high surrogate
-              KeyPressed(Key.Char ' ', Modifiers.None)
-            | c -> KeyPressed(Key.Char c, Modifiers.None)
+              KeyPressed(Key.Char (Text.Rune ' '), Modifiers.None)
+            | c -> KeyPressed(Key.Char (Text.Rune c), Modifiers.None)
           enqueueEvent event)
     parseThread.IsBackground <- true
     parseThread.Name <- "SageTUI.InputParse"

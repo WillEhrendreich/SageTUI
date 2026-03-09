@@ -28,9 +28,9 @@ let view model =
 let subscribe _model =
   [ KeySub (fun (key, _mods) ->
       match key with
-      | Char '+' | Char '=' -> Some Increment
-      | Char '-' -> Some Decrement
-      | Char 'q' | Char 'Q' | Escape -> Some Quit
+      | KeyChar '+' | KeyChar '=' -> Some Increment
+      | KeyChar '-' -> Some Decrement
+      | KeyChar 'q' | KeyChar 'Q' | Escape -> Some Quit
       | _ -> None) ]
 
 let program : Program<Model, Msg> =

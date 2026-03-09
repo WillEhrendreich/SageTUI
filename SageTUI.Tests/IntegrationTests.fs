@@ -35,9 +35,9 @@ let counterProgram : Program<int, CounterMsg> =
       |> El.bordered Rounded
     Subscribe = fun _ -> [
       Keys.bind [
-        Key.Char 'j', Inc
-        Key.Char 'k', Dec
-        Key.Char 'q', QuitCounter
+        Key.Char (System.Text.Rune 'j'), Inc
+        Key.Char (System.Text.Rune 'k'), Dec
+        Key.Char (System.Text.Rune 'q'), QuitCounter
         Key.Escape, QuitCounter
       ] ] }
 
@@ -84,7 +84,7 @@ let counterIntegrationTests =
     test "j key increments counter to 1" {
       let app =
         TestHarness.init 50 15 counterProgram
-        |> TestHarness.pressKey (Key.Char 'j')
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'j'))
       app.Model |> Expect.equal "model should be 1" 1
       let output = TestHarness.render app
       output |> Expect.stringContains "should show count 1" "Count: 1"
@@ -93,9 +93,9 @@ let counterIntegrationTests =
     test "k key decrements counter" {
       let app =
         TestHarness.init 50 15 counterProgram
-        |> TestHarness.pressKey (Key.Char 'j')
-        |> TestHarness.pressKey (Key.Char 'j')
-        |> TestHarness.pressKey (Key.Char 'k')
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'j'))
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'j'))
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'k'))
       app.Model |> Expect.equal "model should be 1" 1
       let output = TestHarness.render app
       output |> Expect.stringContains "should show count 1" "Count: 1"
@@ -104,7 +104,7 @@ let counterIntegrationTests =
     test "k at zero stays at zero (floor)" {
       let app =
         TestHarness.init 50 15 counterProgram
-        |> TestHarness.pressKey (Key.Char 'k')
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'k'))
       app.Model |> Expect.equal "model should be 0" 0
       let output = TestHarness.render app
       output |> Expect.stringContains "should show count 0" "Count: 0"
@@ -113,10 +113,10 @@ let counterIntegrationTests =
     test "multi-step: j*3 then k*1 = 2" {
       let app =
         TestHarness.init 50 15 counterProgram
-        |> TestHarness.pressKey (Key.Char 'j')
-        |> TestHarness.pressKey (Key.Char 'j')
-        |> TestHarness.pressKey (Key.Char 'j')
-        |> TestHarness.pressKey (Key.Char 'k')
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'j'))
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'j'))
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'j'))
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'k'))
       app.Model |> Expect.equal "model should be 2" 2
       let output = TestHarness.render app
       output |> Expect.stringContains "should show count 2" "Count: 2"
@@ -125,7 +125,7 @@ let counterIntegrationTests =
     test "q triggers quit" {
       let app =
         TestHarness.init 50 15 counterProgram
-        |> TestHarness.pressKey (Key.Char 'q')
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'q'))
       app.HasQuit |> Expect.isTrue "should have quit"
     }
 
@@ -139,7 +139,7 @@ let counterIntegrationTests =
     test "unbound key does nothing" {
       let app =
         TestHarness.init 50 15 counterProgram
-        |> TestHarness.pressKey (Key.Char 'x')
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'x'))
       app.Model |> Expect.equal "model should be 0" 0
       app.HasQuit |> Expect.isFalse "should not have quit"
     }
@@ -286,7 +286,7 @@ let widgetIntegrationTests =
   testList "Widgets" [
     test "TextInput renders typed text" {
       let model = TextInput.empty
-      let model = "Hello" |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char c) m) model
+      let model = "Hello" |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char (System.Text.Rune c)) m) model
       let elem = TextInput.view true model
       let output = renderElement 30 3 elem
       output |> Expect.stringContains "should show typed text" "Hello"
@@ -296,7 +296,7 @@ let widgetIntegrationTests =
       let model = TextInput.empty
       let model =
         "Hi!"
-        |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char c) m) model
+        |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char (System.Text.Rune c)) m) model
         |> TextInput.handleKey Key.Backspace
       model.Text |> Expect.equal "text after backspace" "Hi"
     }
@@ -305,7 +305,7 @@ let widgetIntegrationTests =
       let model = TextInput.empty
       let model =
         "ABCD"
-        |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char c) m) model
+        |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char (System.Text.Rune c)) m) model
       model.Cursor |> Expect.equal "cursor at end" 4
       let model = TextInput.handleKey Key.Home model
       model.Cursor |> Expect.equal "cursor at home" 0
@@ -548,8 +548,8 @@ let kanbanProgram : Program<KanbanModel, KanbanMsg> =
         Key.Right, KRight
         Key.Up, KUp
         Key.Down, KDown
-        Key.Char ' ', KGrab
-        Key.Char 'q', KQuit
+        Key.Char (System.Text.Rune ' '), KGrab
+        Key.Char (System.Text.Rune 'q'), KQuit
       ] ] }
 
 let kanbanIntegrationTests =
@@ -605,14 +605,14 @@ let kanbanIntegrationTests =
     test "space grabs card" {
       let app =
         TestHarness.init 80 25 kanbanProgram
-        |> TestHarness.pressKey (Key.Char ' ')
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune ' '))
       app.Model.Moving |> Expect.isTrue "should be moving"
     }
 
     test "grab and move right transfers card" {
       let app =
         TestHarness.init 80 25 kanbanProgram
-        |> TestHarness.pressKey (Key.Char ' ')  // grab Task A
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune ' '))  // grab Task A
         |> TestHarness.pressKey Key.Right        // move to InProgress
       // Task A should now be in InProgress
       let inProgressCards = kanbanCardsIn KInProgress app.Model
@@ -629,7 +629,7 @@ let kanbanIntegrationTests =
         allKanbanColumns |> List.sumBy (fun col -> (kanbanCardsIn col app0.Model).Length)
       let app1 =
         app0
-        |> TestHarness.pressKey (Key.Char ' ')
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune ' '))
         |> TestHarness.pressKey Key.Right
       let totalAfter =
         allKanbanColumns |> List.sumBy (fun col -> (kanbanCardsIn col app1.Model).Length)
@@ -639,7 +639,7 @@ let kanbanIntegrationTests =
     test "q quits" {
       let app =
         TestHarness.init 80 25 kanbanProgram
-        |> TestHarness.pressKey (Key.Char 'q')
+        |> TestHarness.pressKey (Key.Char (System.Text.Rune 'q'))
       app.HasQuit |> Expect.isTrue "should have quit"
     }
   ]

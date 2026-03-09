@@ -4,6 +4,7 @@ module HtmlRenderer
 // Demonstrates: HtmlString.parseFragment, HTML→Element bridge, CSS colors,
 // semantic tags, tables, lists, links, inline styles, forms.
 
+open System.Text
 open SageTUI
 open SageTUI.Html
 
@@ -198,11 +199,11 @@ let view model =
 let keyBindings =
   Keys.bind [
     Key.Right, NextPage
-    Key.Char 'l', NextPage
+    Key.Char (Rune 'l'), NextPage
     Key.Left, PrevPage
-    Key.Char 'h', PrevPage
-    Key.Char 'q', Quit
-    Key.Char 'Q', Quit
+    Key.Char (Rune 'h'), PrevPage
+    Key.Char (Rune 'q'), Quit
+    Key.Char (Rune 'Q'), Quit
     Key.Escape, Quit
   ]
 

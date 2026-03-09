@@ -149,10 +149,10 @@ type KeyCounterMsg = KeyInc | KeyDec | KeyReset | KeyQuit
 
 let keyCounterProgram : Program<CounterModel, KeyCounterMsg> =
   let bindings = Keys.bind [
-    Key.Char '+', KeyInc
-    Key.Char '-', KeyDec
-    Key.Char 'r', KeyReset
-    Key.Char 'q', KeyQuit ]
+    Key.Char (System.Text.Rune '+'), KeyInc
+    Key.Char (System.Text.Rune '-'), KeyDec
+    Key.Char (System.Text.Rune 'r'), KeyReset
+    Key.Char (System.Text.Rune 'q'), KeyQuit ]
   { Init    = fun () -> { Count = 0 }, Cmd.none
     Update  = fun msg model ->
       match msg with
@@ -166,7 +166,7 @@ let keyCounterProgram : Program<CounterModel, KeyCounterMsg> =
 let routeTerminalEventTests = testList "Testing.routeTerminalEvent" [
   test "KeyPressed routes to KeySub handler" {
     let app = TestHarness.init 80 24 keyCounterProgram
-    let app' = Testing.routeTerminalEvent (KeyPressed(Key.Char '+', Modifiers.None)) app
+    let app' = Testing.routeTerminalEvent (KeyPressed(Key.Char (System.Text.Rune '+'), Modifiers.None)) app
     app'.Model.Count |> Expect.equal "count incremented" 1
   }
   test "Resized routes to resize" {
@@ -193,10 +193,10 @@ let routeTerminalEventTests = testList "Testing.routeTerminalEvent" [
   test "multiple events can be folded" {
     let app = TestHarness.init 80 24 keyCounterProgram
     let events = [
-      KeyPressed(Key.Char '+', Modifiers.None)
-      KeyPressed(Key.Char '+', Modifiers.None)
-      KeyPressed(Key.Char '+', Modifiers.None)
-      KeyPressed(Key.Char '-', Modifiers.None) ]
+      KeyPressed(Key.Char (System.Text.Rune '+'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune '+'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune '+'), Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune '-'), Modifiers.None) ]
     let app' = events |> List.fold (fun a e -> Testing.routeTerminalEvent e a) app
     app'.Model.Count |> Expect.equal "count is 2" 2
   }

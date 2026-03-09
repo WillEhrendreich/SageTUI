@@ -10,9 +10,9 @@ open SageTUI
 let keyRoundtripTests = testList "Key roundtrip" [
   testProperty "all printable ASCII chars roundtrip" <| fun (c: char) ->
     let c = char (int c % 95 + 32) // printable ASCII 32-126
-    let k = Key.Char c
+    let k = Key.Char (System.Text.Rune c)
     match Recording.encodeKey k |> Recording.decodeKey with
-    | Some (Key.Char back) -> back = c
+    | Some (Key.Char back) -> back = System.Text.Rune c
     | _ -> false
 
   let namedKeys = [
@@ -49,7 +49,7 @@ let eventRoundtripTests = testList "Event roundtrip" [
   }
 
   test "KeyPressed roundtrips with Ctrl modifier" {
-    let evt = KeyPressed(Key.Char 'c', Modifiers.Ctrl)
+    let evt = KeyPressed(Key.Char (System.Text.Rune 'c'), Modifiers.Ctrl)
     let line = Recording.encodeEvent 200L evt
     Recording.decodeEvent line |> Expect.equal "roundtrip" (Some evt)
   }
@@ -128,7 +128,7 @@ let serializationTests = testList "JSONL serialization" [
 let recordingBackendTests = testList "Recording backend" [
   test "records key events to JSONL" {
     let path = System.IO.Path.GetTempFileName()
-    let events = [ KeyPressed(Key.Char 'a', Modifiers.None); KeyPressed(Key.Escape, Modifiers.None) ]
+    let events = [ KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.None); KeyPressed(Key.Escape, Modifiers.None) ]
     let (inner, _) = TestBackend.create 80 24 events
     let recording = Recording.wrapRecording Recording.InputOnly path inner
 
@@ -221,7 +221,7 @@ let integrationTests = testList "Integration" [
       { Init    = fun () -> 0, NoCmd
         Update  = fun msg model ->
           match msg with
-          | KeyPressed(Key.Char 'q', _) -> model, Quit 0
+          | KeyPressed(KeyChar 'q', _) -> model, Quit 0
           | KeyPressed(Key.Up, _)        -> model + 1, NoCmd
           | KeyPressed(Key.Down, _)      -> model - 1, NoCmd
           | _                            -> model, NoCmd
@@ -232,7 +232,7 @@ let integrationTests = testList "Integration" [
       KeyPressed(Key.Up,      Modifiers.None)
       KeyPressed(Key.Up,      Modifiers.None)
       KeyPressed(Key.Down,    Modifiers.None)
-      KeyPressed(Key.Char 'q', Modifiers.None)
+      KeyPressed(Key.Char (System.Text.Rune 'q'), Modifiers.None)
     ]
 
     // Record

@@ -10,15 +10,26 @@ type Modifiers =
   | Ctrl = 4
   | Meta = 8
 
+/// A Unicode scalar value character. Use `Text.Rune 'q'` for BMP characters or `Text.Rune 0x1F600` for supplementary.
 type Key =
-  | Char of char
+  | Char of Text.Rune
   | Enter | Escape | Backspace | Tab
   | Up | Down | Left | Right
   | Home | End | PageUp | PageDown
   | Insert | Delete
   | F of int
 
-type MouseButton = LeftButton | RightButton | MiddleButton | ScrollUp | ScrollDown
+/// Active pattern for matching `Key.Char` against a BMP character literal.
+/// Usage: `| KeyChar 'q' ->` instead of `| Key.Char r when r = Text.Rune 'q' ->`
+/// Enables ergonomic char-literal patterns after the `Key.Char of char → Key.Char of Rune` migration.
+/// Automatically available when `open SageTUI` is in scope.
+[<AutoOpen>]
+module InputHelpers =
+  let (|KeyChar|_|) (expected: char) = function
+    | Key.Char r when r = Text.Rune expected -> Some ()
+    | _ -> None
+
+type MouseButton= LeftButton | RightButton | MiddleButton | ScrollUp | ScrollDown
 
 /// Whether the mouse button went down (Pressed), came up (Released), or was held
 /// during motion (Motion). Released corresponds to the lowercase 'm' SGR terminator;
@@ -145,5 +156,5 @@ module AnsiParser =
     | s when s.Length = 1 ->
       // Alt+key: ESC followed by a single character (e.g. ESC+'a' = Alt+a)
       // This MUST come after the CSI/SS3 patterns so "[" doesn't match here.
-      Some (KeyPressed(Key.Char s.[0], Modifiers.Alt))
+      Some (KeyPressed(Key.Char (Text.Rune s.[0]), Modifiers.Alt))
     | _ -> None

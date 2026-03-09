@@ -95,12 +95,12 @@ let widgetSnapshots =
     snapshotTest "widget-textinput-filled"
       (let model =
         "Hello World"
-        |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char c) m) TextInput.empty
+        |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char (System.Text.Rune c)) m) TextInput.empty
        render 30 3 (TextInput.view true model))
     snapshotTest "widget-textinput-unfocused"
       (let model =
         "Hello"
-        |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char c) m) TextInput.empty
+        |> Seq.fold (fun m c -> TextInput.handleKey (Key.Char (System.Text.Rune c)) m) TextInput.empty
        render 30 3 (TextInput.view false model))
 
     // Select
@@ -280,9 +280,9 @@ let programSnapshots =
       (TestHarness.init 50 15 counterProgram |> TestHarness.render)
     snapshotTest "program-counter-3"
       (TestHarness.init 50 15 counterProgram
-       |> TestHarness.pressKey (Key.Char 'j')
-       |> TestHarness.pressKey (Key.Char 'j')
-       |> TestHarness.pressKey (Key.Char 'j')
+       |> TestHarness.pressKey (Key.Char (System.Text.Rune 'j'))
+       |> TestHarness.pressKey (Key.Char (System.Text.Rune 'j'))
+       |> TestHarness.pressKey (Key.Char (System.Text.Rune 'j'))
        |> TestHarness.render)
     snapshotTest "program-kanban-init"
       (TestHarness.init 80 25 kanbanProgram |> TestHarness.render)
@@ -293,7 +293,7 @@ let programSnapshots =
        |> TestHarness.render)
     snapshotTest "program-kanban-grabbed"
       (TestHarness.init 80 25 kanbanProgram
-       |> TestHarness.pressKey (Key.Char ' ')
+       |> TestHarness.pressKey (Key.Char (System.Text.Rune ' '))
        |> TestHarness.pressKey Key.Right
        |> TestHarness.render)
     snapshotTest "program-form-init"
