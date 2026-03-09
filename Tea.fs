@@ -248,6 +248,25 @@ module Sub =
   ///   Sub.frameTimings GotTimings
   let frameTimings (toMsg: FrameTimings -> 'msg) : Sub<'msg> = FrameTimingsSub toMsg
 
+  /// Prepend a namespace prefix to all identifier-bearing subscriptions.
+  /// TimerSub and CustomSub carry string IDs used for reconciliation; two components
+  /// that both register a TimerSub with id "refresh" would silently collide without
+  /// namespacing. Use `Sub.prefix "componentName"` to avoid that.
+  ///
+  /// Subs without IDs (KeySub, MouseSub, ClickSub, DragSub, etc.) are returned unchanged.
+  ///
+  /// Example:
+  ///   let subs = Sub.prefix "sidebar" [
+  ///     TimerSub("refresh", TimeSpan.FromSeconds 1.0, fun () -> Tick)
+  ///     CustomSub("worker", ...)
+  ///   ]
+  ///   // → ids become "sidebar/refresh" and "sidebar/worker"
+  let prefix (ns: string) (sub: Sub<'msg>) : Sub<'msg> =
+    match sub with
+    | TimerSub(id, interval, tick) -> TimerSub(ns + "/" + id, interval, tick)
+    | CustomSub(id, start)         -> CustomSub(ns + "/" + id, start)
+    | other                        -> other
+
   /// Subscribe to an `IObservable<'msg>`. Dispatches each emitted value as a message.
   /// The subscription is automatically cancelled when the app leaves the state that
   /// returns this sub. Disposal is handled by the runtime via CancellationToken.

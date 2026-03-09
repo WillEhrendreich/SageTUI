@@ -132,6 +132,60 @@ module AnsiParser =
       if bits &&& 4 <> 0 then result <- result ||| Modifiers.Ctrl
       Some result
 
+  /// Parse a Kitty keyboard protocol sequence (CSI-u format).
+  /// Format: ESC [ <codepoint> [; <modifiers> [: <event-type>]] u
+  ///   codepoint  — Unicode codepoint of the key
+  ///   modifiers  — 1-based bitmask: (value-1) → bit0=Shift, bit1=Alt, bit2=Ctrl, bit3=Meta
+  ///   event-type — 1=press (default), 2=repeat (also dispatched), 3=release (suppressed)
+  ///
+  /// Examples:
+  ///   "[97u"     → Key.Char 'a', None mods
+  ///   "[97;2u"   → Key.Char 'a', Shift
+  ///   "[13;2u"   → Key.Enter, Shift  (Shift+Enter — unreachable via legacy CSI)
+  ///   "[97;1:3u" → None (release, suppressed)
+  let private parseKittyKey (s: string) : TerminalEvent option =
+    // s includes the leading "[" already stripped of ESC, ends with 'u'
+    if s.Length < 3 || s.[0] <> '[' || s.[s.Length - 1] <> 'u' then None
+    else
+      let inner = s.[1 .. s.Length - 2]   // strip "[" and "u"
+      let semi = inner.IndexOf(';')
+      let codeStr, modsAndEvent =
+        match semi with
+        | -1 -> inner, ""
+        | i  -> inner.[..i - 1], inner.[i + 1..]
+      match System.Int32.TryParse(codeStr) with
+      | false, _ -> None
+      | true, codepoint ->
+        // Split modifiers from optional event-type "mods:event"
+        let colon = modsAndEvent.IndexOf(':')
+        let modStr, eventType =
+          match colon with
+          | -1 -> modsAndEvent, 1
+          | i  ->
+            let evStr = modsAndEvent.[i + 1..]
+            let evt   = match System.Int32.TryParse(evStr) with true, n -> n | _ -> 1
+            modsAndEvent.[..i - 1], evt
+        // event-type 3 = key release → do not dispatch
+        match eventType with
+        | 3 -> None
+        | _ ->
+          let mods =
+            match modStr with
+            | "" -> Modifiers.None
+            | s  ->
+              match parseVtModifiers s with
+              | Some m -> m
+              | None   -> Modifiers.None
+          let key =
+            match codepoint with
+            | 9   -> Some Key.Tab
+            | 13  -> Some Key.Enter
+            | 27  -> Some Key.Escape
+            | 127 -> Some Key.Backspace
+            | cp when cp >= 32 -> Some (Key.Char (System.Text.Rune cp))
+            | _   -> None
+          key |> Option.map (fun k -> KeyPressed(k, mods))
+
   /// Try to parse a modifier-qualified CSI sequence of the form "[<base>;<mod><final>".
   /// For example: "[1;5A" → (base="1", mod=5, final='A') → Ctrl+Up.
   /// Returns None for unrecognised base/final combinations.
@@ -216,6 +270,10 @@ module AnsiParser =
     | s when s.Length > 2 && s.[0] = '[' && s.[1] = '<' ->
       // SGR mouse: CSI body is "[<btn;x;yM" → pass "<btn;x;yM" to parseSgrMouse
       parseSgrMouse s.[1..] |> Option.map MouseInput
+    | s when s.Length >= 3 && s.[0] = '[' && s.[s.Length - 1] = 'u' ->
+      // Kitty keyboard protocol (CSI-u): "[<codepoint>[;<mods>[:<event>]]u"
+      // Must come BEFORE parseModifierCsi so the 'u' final char is captured here.
+      parseKittyKey s
     | s when s.Length >= 5 && s.[0] = '[' && s.Contains(";") ->
       // Modifier-qualified CSI: "[1;5A" = Ctrl+Up, "[15;5~" = Ctrl+F5, etc.
       parseModifierCsi s

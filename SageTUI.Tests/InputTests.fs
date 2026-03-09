@@ -639,6 +639,132 @@ let parseEscapeModifierTests = testList "AnsiParser.parseEscape modifier keys" [
     AnsiParser.parseEscape "[9;5~" |> Expect.isNone "unknown [9;5~"
 ]
 
+/// Kitty keyboard protocol CSI-u format: ESC [ <codepoint> ; <modifiers> : <event-type> u
+/// Full spec: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+/// Modifier encoding: bits from (value - 1): bit0=Shift, bit1=Alt, bit2=Ctrl, bit3=Meta
+/// Event types: 1=press, 2=repeat, 3=release
+let kittyKeyTests = testList "Sprint 33: Kitty keyboard protocol" [
+
+  // ── Basic CSI-u sequences ────────────────────────────────────────────────────
+
+  testCase "CSI 97 u → Char 'a' Press" <| fun () ->
+    AnsiParser.parseEscape "[97u"
+    |> Expect.equal "plain 'a'" (Some (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.None)))
+
+  testCase "CSI 13 u → Enter Press" <| fun () ->
+    AnsiParser.parseEscape "[13u"
+    |> Expect.equal "Enter" (Some (KeyPressed(Key.Enter, Modifiers.None)))
+
+  testCase "CSI 27 u → Escape Press" <| fun () ->
+    AnsiParser.parseEscape "[27u"
+    |> Expect.equal "Escape" (Some (KeyPressed(Key.Escape, Modifiers.None)))
+
+  testCase "CSI 127 u → Backspace Press" <| fun () ->
+    AnsiParser.parseEscape "[127u"
+    |> Expect.equal "Backspace" (Some (KeyPressed(Key.Backspace, Modifiers.None)))
+
+  testCase "CSI 9 u → Tab Press" <| fun () ->
+    AnsiParser.parseEscape "[9u"
+    |> Expect.equal "Tab" (Some (KeyPressed(Key.Tab, Modifiers.None)))
+
+  // ── Modified keys ────────────────────────────────────────────────────────────
+
+  testCase "CSI 97;2u → Shift+a" <| fun () ->
+    AnsiParser.parseEscape "[97;2u"
+    |> Expect.equal "Shift+a" (Some (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.Shift)))
+
+  testCase "CSI 97;5u → Ctrl+a" <| fun () ->
+    AnsiParser.parseEscape "[97;5u"
+    |> Expect.equal "Ctrl+a" (Some (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.Ctrl)))
+
+  testCase "CSI 97;3u → Alt+a" <| fun () ->
+    AnsiParser.parseEscape "[97;3u"
+    |> Expect.equal "Alt+a" (Some (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.Alt)))
+
+  testCase "CSI 13;2u → Shift+Enter (AI chat send key)" <| fun () ->
+    AnsiParser.parseEscape "[13;2u"
+    |> Expect.equal "Shift+Enter" (Some (KeyPressed(Key.Enter, Modifiers.Shift)))
+
+  testCase "CSI 32;5u → Ctrl+Space" <| fun () ->
+    AnsiParser.parseEscape "[32;5u"
+    |> Expect.equal "Ctrl+Space" (Some (KeyPressed(Key.Char (System.Text.Rune ' '), Modifiers.Ctrl)))
+
+  testCase "CSI 13;6u → Shift+Ctrl+Enter" <| fun () ->
+    AnsiParser.parseEscape "[13;6u"
+    |> Expect.equal "Shift+Ctrl+Enter" (Some (KeyPressed(Key.Enter, Modifiers.Shift ||| Modifiers.Ctrl)))
+
+  // ── Event types (press / repeat / release) ───────────────────────────────────
+
+  testCase "CSI 97;1:1u → 'a' press event (explicit event-type=1)" <| fun () ->
+    AnsiParser.parseEscape "[97;1:1u"
+    |> Expect.equal "press" (Some (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.None)))
+
+  testCase "CSI 97;1:2u → 'a' repeat event dispatches as KeyPressed" <| fun () ->
+    AnsiParser.parseEscape "[97;1:2u"
+    |> Expect.equal "repeat dispatches as KeyPressed" (Some (KeyPressed(Key.Char (System.Text.Rune 'a'), Modifiers.None)))
+
+  testCase "CSI 97;1:3u → 'a' release event returns None (not dispatched)" <| fun () ->
+    AnsiParser.parseEscape "[97;1:3u"
+    |> Expect.isNone "release events are not dispatched via KeyPressed"
+
+  testCase "CSI 57443;5u → Ctrl+F6 via Kitty numpad encoding" <| fun () ->
+    // 57443 = 0xE063 = Kitty's F6 codepoint in extended range
+    // Just testing that extended codepoints parse without error (we can't map all)
+    let result = AnsiParser.parseEscape "[57443;5u"
+    result |> Expect.isSome "extended codepoint parses without error"
+
+  // ── Regression: existing sequences still work ────────────────────────────────
+
+  testCase "legacy [A (Up arrow) still parses after Kitty support added" <| fun () ->
+    AnsiParser.parseEscape "[A"
+    |> Expect.equal "Up still works" (Some (KeyPressed(Key.Up, Modifiers.None)))
+
+  testCase "legacy Shift+Up [1;2A still parses after Kitty support added" <| fun () ->
+    AnsiParser.parseEscape "[1;2A"
+    |> Expect.equal "Shift+Up still works" (Some (KeyPressed(Key.Up, Modifiers.Shift)))
+
+]
+
+let subPrefixTests = testList "Sprint 33: Sub.prefix" [
+
+  testCase "Sub.prefix renames TimerSub id" <| fun () ->
+    let sub = TimerSub("refresh", System.TimeSpan.FromSeconds 1.0, fun () -> ())
+    match Sub.prefix "mycomp" sub with
+    | TimerSub(id, _, _) -> id |> Expect.equal "prefixed" "mycomp/refresh"
+    | _ -> failwith "expected TimerSub"
+
+  testCase "Sub.prefix renames CustomSub id" <| fun () ->
+    let sub = CustomSub("worker", fun _ _ -> async { () })
+    match Sub.prefix "mycomp" sub with
+    | CustomSub(id, _) -> id |> Expect.equal "prefixed" "mycomp/worker"
+    | _ -> failwith "expected CustomSub"
+
+  testCase "Sub.prefix on KeySub is identity (no id to prefix)" <| fun () ->
+    let sub = KeySub(fun _ -> None)
+    match Sub.prefix "ns" sub with
+    | KeySub _ -> ()
+    | _ -> failwith "expected KeySub unchanged"
+
+  testCase "Sub.prefix prevents id collision between two components" <| fun () ->
+    let sub1 = TimerSub("refresh", System.TimeSpan.FromSeconds 1.0, fun () -> ())
+    let sub2 = TimerSub("refresh", System.TimeSpan.FromSeconds 2.0, fun () -> ())
+    let prefixed1 = Sub.prefix "comp1" sub1
+    let prefixed2 = Sub.prefix "comp2" sub2
+    match prefixed1, prefixed2 with
+    | TimerSub(id1, _, _), TimerSub(id2, _, _) ->
+      id1 |> Expect.equal "comp1 id" "comp1/refresh"
+      id2 |> Expect.equal "comp2 id" "comp2/refresh"
+      id1 |> Expect.notEqual "ids differ" id2
+    | _ -> failwith "expected TimerSubs"
+
+  testCase "Sub.prefix on PasteSub is identity" <| fun () ->
+    let sub = PasteSub(fun _ -> None)
+    match Sub.prefix "ns" sub with
+    | PasteSub _ -> ()
+    | _ -> failwith "expected PasteSub unchanged"
+
+]
+
 [<Tests>]
 let inputTests =
   testList "Phase 11: Input / AnsiParser" [
@@ -650,4 +776,6 @@ let inputTests =
     sprintThirtyTests
     dragSubTests
     bracketedPasteTests
+    kittyKeyTests
+    subPrefixTests
   ]
