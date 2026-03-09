@@ -342,6 +342,134 @@ let mouseDispatchTests = testList "Mouse dispatch" [
     mouseCount |> Expect.equal "no mouse events" 0
 ]
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 30: Phase filtering, DragSub, TerminalFocusSub, focus parse
+// ─────────────────────────────────────────────────────────────────────────────
+
+let sprintThirtyTests = testList "Sprint 30: phase filtering and new subs" [
+
+  testCase "parseEscape [I → FocusGained" <| fun () ->
+    AnsiParser.parseEscape "[I" |> Expect.equal "focus gained" (Some FocusGained)
+
+  testCase "parseEscape [O → FocusLost" <| fun () ->
+    AnsiParser.parseEscape "[O" |> Expect.equal "focus lost" (Some FocusLost)
+
+  testCase "ClickSub does NOT fire for Released phase" <| fun () ->
+    let releaseEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Released }
+    let events = [ MouseInput releaseEvent; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable clickCount = 0
+    let program : Program<unit, bool> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | true -> clickCount <- clickCount + 1
+          | false -> ()
+          (), if not msg then Quit 0 else NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ ClickSub (fun _ -> Some true)
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ] }
+    App.runWithBackend backend program
+    clickCount |> Expect.equal "click not fired for release" 0
+
+  testCase "ClickSub fires for Pressed phase" <| fun () ->
+    let pressEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Pressed }
+    let events = [ MouseInput pressEvent; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable clickCount = 0
+    let program : Program<unit, bool> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | true -> clickCount <- clickCount + 1
+          | false -> ()
+          (), if not msg then Quit 0 else NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ ClickSub (fun _ -> Some true)
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ] }
+    App.runWithBackend backend program
+    clickCount |> Expect.equal "click fired for press" 1
+
+  testCase "MouseSub does NOT fire for Motion phase" <| fun () ->
+    let motionEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Motion }
+    let events = [ MouseInput motionEvent; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable mouseCount = 0
+    let program : Program<unit, bool> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | true -> mouseCount <- mouseCount + 1
+          | false -> ()
+          (), if not msg then Quit 0 else NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ MouseSub (fun _ -> Some true)
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ] }
+    App.runWithBackend backend program
+    mouseCount |> Expect.equal "MouseSub not fired for motion" 0
+
+  testCase "MouseSub fires for Pressed and Released" <| fun () ->
+    let pressEvent   = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Pressed }
+    let releaseEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Released }
+    let events = [ MouseInput pressEvent; MouseInput releaseEvent; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable phases : MousePhase list = []
+    let program : Program<unit, MousePhase option> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | Some p -> phases <- p :: phases
+          | None -> ()
+          (), match msg with None -> Quit 0 | _ -> NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ MouseSub (fun me -> Some (Some me.Phase))
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some None | _ -> None) ] }
+    App.runWithBackend backend program
+    phases |> List.rev |> Expect.equal "press then release" [ Pressed; Released ]
+
+  testCase "DragSub fires only for Motion phase" <| fun () ->
+    let pressEvent  = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Pressed }
+    let motionEvent = { Button = LeftButton; X = 6; Y = 3; Modifiers = Modifiers.None; Phase = Motion }
+    let events = [ MouseInput pressEvent; MouseInput motionEvent; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable positions : (int * int) list = []
+    let program : Program<unit, (int * int) option> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | Some xy -> positions <- xy :: positions
+          | None -> ()
+          (), match msg with None -> Quit 0 | _ -> NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ DragSub (fun me -> Some (Some (me.X, me.Y)))
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some None | _ -> None) ] }
+    App.runWithBackend backend program
+    positions |> List.rev |> Expect.equal "only motion event" [ (6, 3) ]
+
+  testCase "TerminalFocusSub receives FocusGained and FocusLost" <| fun () ->
+    let events = [ FocusGained; FocusLost; KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, _ = TestBackend.create 80 24 events
+    let mutable focusStates : bool list = []
+    let program : Program<unit, bool option> =
+      { Init = fun () -> (), NoCmd
+        Update = fun msg () ->
+          match msg with
+          | Some b -> focusStates <- b :: focusStates
+          | None -> ()
+          (), match msg with None -> Quit 0 | _ -> NoCmd
+        View = fun () -> El.empty
+        Subscribe = fun _ ->
+          [ TerminalFocusSub (fun gained -> Some (Some gained))
+            KeySub (fun (k, _) -> match k with Key.Escape -> Some None | _ -> None) ] }
+    App.runWithBackend backend program
+    focusStates |> List.rev |> Expect.equal "gained then lost" [ true; false ]
+]
+
 
 [<Tests>]
 let inputTests =
@@ -350,4 +478,5 @@ let inputTests =
     isCompleteEscSeqTests
     parseEscapeTests
     mouseDispatchTests
+    sprintThirtyTests
   ]

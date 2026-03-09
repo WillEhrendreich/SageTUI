@@ -323,8 +323,22 @@ module Backend =
             | c when int c >= 1 && int c <= 26 ->
               // Ctrl-A (1) through Ctrl-Z (26): map to Char 'a'..'z' + Ctrl modifier
               KeyPressed(Key.Char (char (int c + int 'a' - 1)), Modifiers.Ctrl)
-            | c when Char.IsHighSurrogate(c) || Char.IsLowSurrogate(c) ->
-              KeyPressed(Key.Char ' ', Modifiers.None)  // skip surrogates; use space as sentinel
+            | c when Char.IsHighSurrogate(c) ->
+              // UTF-16 surrogate pair: read the low surrogate and reassemble into a scalar codepoint
+              let next = tryReadChar escTimeoutMs
+              match next > 0 && Char.IsLowSurrogate(char next) with
+              | true ->
+                let mutable rune = Unchecked.defaultof<Text.Rune>
+                match Text.Rune.TryCreate(c, char next, &rune) with
+                | true ->
+                  // Rune fits in BMP if it's a single char; otherwise emit the first char of the string
+                  let s = rune.ToString()
+                  KeyPressed(Key.Char s.[0], Modifiers.None)
+                | false -> KeyPressed(Key.Char ' ', Modifiers.None)  // malformed pair
+              | false -> KeyPressed(Key.Char ' ', Modifiers.None)  // lone surrogate
+            | c when Char.IsLowSurrogate(c) ->
+              // Orphaned low surrogate — should not appear without a prior high surrogate
+              KeyPressed(Key.Char ' ', Modifiers.None)
             | c -> KeyPressed(Key.Char c, Modifiers.None)
           enqueueEvent event)
     parseThread.IsBackground <- true
@@ -336,7 +350,9 @@ module Backend =
     let mutable savedModes = Unchecked.defaultof<RawMode.SavedModes>
     let mutable inputStarted = false
     let eventQueue = Collections.Concurrent.ConcurrentQueue<TerminalEvent>()
-    let mutable eventSignal : Threading.SemaphoreSlim = null
+    // Option-wrapped semaphore: None until EnterRawMode starts the reader thread.
+    // Guards PollEvent from a null-deref if called before the backend is initialised.
+    let mutable eventSignal : Threading.SemaphoreSlim option = None
     let mutable lastW, lastH = profile.Size
     let currentSize () =
       match tryGetConsoleSize () with
@@ -361,42 +377,42 @@ module Backend =
           match eventQueue.TryDequeue(&evt) with
           | true -> Some evt
           | false ->
-            match timeoutMs > 0 && eventSignal <> null with
-            | true ->
+            match timeoutMs > 0, eventSignal with
+            | true, Some sem ->
               // Wait on the semaphore: returns immediately when parse thread enqueues an event,
-              // or after timeoutMs if nothing arrives — no more fixed-sleep worst-case latency.
-              eventSignal.Wait(timeoutMs) |> ignore
+              // or after timeoutMs if nothing arrives — no fixed-sleep worst-case latency.
+              sem.Wait(timeoutMs) |> ignore
               match checkResize () with
               | Some r -> Some r
               | None ->
                 match eventQueue.TryDequeue(&evt) with
                 | true -> Some evt
                 | false -> None
-            | false ->
-              match timeoutMs > 0 with
-              | true ->
-                Threading.Thread.Sleep(timeoutMs)
-                match checkResize () with
-                | Some r -> Some r
-                | None ->
-                  match eventQueue.TryDequeue(&evt) with
-                  | true -> Some evt
-                  | false -> None
-              | false -> None
+            | true, None ->
+              Threading.Thread.Sleep(timeoutMs)
+              match checkResize () with
+              | Some r -> Some r
+              | None ->
+                match eventQueue.TryDequeue(&evt) with
+                | true -> Some evt
+                | false -> None
+            | false, _ -> None
       EnterRawMode = fun () ->
         savedModes <- RawMode.enter profile.Platform
         match inputStarted with
         | false ->
-          eventSignal <- startInputReader eventQueue
+          eventSignal <- Some (startInputReader eventQueue)
           inputStarted <- true
         | true -> ()
-        // Enable SGR mouse mode: normal button tracking (?1000h) + SGR extended coords (?1006h)
-        // ?1002h (button-event motion) is intentionally omitted until MousePhase.Motion is
-        // fully representable and tested. Re-enable with ?1002h when motion tracking is needed.
-        Console.Write("\x1b[?1000h\x1b[?1006h")
+        // Enable terminal features:
+        //   ?1000h — normal mouse button tracking (press/release)
+        //   ?1006h — SGR extended coordinates (required for columns >223)
+        //   ?1004h — OS-level focus in/out events (ESC [ I / ESC [ O)
+        // ?1002h (button-event motion) is omitted until DragSub is tested end-to-end.
+        Console.Write("\x1b[?1000h\x1b[?1006h\x1b[?1004h")
         Console.Out.Flush()
       LeaveRawMode = fun () ->
-        Console.Write("\x1b[?1006l\x1b[?1000l")
+        Console.Write("\x1b[?1004l\x1b[?1006l\x1b[?1000l")
         Console.Out.Flush()
         RawMode.leave savedModes
       Profile = profile }

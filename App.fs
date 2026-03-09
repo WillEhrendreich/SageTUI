@@ -390,11 +390,19 @@ module App =
             | FocusSub handler, KeyPressed(Key.Tab, mods) ->
               let dir = match mods.HasFlag(Modifiers.Shift) with true -> FocusPrev | false -> FocusNext
               handler dir |> Option.iter dispatch
-            | MouseSub handler, MouseInput me ->
+            // MouseSub: press and release only — Motion events go to DragSub
+            | MouseSub handler, MouseInput me when me.Phase <> Motion ->
               handler me |> Option.iter dispatch
-            | ClickSub handler, MouseInput me ->
+            // ClickSub: press only, with hit-test against keyed elements
+            | ClickSub handler, MouseInput me when me.Phase = Pressed ->
               let hitKey = ArenaRender.hitTest arena me.X me.Y
               handler (me, hitKey) |> Option.iter dispatch
+            // DragSub: motion only — fires when button-event tracking (?1002h) is enabled
+            | DragSub handler, MouseInput me when me.Phase = Motion ->
+              handler me |> Option.iter dispatch
+            // TerminalFocusSub: OS-level focus gained/lost (?1004h)
+            | TerminalFocusSub handler, FocusGained -> handler true  |> Option.iter dispatch
+            | TerminalFocusSub handler, FocusLost   -> handler false |> Option.iter dispatch
             | ResizeSub handler, Resized(w, h) ->
               handler (w, h) |> dispatch
             | _ -> ()

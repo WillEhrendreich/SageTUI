@@ -136,6 +136,9 @@ module AnsiParser =
     | "[21~" -> Some (KeyPressed(Key.F 10,  Modifiers.None))
     | "[23~" -> Some (KeyPressed(Key.F 11,  Modifiers.None))
     | "[24~" -> Some (KeyPressed(Key.F 12,  Modifiers.None))
+    // Terminal OS-level focus reporting (?1004h): ESC [ I = gained, ESC [ O = lost
+    | "[I"  -> Some FocusGained
+    | "[O"  -> Some FocusLost
     | s when s.Length > 2 && s.[0] = '[' && s.[1] = '<' ->
       // SGR mouse: CSI body is "[<btn;x;yM" → pass "<btn;x;yM" to parseSgrMouse
       parseSgrMouse s.[1..] |> Option.map MouseInput

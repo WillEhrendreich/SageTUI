@@ -153,9 +153,24 @@ module FrameTimings =
 
 /// A subscription that connects external events to messages.
 type Sub<'msg> =
+  /// Fires for every key press. The callback receives the key and any active modifiers.
   | KeySub of (Key * Modifiers -> 'msg option)
+  /// Fires for mouse press and release events only (Phase = Pressed or Released).
+  /// Does NOT fire for drag/motion events — use DragSub for those.
+  /// When button-event tracking (?1002h) is enabled in a future release, Motion events
+  /// will arrive via DragSub, not MouseSub.
   | MouseSub of (MouseEvent -> 'msg option)
+  /// Fires for mouse press events only (Phase = Pressed) at a Keyed element.
+  /// The second argument is the key of the innermost Keyed element at the cursor, or None.
+  /// Does NOT fire for mouse releases or drag/motion events.
   | ClickSub of (MouseEvent * string option -> 'msg option)
+  /// Fires for mouse drag/motion events (Phase = Motion) when button-event tracking
+  /// (?1002h) is enabled. Does NOT fire for press or release events.
+  /// Re-enable ?1002h in Detect.fs once your app registers a DragSub.
+  | DragSub of (MouseEvent -> 'msg option)
+  /// Fires when the terminal window gains or loses OS focus (?1004h must be enabled).
+  /// The bool argument is true for focus-gained, false for focus-lost.
+  | TerminalFocusSub of (bool -> 'msg option)
   | FocusSub of (FocusDirection -> 'msg option)
   | TimerSub of id: string * interval: TimeSpan * tick: (unit -> 'msg)
   | ResizeSub of (int * int -> 'msg)
@@ -212,6 +227,8 @@ module Sub =
     | KeySub handler -> KeySub(fun input -> handler input |> Option.map f)
     | MouseSub handler -> MouseSub(fun input -> handler input |> Option.map f)
     | ClickSub handler -> ClickSub(fun input -> handler input |> Option.map f)
+    | DragSub handler -> DragSub(fun input -> handler input |> Option.map f)
+    | TerminalFocusSub handler -> TerminalFocusSub(fun gained -> handler gained |> Option.map f)
     | FocusSub handler -> FocusSub(fun input -> handler input |> Option.map f)
     | TimerSub(id, interval, tick) -> TimerSub(id, interval, tick >> f)
     | ResizeSub handler -> ResizeSub(fun input -> handler input |> f)
