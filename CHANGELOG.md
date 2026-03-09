@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **Zero-alloc arena render path** (Sprints 21–22): Per-frame heap allocation in the hot path reduced from ~3,640 bytes/frame to < 100 bytes/frame — a **97 % reduction**.
+  - _Before_: `Area` was a reference record (one heap object per layout child per frame), text rendering used `StringBuilder` + `string`-per-rune, keyed nodes materialised a `string` per `El.keyed` node per frame into `HitEntry.Key: string`.
+  - _After_: `[<Struct>] Area` (zero allocation for layout traversal); `Buffer.writeCharSpan` uses `ReadOnlySpan<char>` + `SpanRuneEnumerator` (both ref-structs, zero allocation); `[<Struct>] HitEntry` stores `(KeyStart, KeyLen)` offsets into the shared `TextBuf` — string materialisation deferred to `hitTest`/`keyAreas` call sites only.
+  - `measureWidth` text case (kind=1) aligned with the render path: uses `ReadOnlySpan<char>` instead of `System.String`.
+  - `writeCharSpan` inner loop: `y >= 0 && y < buf.Height` hoisted out of the rune loop (y is loop-invariant).
+
 ### Changed
 
 - **`FieldId` is now a reference DU** (was `[<Struct>]`). This is technically a breaking
@@ -29,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Tabs.withTheme` / `VirtualList.withTheme`
 - Benchmark CI regression gate (`benchmark-regression` job): 150% threshold, 15 iterations,
   compares against stored gh-pages baseline on every push and PR.
+- Steady-state allocation tests in `ArenaAllocationTests.fs` (4 `testSequenced` tests):
+  - Dashboard tree: ≤ 1,024 B/frame after 100-frame JIT warmup
+  - Keyed tree (exercises `HitMap`): ≤ 1,024 B/frame — verifies `HitEntry` struct stores offsets, not strings
+  - NodeCount determinism across resets
+  - PeakNodes high-water mark tracking
 
 ### Fixed
 

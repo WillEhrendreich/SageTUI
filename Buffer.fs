@@ -71,14 +71,16 @@ module Buffer =
   /// Zero-allocation text write from a pre-allocated char array slice.
   /// Used by ArenaRender to avoid creating intermediate strings per frame.
   let writeCharSpan x y (fg: int32) (bg: int32) (attrs: uint16) (chars: char array) (start: int) (len: int) (maxWidth: int) buf =
-    let span = System.ReadOnlySpan<char>(chars, start, len)
-    let mutable col = x
-    for rune in span.EnumerateRunes() do
-      let w = RuneWidth.getColumnWidth rune
-      if col - x < maxWidth && col >= 0 && col < buf.Width && y >= 0 && y < buf.Height then
-        buf.Cells[y * buf.Width + col] <-
-          { Rune = rune.Value; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us }
-      col <- col + w
+    // Hoist the y bounds check — y never changes inside the rune loop.
+    if y >= 0 && y < buf.Height then
+      let span = System.ReadOnlySpan<char>(chars, start, len)
+      let mutable col = x
+      for rune in span.EnumerateRunes() do
+        let w = RuneWidth.getColumnWidth rune
+        if col - x < maxWidth && col >= 0 && col < buf.Width then
+          buf.Cells[y * buf.Width + col] <-
+            { Rune = rune.Value; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us }
+        col <- col + w
 
   let clear buf =
     System.Array.Fill(buf.Cells, emptyCell)

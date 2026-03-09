@@ -41,14 +41,41 @@ let dashboardTree =
         ]
     ]
 
+/// Same structure but with El.keyed wrappers to exercise the HitMap path.
+/// Keys are stable per-frame; strings are now materialised only in hitTest/keyAreas,
+/// not during rendering.
+let keyedDashboardTree =
+    El.column [
+        El.keyed "header" (
+            El.row [
+                El.text "Dashboard" |> El.bold |> El.fg (Color.Named(Cyan, Bright))
+            ]
+        )
+        El.keyed "main" (
+            El.row [
+                El.keyed "panel1" (El.column [ El.text "Panel 1" |> El.bordered Light |> El.fill ] |> El.fill)
+                El.keyed "panel2" (El.column [ El.text "Panel 2" |> El.bordered Light |> El.fill ] |> El.fill)
+            ] |> El.fill
+        )
+        El.keyed "statusbar" (
+            El.row [
+                El.text "Status: OK" |> El.fg (Color.Named(Green, Bright))
+                El.text " | " |> El.dim
+                El.text "80x24"    |> El.dim
+            ]
+        )
+    ]
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 /// Maximum bytes the arena path may allocate per frame in steady state.
 /// This is intentionally generous (1 KB) to be stable across GC versions
 /// and debug vs. release JIT. The important invariant is "not proportional
 /// to tree size" — i.e., allocations do not grow with each frame. In practice
-/// the steady-state delta should be < 100 bytes (boxing of the FrameArena
-/// struct fields and measurement overhead).
+/// the steady-state delta should be < 100 bytes (GC measurement overhead and
+/// any residual boxing in the F# runtime under debug JIT).
+/// Before Sprint 21: ~3,640 bytes/frame (Area records + StringBuilder + string-per-rune).
+/// After Sprint 21: < 1,024 bytes/frame (struct Area, Span<char> text path, zero-alloc layout).
 [<Literal>]
 let MaxSteadyStateBytesPerFrame = 1024L
 
@@ -117,4 +144,24 @@ let arenaAllocationTests =
             |> Expect.equal
                 "PeakNodes must equal NodeCount of the previous frame"
                 nodesBefore
+
+        testCase "keyed tree render allocates < 1KB per frame after warmup (HitMap path)" <| fun () ->
+            // This test covers the HitMap path: El.keyed nodes record (KeyStart, KeyLen) pairs
+            // in HitMap — no string materialisation during render, only during hitTest/keyAreas calls.
+            let arena = FrameArena.create 4096 65536 4096
+            let buf   = Buffer.create 80 24
+            let area  = { X = 0; Y = 0; Width = 80; Height = 24 }
+
+            let frame () =
+                FrameArena.reset arena
+                let root = Arena.lower arena keyedDashboardTree
+                ArenaRender.renderRoot arena root area buf
+
+            let totalAllocated = measureAllocBytes 100 1000 frame
+            let perFrame = totalAllocated / 1000L
+
+            (perFrame, MaxSteadyStateBytesPerFrame)
+            |> Expect.isLessThanOrEqual
+                (sprintf "Keyed-tree arena per-frame allocation %d B exceeds %d B threshold; HitEntry string materialisation must be deferred to hitTest/keyAreas callers"
+                    perFrame MaxSteadyStateBytesPerFrame)
     ]

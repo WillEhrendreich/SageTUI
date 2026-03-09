@@ -20,7 +20,10 @@ type NodeHandle = private NodeHandle of int
 module NodeHandle =
   let value (NodeHandle idx) = idx
 
-type HitEntry = { X: int; Y: int; Width: int; Height: int; Key: string }
+/// Arena hit-test entry. Key is stored as a (DataStart, DataLen) pair to avoid
+/// per-frame string allocation — materialise via System.String only when needed.
+[<Struct>]
+type HitEntry = { X: int; Y: int; Width: int; Height: int; KeyStart: int; KeyLen: int }
 
 type FrameArena =
   { Nodes: ElementNode array

@@ -68,10 +68,10 @@ module ArenaRender =
     let node = arena.Nodes.[nodeIdx]
     match node.Kind with
     | 0uy -> 0 // Empty
-    | 1uy -> // Text
+    | 1uy -> // Text — zero allocation: iterate rune widths directly from TextBuf span
       let mutable w = 0
-      let text = System.String(arena.TextBuf, node.DataStart, node.DataLen)
-      for rune in text.EnumerateRunes() do
+      let span = System.ReadOnlySpan<char>(arena.TextBuf, node.DataStart, node.DataLen)
+      for rune in System.MemoryExtensions.EnumerateRunes(span) do
         w <- w + RuneWidth.getColumnWidth rune
       w
     | 2uy -> // Row — sum of children widths
@@ -363,10 +363,11 @@ module ArenaRender =
         render arena node.FirstChild inner inheritedFg inheritedBg inheritedAttrs buf
 
       | 9uy -> // Keyed (pass through to child + record hit area)
+        // Store (KeyStart, KeyLen) pairs — no string allocation per frame.
+        // Materialise strings only when hitTest/keyAreas is called.
         match node.DataLen > 0 with
         | true ->
-          let key = System.String(arena.TextBuf, node.DataStart, node.DataLen)
-          arena.HitMap.Add({ X = area.X; Y = area.Y; Width = area.Width; Height = area.Height; Key = key })
+          arena.HitMap.Add({ X = area.X; Y = area.Y; Width = area.Width; Height = area.Height; KeyStart = node.DataStart; KeyLen = node.DataLen })
         | false -> ()
         render arena node.FirstChild area inheritedFg inheritedBg inheritedAttrs buf
 
@@ -555,7 +556,7 @@ module ArenaRender =
       | None ->
         let entry = arena.HitMap.[i]
         match x >= entry.X && x < entry.X + entry.Width && y >= entry.Y && y < entry.Y + entry.Height with
-        | true -> result <- Some entry.Key
+        | true -> result <- Some (System.String(arena.TextBuf, entry.KeyStart, entry.KeyLen))
         | false -> ()
     result
 
@@ -563,9 +564,10 @@ module ArenaRender =
     let mutable areas = Map.empty
     for i in 0 .. arena.HitMap.Count - 1 do
       let entry = arena.HitMap.[i]
+      let key = System.String(arena.TextBuf, entry.KeyStart, entry.KeyLen)
       areas <-
         Map.add
-          entry.Key
+          key
           { X = entry.X
             Y = entry.Y
             Width = entry.Width
