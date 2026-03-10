@@ -8777,7 +8777,7 @@ let sprint62ProgramOnErrorTests = testList "Program.onError (Sprint 62)" [
     result |> Expect.equal "recovery msg" (Some "Recovered from: oops")
   }
 
-  test "Program.withOnError handler returning None signals crash intent" {
+  test "Program.withOnError handler returning None means continue silently (no dispatch)" {
     let handler (_: exn) : string option = None
     let prog : Program<int, string> = {
       Init      = fun () -> (0, NoCmd)
@@ -8788,7 +8788,9 @@ let sprint62ProgramOnErrorTests = testList "Program.onError (Sprint 62)" [
     }
     let prog2 = Program.withOnError handler prog
     let result = prog2.OnError |> Option.bind (fun h -> h (System.Exception()))
-    result |> Expect.equal "None = crash" None
+    // None from a handler = "I handled it (logged, etc.), no recovery msg needed"
+    // The runtime will NOT reraise. To reraise, call `raise ex` inside the handler body.
+    result |> Expect.isNone "None = continue silently, no recovery message dispatched"
   }
 
   test "Two withOnError calls: last one wins (not chained)" {

@@ -70,7 +70,11 @@ jobs:
           -o ./artifacts
           /p:Version=${{ steps.version.outputs.VERSION }}
 
-      - name: Pack — Html (preview)
+      - name: Pack — Html (preview, independently versioned)
+        # SageTUI.Html uses its own independent versioning (currently 0.1.0-preview).
+        # It is NOT stamped with the monorepo tag version because its API stability
+        # and external dependencies (AngleSharp, Falco.Markup) follow a separate release
+        # cadence. When Html reaches stable, add /p:Version=${{ steps.version.outputs.VERSION }}.
         run: >
           dotnet pack SageTUI.Html/SageTUI.Html.fsproj
           --no-build

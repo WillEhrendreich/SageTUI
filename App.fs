@@ -13,14 +13,23 @@ type AppConfig =
     /// Maximum number of messages drained in a single frame's Update loop.
     /// Raising this allows bursty message chains; lowering it tightens loop-detection.
     /// Default: 10,000. Infinite self-dispatch cycles always trigger the guard.
-    MaxDrainMessages: int }
+    MaxDrainMessages: int
+    /// Called when an async command or subscription encounters an unhandled exception.
+    /// Receives a pre-formatted log line with timestamp, message, and stack trace.
+    /// Defaults to appending to "sagetui-errors.log" in the working directory.
+    /// Override to integrate with your application's structured logging infrastructure.
+    LogSink: string -> unit }
 
 module AppConfig =
+  let private defaultLogSink (msg: string) =
+    try System.IO.File.AppendAllText("sagetui-errors.log", msg) with _ -> ()
+
   let defaults =
     { ArenaNodes = 4096
       ArenaChars = 65536
       ArenaLayout = 4096
-      MaxDrainMessages = 10_000 }
+      MaxDrainMessages = 10_000
+      LogSink = defaultLogSink }
 
 module App =
   let private isTruthyEnvVar (value: string option) =
@@ -86,7 +95,7 @@ module App =
           try do! run dispatch
           with ex ->
             let msg = sprintf "[SageTUI] OfAsync error at %s: %s\n%s\n" (DateTime.UtcNow.ToString("u")) ex.Message ex.StackTrace
-            try System.IO.File.AppendAllText("sagetui-errors.log", msg) with _ -> ()
+            config.LogSink msg
         } |> Async.Start
       | OfCancellableAsync(id, run) ->
         match activeSubs.TryGetValue(id) with
@@ -329,9 +338,12 @@ module App =
           with ex ->
             match program.OnError with
             | Some handler ->
+              // Some recoveryMsg: dispatch the recovery message
+              // None: handler handled it (e.g. logged); continue without dispatch
+              // To reraise from inside a handler, call `raise ex` in the handler body
               match handler ex with
               | Some recoveryMsg -> dispatch recoveryMsg
-              | None -> reraise()
+              | None -> ()
             | None -> reraise()
 
         match modelChanged with
@@ -721,7 +733,7 @@ module App =
           try do! run dispatch
           with ex ->
             let msg = sprintf "[SageTUI] OfAsync error at %s: %s\n%s\n" (DateTime.UtcNow.ToString("u")) ex.Message ex.StackTrace
-            try System.IO.File.AppendAllText("sagetui-errors.log", msg) with _ -> ()
+            config.LogSink msg
         } |> Async.Start
       | OfCancellableAsync(id, run) ->
         match activeSubs.TryGetValue(id) with
@@ -860,9 +872,12 @@ module App =
           with ex ->
             match program.OnError with
             | Some handler ->
+              // Some recoveryMsg: dispatch the recovery message
+              // None: handler handled it (e.g. logged); continue without dispatch
+              // To reraise from inside a handler, call `raise ex` in the handler body
               match handler ex with
               | Some recoveryMsg -> dispatch recoveryMsg
-              | None -> reraise()
+              | None -> ()
             | None -> reraise()
 
         match modelChanged with
