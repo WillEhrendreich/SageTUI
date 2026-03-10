@@ -75,15 +75,17 @@ jobs:
         # It is NOT stamped with the monorepo tag version because its API stability
         # and external dependencies (AngleSharp, Falco.Markup) follow a separate release
         # cadence. When Html reaches stable, add /p:Version=${{ steps.version.outputs.VERSION }}.
+        # continue-on-error: true so a failure here cannot block core SageTUI from publishing.
+        continue-on-error: true
         run: >
           dotnet pack SageTUI.Html/SageTUI.Html.fsproj
           --no-build
           -c Release
           -o ./artifacts
 
-      - name: Verify packages were created
+      - name: Verify core packages were created
         run: |
-          for pkg in SageTUI SageTUI.Templates SageTUI.Html; do
+          for pkg in SageTUI SageTUI.Templates; do
             FOUND=$(ls ./artifacts/${pkg}.*.nupkg 2>/dev/null | head -1)
             if [ -z "$FOUND" ]; then
               echo "ERROR: No .nupkg found for $pkg in ./artifacts"
@@ -92,6 +94,13 @@ jobs:
             fi
             echo "Found: $FOUND"
           done
+          # Html is optional — warn but don't fail
+          FOUND=$(ls ./artifacts/SageTUI.Html.*.nupkg 2>/dev/null | head -1)
+          if [ -z "$FOUND" ]; then
+            echo "WARNING: SageTUI.Html.nupkg not found (non-blocking)"
+          else
+            echo "Found: $FOUND"
+          fi
 
       - name: Push to NuGet.org
         run: >

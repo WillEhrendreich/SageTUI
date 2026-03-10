@@ -9364,3 +9364,327 @@ let sprint64Tests =
     sprint64ProgramCombineTests
     sprint64SaveBytesTests
   ]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 65 — Cmd.saveString / loadString / Storage.bind
+// ─────────────────────────────────────────────────────────────────────────────
+
+let sprint65SaveStringTests =
+  testList "Cmd.saveString and Cmd.loadString" [
+
+    test "Cmd.saveString returns OfAsync command" {
+      let cmd = Cmd.saveString "SageTUI.Test" "key" "hello" (fun () -> ()) (fun _ -> ())
+      match cmd with
+      | OfAsync _ -> ()
+      | _ -> failtest "expected OfAsync"
+    }
+
+    test "Cmd.loadString returns OfAsync command" {
+      let cmd = Cmd.loadString "SageTUI.Test" "key" (fun _ -> ()) (fun _ -> ())
+      match cmd with
+      | OfAsync _ -> ()
+      | _ -> failtest "expected OfAsync"
+    }
+
+    testTask "saveString + loadString round-trip preserves text" {
+      let appName = sprintf "SageTUI.TestStr.%s" (System.Guid.NewGuid().ToString("N").[..7])
+      let text = "Hello, 世界! 🎉\nLine 2"
+      let mutable saveOk = false
+      let mutable loadResult : string option = None
+
+      let saveCmd = Cmd.saveString appName "rt" text (fun () -> true) (fun _ -> false)
+      match saveCmd with
+      | OfAsync f -> do! f (fun ok -> saveOk <- ok)
+      | _ -> failtest "expected OfAsync for save"
+      saveOk |> Expect.isTrue "save should succeed"
+
+      let loadCmd = Cmd.loadString appName "rt" id (fun _ -> None)
+      match loadCmd with
+      | OfAsync f -> do! f (fun r -> loadResult <- r)
+      | _ -> failtest "expected OfAsync for load"
+      loadResult |> Expect.equal "loaded text matches saved text" (Some text)
+
+      try
+        let dir = Cmd.appDataDir appName
+        if System.IO.Directory.Exists(dir) then System.IO.Directory.Delete(dir, true)
+      with _ -> ()
+    }
+
+    testTask "loadString returns None for missing key" {
+      let appName = sprintf "SageTUI.TestStrMiss.%s" (System.Guid.NewGuid().ToString("N").[..7])
+      let mutable loadResult : string option = Some "wrong"
+
+      let loadCmd = Cmd.loadString appName "nonexistent" id (fun _ -> None)
+      match loadCmd with
+      | OfAsync f -> do! f (fun r -> loadResult <- r)
+      | _ -> failtest "expected OfAsync for load"
+      loadResult |> Expect.equal "missing key returns None" None
+    }
+
+    testTask "saveString writes .bin file on disk" {
+      let appName = sprintf "SageTUI.TestStrFile.%s" (System.Guid.NewGuid().ToString("N").[..7])
+      let mutable saved = false
+
+      let saveCmd = Cmd.saveString appName "mykey" "abc" (fun () -> true) (fun _ -> false)
+      match saveCmd with
+      | OfAsync f -> do! f (fun ok -> saved <- ok)
+      | _ -> failtest "expected OfAsync"
+      saved |> Expect.isTrue "should save"
+
+      let expectedPath = System.IO.Path.Combine(Cmd.appDataDir appName, "mykey.bin")
+      System.IO.File.Exists(expectedPath) |> Expect.isTrue "bin file should exist on disk"
+
+      try System.IO.Directory.Delete(Cmd.appDataDir appName, true) with _ -> ()
+    }
+
+    test "Cmd.Storage.bind returns object with save and load functions" {
+      let storage = Cmd.Storage.bind "SageTUI.Test"
+      // smoke: calling save and load creates OfAsync commands
+      let saveCmd = storage.save "key" "hello" (fun () -> ()) (fun _ -> ())
+      let loadCmd = storage.load "key" (fun _ -> ()) (fun _ -> ())
+      match saveCmd with
+      | OfAsync _ -> ()
+      | _ -> failtest "storage.save should return OfAsync"
+      match loadCmd with
+      | OfAsync _ -> ()
+      | _ -> failtest "storage.load should return OfAsync"
+    }
+
+    testTask "Storage.bind round-trip" {
+      let appName = sprintf "SageTUI.TestStorageBind.%s" (System.Guid.NewGuid().ToString("N").[..7])
+      let storage = Cmd.Storage.bind appName
+      let mutable loaded : string option = None
+
+      let saveCmd = storage.save "bindkey" "bound value" (fun () -> true) (fun _ -> false)
+      match saveCmd with
+      | OfAsync f -> do! f (fun _ -> ())
+      | _ -> failtest "expected OfAsync"
+
+      let loadCmd = storage.load "bindkey" id (fun _ -> None)
+      match loadCmd with
+      | OfAsync f -> do! f (fun r -> loaded <- r)
+      | _ -> failtest "expected OfAsync"
+
+      loaded |> Expect.equal "Storage.bind round-trip" (Some "bound value")
+      try System.IO.Directory.Delete(Cmd.appDataDir appName, true) with _ -> ()
+    }
+
+  ]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 65 — Viewport.handleMouse
+// ─────────────────────────────────────────────────────────────────────────────
+
+let sprint65ViewportMouseTests =
+  testList "Viewport.handleMouse" [
+
+    test "ScrollUp event maps to VPScrollUp" {
+      let ev = MouseInput { Button = ScrollUp; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      Viewport.handleMouse ev |> Expect.equal "scroll up" (Some VPScrollUp)
+    }
+
+    test "ScrollDown event maps to VPScrollDown" {
+      let ev = MouseInput { Button = ScrollDown; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      Viewport.handleMouse ev |> Expect.equal "scroll down" (Some VPScrollDown)
+    }
+
+    test "Unhandled mouse button returns None" {
+      let ev = MouseInput { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Pressed }
+      Viewport.handleMouse ev |> Expect.equal "left click unhandled" None
+    }
+
+    test "Non-mouse event returns None" {
+      let ev = KeyPressed(Key.Down, Modifiers.None)
+      Viewport.handleMouse ev |> Expect.equal "key event unhandled" None
+    }
+
+    test "Viewport scrolls down via handleMouse scroll-down event" {
+      let vm =
+        Viewport.ofString (String.concat "\n" (List.init 20 (sprintf "Line %d")))
+        |> fun m -> { m with Height = 5 }
+      let ev = MouseInput { Button = ScrollDown; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      match Viewport.handleMouse ev with
+      | Some msg ->
+        let vm2 = Viewport.update msg vm
+        (vm2.ScrollTop, vm.ScrollTop) |> Expect.isGreaterThan "scrolled down"
+      | None -> failtest "expected Some VPScrollDown"
+    }
+
+    test "Viewport scrolls up via handleMouse scroll-up event" {
+      let vm =
+        Viewport.ofString (String.concat "\n" (List.init 20 (sprintf "Line %d")))
+        |> fun m -> { m with Height = 5; ScrollTop = 5 }
+      let ev = MouseInput { Button = ScrollUp; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      match Viewport.handleMouse ev with
+      | Some msg ->
+        let vm2 = Viewport.update msg vm
+        (vm.ScrollTop, vm2.ScrollTop) |> Expect.isGreaterThan "scrolled up"
+      | None -> failtest "expected Some VPScrollUp"
+    }
+
+  ]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 65 — Tabs.viewKeyed + Tabs.clickActivate
+// ─────────────────────────────────────────────────────────────────────────────
+
+let sprint65TabsClickTests =
+  testList "Tabs.viewKeyed and Tabs.clickActivate" [
+
+    test "Tabs.viewKeyed returns a row Element" {
+      let cfg : TabsConfig<string> =
+        { Items = ["Home"; "Settings"; "Help"]
+          ActiveIndex = 0
+          ToString = id
+          ActiveColor = None
+          InactiveColor = None }
+      let el = Tabs.viewKeyed "tabs" cfg
+      // Should be a Row (or contain keyed elements — the outer is a Row)
+      match el with
+      | Row _ -> ()
+      | _ -> failtest (sprintf "expected Row, got %A" el)
+    }
+
+    test "Tabs.viewKeyed wraps each item in a Keyed element" {
+      let cfg : TabsConfig<string> =
+        { Items = ["A"; "B"; "C"]
+          ActiveIndex = 1
+          ToString = id
+          ActiveColor = None
+          InactiveColor = None }
+      let el = Tabs.viewKeyed "t" cfg
+      match el with
+      | Row children ->
+        children |> List.length |> Expect.equal "3 children" 3
+        // Each child should be Keyed
+        children |> List.iteri (fun i child ->
+          match child with
+          | Keyed(key, _, _, _) ->
+            key |> Expect.stringContains (sprintf "child %d has prefix" i) "t"
+          | _ -> failtest (sprintf "child %d is not Keyed: %A" i child))
+      | _ -> failtest (sprintf "expected Row, got %A" el)
+    }
+
+    test "Tabs.clickActivate with matching key updates ActiveIndex" {
+      let cfg : TabsConfig<string> =
+        { Items = ["Home"; "Settings"; "Help"]
+          ActiveIndex = 0
+          ToString = id
+          ActiveColor = None
+          InactiveColor = None }
+      let cfg2 = Tabs.clickActivate (Some "tabs:1") "tabs" cfg
+      cfg2.ActiveIndex |> Expect.equal "index updated to 1" 1
+    }
+
+    test "Tabs.clickActivate with None hit key is no-op" {
+      let cfg : TabsConfig<string> =
+        { Items = ["Home"; "Settings"; "Help"]
+          ActiveIndex = 2
+          ToString = id
+          ActiveColor = None
+          InactiveColor = None }
+      let cfg2 = Tabs.clickActivate None "tabs" cfg
+      cfg2.ActiveIndex |> Expect.equal "unchanged" 2
+    }
+
+    test "Tabs.clickActivate with non-matching prefix key is no-op" {
+      let cfg : TabsConfig<string> =
+        { Items = ["Home"; "Settings"; "Help"]
+          ActiveIndex = 1
+          ToString = id
+          ActiveColor = None
+          InactiveColor = None }
+      let cfg2 = Tabs.clickActivate (Some "other:0") "tabs" cfg
+      cfg2.ActiveIndex |> Expect.equal "unchanged when prefix doesn't match" 1
+    }
+
+    test "Tabs.clickActivate with out-of-range index is no-op" {
+      let cfg : TabsConfig<string> =
+        { Items = ["A"; "B"]
+          ActiveIndex = 0
+          ToString = id
+          ActiveColor = None
+          InactiveColor = None }
+      let cfg2 = Tabs.clickActivate (Some "tabs:99") "tabs" cfg
+      cfg2.ActiveIndex |> Expect.equal "out-of-range unchanged" 0
+    }
+
+    test "Tabs.clickActivate activates last tab" {
+      let cfg : TabsConfig<string> =
+        { Items = ["A"; "B"; "C"]
+          ActiveIndex = 0
+          ToString = id
+          ActiveColor = None
+          InactiveColor = None }
+      let cfg2 = Tabs.clickActivate (Some "tabs:2") "tabs" cfg
+      cfg2.ActiveIndex |> Expect.equal "last tab" 2
+    }
+
+  ]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 65 — VirtualList.clickSelectAt
+// ─────────────────────────────────────────────────────────────────────────────
+
+let sprint65VListClickTests =
+  testList "VirtualList.clickSelectAt" [
+
+    test "clickSelectAt row 0 selects first visible item" {
+      let m = VirtualList.ofList 5 ["a"; "b"; "c"; "d"; "e"]
+      let m2 = VirtualList.clickSelectAt 0 m
+      m2.SelectedIndex |> Expect.equal "index 0 selected" (Some 0)
+    }
+
+    test "clickSelectAt row 2 selects third visible item" {
+      let m = VirtualList.ofList 5 ["a"; "b"; "c"; "d"; "e"]
+      let m2 = VirtualList.clickSelectAt 2 m
+      m2.SelectedIndex |> Expect.equal "index 2 selected" (Some 2)
+    }
+
+    test "clickSelectAt accounts for scroll offset" {
+      let m = { VirtualList.ofList 3 ["a"; "b"; "c"; "d"; "e"] with ScrollOffset = 2 }
+      // Row 0 visible item = Items[2] = "c" → SelectedIndex should be 2
+      let m2 = VirtualList.clickSelectAt 0 m
+      m2.SelectedIndex |> Expect.equal "offset 2, row 0 = index 2" (Some 2)
+    }
+
+    test "clickSelectAt beyond visible items clamps to last item" {
+      let m = VirtualList.ofList 5 ["a"; "b"; "c"]
+      // Only 3 items; clicking row 10 should land on last valid index 2
+      let m2 = VirtualList.clickSelectAt 10 m
+      m2.SelectedIndex |> Expect.equal "clamped to last" (Some 2)
+    }
+
+    test "clickSelectAt negative relativeY selects first visible item" {
+      let m = VirtualList.ofList 5 ["a"; "b"; "c"]
+      let m2 = VirtualList.clickSelectAt -3 m
+      m2.SelectedIndex |> Expect.equal "negative clamped to 0" (Some 0)
+    }
+
+    test "clickSelectAt on empty list is no-op" {
+      let m = VirtualList.ofList 5 ([] : string list)
+      let m2 = VirtualList.clickSelectAt 0 m
+      m2.SelectedIndex |> Expect.equal "empty list stays None" None
+    }
+
+    test "clickSelectAt calls ensureVisible" {
+      let m = VirtualList.ofList 3 ["a"; "b"; "c"; "d"; "e"]
+      let m2 = VirtualList.clickSelectAt 1 m
+      // The selected item should be visible in the viewport
+      match m2.SelectedIndex with
+      | None -> failtest "should have selection"
+      | Some i ->
+        let inView = i >= m2.ScrollOffset && i < m2.ScrollOffset + m2.ViewportHeight
+        inView |> Expect.isTrue "selected item must be visible after clickSelectAt"
+    }
+
+  ]
+
+[<Tests>]
+let sprint65Tests =
+  testList "Sprint 65" [
+    sprint65SaveStringTests
+    sprint65ViewportMouseTests
+    sprint65TabsClickTests
+    sprint65VListClickTests
+  ]

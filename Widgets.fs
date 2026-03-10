@@ -831,6 +831,59 @@ module Tabs =
         ActiveColor   = Some theme.Primary
         InactiveColor = Some theme.TextDim }
 
+  /// Like `view`, but wraps each tab label in `El.clickRegion` so that click events
+  /// can be routed via `Sub.clicks` or `ClickSub`. Keys are `"{keyPrefix}:{index}"`.
+  ///
+  /// Pair with `Tabs.clickActivate` in your `Update` function:
+  /// ```fsharp
+  /// // Subscribe (declared at module level):
+  /// let tabClicks = Sub.clicks [ "tabs:0", TabClicked 0; "tabs:1", TabClicked 1 ]
+  ///
+  /// // Or in Update, using clickActivate to handle any tab generically:
+  /// | TabClicked hitKey -> { model with Tabs = Tabs.clickActivate (Some hitKey) "tabs" model.Tabs }, NoCmd
+  /// ```
+  let viewKeyed (keyPrefix: string) (config: TabsConfig<'a>) : Element =
+    config.Items
+    |> List.mapi (fun i item ->
+      let label = sprintf " %s " (config.ToString item)
+      let isActive = i = config.ActiveIndex
+      let el =
+        match isActive with
+        | true ->
+          let styled = El.text label |> El.bold
+          match config.ActiveColor with
+          | Some c -> styled |> El.fg c
+          | None -> styled
+        | false ->
+          let styled = El.text label
+          match config.InactiveColor with
+          | Some c -> styled |> El.fg c
+          | None -> styled
+      El.clickRegion (sprintf "%s:%d" keyPrefix i) el)
+    |> El.row
+
+  /// Update `config.ActiveIndex` based on a clicked `hitKey` from `Sub.clicks` /
+  /// `ClickSub`. Keys are expected to be `"{keyPrefix}:{index}"` as produced by
+  /// `Tabs.viewKeyed`. Returns the config unchanged when:
+  /// - `hitKey` is `None`
+  /// - the key prefix doesn't match
+  /// - the parsed index is out of bounds
+  let clickActivate (hitKey: string option) (keyPrefix: string) (config: TabsConfig<'a>) : TabsConfig<'a> =
+    let expectedPrefix = keyPrefix + ":"
+    match hitKey with
+    | None -> config
+    | Some key ->
+      match key.StartsWith(expectedPrefix) with
+      | false -> config
+      | true  ->
+        let indexStr = key.[expectedPrefix.Length ..]
+        match System.Int32.TryParse(indexStr) with
+        | false, _ -> config
+        | true, i  ->
+          match i >= 0 && i < config.Items.Length with
+          | false -> config
+          | true  -> { config with ActiveIndex = i }
+
 /// Sort direction for table columns.
 type SortDirection = Ascending | Descending
 
@@ -1182,6 +1235,18 @@ module VirtualList =
     | MouseInput { Button = ScrollUp }   -> selectPrev m
     | MouseInput { Button = ScrollDown } -> selectNext m
     | _ -> m
+
+  /// Select the item at `relativeY` rows below the top of the visible viewport.
+  /// Accounts for `ScrollOffset`, clamps to the valid item range, and calls
+  /// `ensureVisible` so the selected item is always in view.
+  /// No-op on an empty list.
+  let clickSelectAt (relativeY: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+    match m.Items.Length with
+    | 0 -> m
+    | n ->
+      let raw   = m.ScrollOffset + (max 0 relativeY)
+      let index = min (n - 1) raw
+      { m with SelectedIndex = Some index } |> ensureVisible
 
   // ── Multi-select ─────────────────────────────────────────────────────────────
 
@@ -3135,6 +3200,14 @@ module Viewport =
     | KeyChar 'G' -> Some VPScrollToBottom
     | Key.PageDown -> Some VPPageDown
     | Key.PageUp   -> Some VPPageUp
+    | _ -> None
+
+  /// Map mouse scroll events to `ViewportMsg`. Returns `None` for unhandled events.
+  /// Handles `ScrollUp` → `VPScrollUp` and `ScrollDown` → `VPScrollDown`.
+  let handleMouse (event: TerminalEvent) : ViewportMsg option =
+    match event with
+    | MouseInput { Button = ScrollUp }   -> Some VPScrollUp
+    | MouseInput { Button = ScrollDown } -> Some VPScrollDown
     | _ -> None
 
   // ── View ───────────────────────────────────────────────────────────────────

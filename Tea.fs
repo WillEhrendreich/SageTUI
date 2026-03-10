@@ -273,7 +273,42 @@ module Cmd =
           dispatch (onError ex)
       })
 
-/// Per-frame render timing measurements. All values are in milliseconds.
+  /// Persist a UTF-8 string to `{appDataDir appName}/{key}.bin` asynchronously.
+  /// Creates the directory if it doesn't exist.
+  /// Dispatches `onDone ()` on success, `onError exn` on failure.
+  let saveString
+    (appName: string)
+    (key: string)
+    (text: string)
+    (onDone: unit -> 'msg)
+    (onError: exn -> 'msg) : Cmd<'msg> =
+    saveBytes appName key (Text.Encoding.UTF8.GetBytes(text)) onDone onError
+
+  /// Load a UTF-8 string from `{appDataDir appName}/{key}.bin` asynchronously.
+  /// Dispatches `onLoaded (Some string)` if the file exists, `onLoaded None` if it doesn't.
+  /// Dispatches `onError exn` on I/O failure (other than file-not-found).
+  let loadString
+    (appName: string)
+    (key: string)
+    (onLoaded: string option -> 'msg)
+    (onError: exn -> 'msg) : Cmd<'msg> =
+    loadBytes appName key (Option.map (fun b -> Text.Encoding.UTF8.GetString(b)) >> onLoaded) onError
+
+  /// Return a bound storage helper for a specific app name.
+  /// Avoids repeating the `appName` argument at every call site.
+  ///
+  /// Example:
+  /// ```fsharp
+  /// let store = Cmd.Storage.bind "MyApp"
+  /// store.save "prefs" settingsJson onSaved onError
+  /// store.load "prefs" onLoaded onError
+  /// ```
+  module Storage =
+    let bind (appName: string) =
+      {| save = saveString appName
+         load = loadString appName |}
+
+
 /// Available via FrameTimingsSub — subscribe to receive one record per frame.
 type FrameTimings = {
   /// Time spent in ArenaRender.renderRoot (layout + draw into back buffer). Milliseconds.
@@ -728,6 +763,11 @@ module Program =
   /// `viewCompose` receives both sub-views and must produce a single `Element`
   /// (typically `El.row [view1; view2]` or `El.column [view1; view2]`).
   ///
+  /// **Note**: For real applications, prefer defining your own discriminated union for messages
+  /// and using `Program.embed` for composition. `Choice<>` call sites are hard to read — you
+  /// must mentally map `Choice1Of2`/`Choice2Of2` to sub-program semantics. This combinator
+  /// is most useful for prototypes and side-by-side demos.
+  ///
   /// Example:
   /// ```fsharp
   /// let combined =
@@ -736,6 +776,7 @@ module Program =
   ///     counterProgram
   ///     timerProgram
   /// ```
+  [<System.Obsolete("Program.combine is a preview API. For production code, prefer Program.embed with your own DU to get readable call sites instead of Choice1Of2/Choice2Of2.")>]
   let combine
     (viewCompose: Element -> Element -> Element)
     (p1: Program<'m1, 'msg1>)
