@@ -5705,8 +5705,90 @@ let sprint47PresenterTests = testList "Sprint 47 Presenter" [
     sb.Length |> Expect.equal "empty output for no changes" 0
 ]
 
+// ── Sprint 48: Zero-alloc PackedColor tests ──────────────────────────────────
+
+let sprint48PackedColorTests = testList "Sprint 48 PackedColor zero-alloc" [
+  let fgPacked c =
+    let sb = System.Text.StringBuilder()
+    Ansi.appendFgColorPacked sb (PackedColor.pack c)
+    sb.ToString()
+
+  let bgPacked c =
+    let sb = System.Text.StringBuilder()
+    Ansi.appendBgColorPacked sb (PackedColor.pack c)
+    sb.ToString()
+
+  let fgUnpacked c =
+    let sb = System.Text.StringBuilder()
+    Ansi.appendFgColor sb c
+    sb.ToString()
+
+  let bgUnpacked c =
+    let sb = System.Text.StringBuilder()
+    Ansi.appendBgColor sb c
+    sb.ToString()
+
+  testCase "appendFgColorPacked Default is zero-alloc and matches DU path" <| fun () ->
+    fgPacked Default |> Expect.equal "fg default packed = unpacked" (fgUnpacked Default)
+
+  testCase "appendBgColorPacked Default is zero-alloc and matches DU path" <| fun () ->
+    bgPacked Default |> Expect.equal "bg default packed = unpacked" (bgUnpacked Default)
+
+  testCase "appendFgColorPacked Named Normal matches all 8 base colors" <| fun () ->
+    for bc in [Black;Red;Green;Yellow;Blue;Magenta;Cyan;White] do
+      let c = Named(bc, Normal)
+      fgPacked c |> Expect.equal (sprintf "fg named normal %A packed = unpacked" bc) (fgUnpacked c)
+
+  testCase "appendFgColorPacked Named Bright matches all 8 base colors" <| fun () ->
+    for bc in [Black;Red;Green;Yellow;Blue;Magenta;Cyan;White] do
+      let c = Named(bc, Bright)
+      fgPacked c |> Expect.equal (sprintf "fg named bright %A packed = unpacked" bc) (fgUnpacked c)
+
+  testCase "appendBgColorPacked Named Normal matches all 8 base colors" <| fun () ->
+    for bc in [Black;Red;Green;Yellow;Blue;Magenta;Cyan;White] do
+      let c = Named(bc, Normal)
+      bgPacked c |> Expect.equal (sprintf "bg named normal %A packed = unpacked" bc) (bgUnpacked c)
+
+  testCase "appendBgColorPacked Named Bright matches all 8 base colors" <| fun () ->
+    for bc in [Black;Red;Green;Yellow;Blue;Magenta;Cyan;White] do
+      let c = Named(bc, Bright)
+      bgPacked c |> Expect.equal (sprintf "bg named bright %A packed = unpacked" bc) (bgUnpacked c)
+
+  testCase "appendFgColorPacked Ansi256 spot checks" <| fun () ->
+    for i in [0uy; 1uy; 127uy; 255uy] do
+      let c = Ansi256 i
+      fgPacked c |> Expect.equal (sprintf "fg ansi256 %d packed = unpacked" i) (fgUnpacked c)
+
+  testCase "appendBgColorPacked Ansi256 spot checks" <| fun () ->
+    for i in [0uy; 1uy; 127uy; 255uy] do
+      let c = Ansi256 i
+      bgPacked c |> Expect.equal (sprintf "bg ansi256 %d packed = unpacked" i) (bgUnpacked c)
+
+  testCase "appendFgColorPacked Rgb spot checks" <| fun () ->
+    for (r, g, b) in [(0uy,0uy,0uy); (255uy,128uy,0uy); (255uy,255uy,255uy)] do
+      let c = Rgb(r,g,b)
+      fgPacked c |> Expect.equal (sprintf "fg rgb(%d,%d,%d) packed = unpacked" r g b) (fgUnpacked c)
+
+  testCase "appendBgColorPacked Rgb spot checks" <| fun () ->
+    for (r, g, b) in [(0uy,0uy,0uy); (255uy,128uy,0uy); (255uy,255uy,255uy)] do
+      let c = Rgb(r,g,b)
+      bgPacked c |> Expect.equal (sprintf "bg rgb(%d,%d,%d) packed = unpacked" r g b) (bgUnpacked c)
+
+  testProperty "appendFgColorPacked matches appendFgColor for all packable colors" <| fun (c: Color) ->
+    fgPacked c = fgUnpacked c
+
+  testProperty "appendBgColorPacked matches appendBgColor for all packable colors" <| fun (c: Color) ->
+    bgPacked c = bgUnpacked c
+]
+
 [<Tests>]
 let sprint47Tests =
   testList "Sprint 47" [
     sprint47PresenterTests
+  ]
+
+[<Tests>]
+let sprint48Tests =
+  testList "Sprint 48" [
+    sprint48PackedColorTests
   ]

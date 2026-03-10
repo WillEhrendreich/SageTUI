@@ -129,8 +129,45 @@ module Ansi =
     if TextAttrs.has TextAttrs.hidden attrs then appendEsc sb; sb.Append("8m") |> ignore
     if TextAttrs.has TextAttrs.strikethrough attrs then appendEsc sb; sb.Append("9m") |> ignore
 
-  let appendFgColorPacked (sb: StringBuilder) (packed: int32) = appendFgColor sb (PackedColor.unpack packed)
-  let appendBgColorPacked (sb: StringBuilder) (packed: int32) = appendBgColor sb (PackedColor.unpack packed)
+  /// Zero-alloc fg color: decodes packed bits directly without allocating a Color DU.
+  let appendFgColorPacked (sb: StringBuilder) (packed: int32) =
+    let tag = packed &&& 0x3
+    appendEsc sb
+    match tag with
+    | 0 -> sb.Append("39m") |> ignore
+    | 1 ->
+      let bcIdx  = (packed >>> 2) &&& 0x7
+      let iIdx   = (packed >>> 5) &&& 0x1
+      let offset = if iIdx = 0 then 30 else 90
+      sb.Append(offset + bcIdx).Append('m') |> ignore
+    | 2 ->
+      let idx = (packed >>> 8) &&& 0xFF
+      sb.Append("38;5;").Append(idx).Append('m') |> ignore
+    | _ ->
+      let r = (packed >>>  8) &&& 0xFF
+      let g = (packed >>> 16) &&& 0xFF
+      let b = (packed >>> 24) &&& 0xFF
+      sb.Append("38;2;").Append(r).Append(';').Append(g).Append(';').Append(b).Append('m') |> ignore
+
+  /// Zero-alloc bg color: decodes packed bits directly without allocating a Color DU.
+  let appendBgColorPacked (sb: StringBuilder) (packed: int32) =
+    let tag = packed &&& 0x3
+    appendEsc sb
+    match tag with
+    | 0 -> sb.Append("49m") |> ignore
+    | 1 ->
+      let bcIdx  = (packed >>> 2) &&& 0x7
+      let iIdx   = (packed >>> 5) &&& 0x1
+      let offset = if iIdx = 0 then 40 else 100
+      sb.Append(offset + bcIdx).Append('m') |> ignore
+    | 2 ->
+      let idx = (packed >>> 8) &&& 0xFF
+      sb.Append("48;5;").Append(idx).Append('m') |> ignore
+    | _ ->
+      let r = (packed >>>  8) &&& 0xFF
+      let g = (packed >>> 16) &&& 0xFF
+      let b = (packed >>> 24) &&& 0xFF
+      sb.Append("48;2;").Append(r).Append(';').Append(g).Append(';').Append(b).Append('m') |> ignore
   let appendTextAttrsPacked (sb: StringBuilder) (packed: uint16) = appendTextAttrs sb { Value = packed }
 
   /// Produce an OSC 52 escape sequence that writes `text` to the system clipboard.
