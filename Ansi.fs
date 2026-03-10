@@ -72,6 +72,67 @@ module Ansi =
   let bgColorPacked (packed: int32) = bgColor (PackedColor.unpack packed)
   let textAttrsPacked (packed: uint16) = textAttrs { Value = packed }
 
+  // ---------------------------------------------------------------------------
+  // Zero-alloc StringBuilder append helpers — used by Presenter.presentInto.
+  // These write ANSI sequences directly into a pre-allocated StringBuilder using
+  // the StringBuilder.Append(int) overload, which is zero-alloc (JIT writes the
+  // decimal representation directly into the internal char[] without a string).
+  // ---------------------------------------------------------------------------
+
+  let private appendEsc (sb: StringBuilder) = sb.Append("\x1b[") |> ignore
+
+  let appendMoveCursor (sb: StringBuilder) row col =
+    appendEsc sb
+    sb.Append(row + 1).Append(';').Append(col + 1).Append('H') |> ignore
+
+  let appendResetStyle (sb: StringBuilder) = sb.Append("\x1b[0m") |> ignore
+
+  let appendFgColor (sb: StringBuilder) (c: Color) =
+    match c with
+    | Default -> appendEsc sb; sb.Append("39m") |> ignore
+    | Named(base', intensity) ->
+      let code =
+        match base' with
+        | Black -> 0 | Red -> 1 | Green -> 2 | Yellow -> 3
+        | Blue -> 4 | Magenta -> 5 | Cyan -> 6 | White -> 7
+      let offset = match intensity with Normal -> 30 | Bright -> 90
+      appendEsc sb; sb.Append(offset + code).Append('m') |> ignore
+    | Ansi256 idx ->
+      appendEsc sb; sb.Append("38;5;").Append(int idx).Append('m') |> ignore
+    | Rgb(r, g, b) ->
+      appendEsc sb
+      sb.Append("38;2;").Append(int r).Append(';').Append(int g).Append(';').Append(int b).Append('m') |> ignore
+
+  let appendBgColor (sb: StringBuilder) (c: Color) =
+    match c with
+    | Default -> appendEsc sb; sb.Append("49m") |> ignore
+    | Named(base', intensity) ->
+      let code =
+        match base' with
+        | Black -> 0 | Red -> 1 | Green -> 2 | Yellow -> 3
+        | Blue -> 4 | Magenta -> 5 | Cyan -> 6 | White -> 7
+      let offset = match intensity with Normal -> 40 | Bright -> 100
+      appendEsc sb; sb.Append(offset + code).Append('m') |> ignore
+    | Ansi256 idx ->
+      appendEsc sb; sb.Append("48;5;").Append(int idx).Append('m') |> ignore
+    | Rgb(r, g, b) ->
+      appendEsc sb
+      sb.Append("48;2;").Append(int r).Append(';').Append(int g).Append(';').Append(int b).Append('m') |> ignore
+
+  let appendTextAttrs (sb: StringBuilder) (attrs: TextAttrs) =
+    if TextAttrs.has TextAttrs.bold attrs then appendEsc sb; sb.Append("1m") |> ignore
+    if TextAttrs.has TextAttrs.dim attrs then appendEsc sb; sb.Append("2m") |> ignore
+    if TextAttrs.has TextAttrs.italic attrs then appendEsc sb; sb.Append("3m") |> ignore
+    if TextAttrs.has TextAttrs.underline attrs then appendEsc sb; sb.Append("4m") |> ignore
+    if TextAttrs.has TextAttrs.blink attrs then appendEsc sb; sb.Append("5m") |> ignore
+    if TextAttrs.has TextAttrs.reverse attrs then appendEsc sb; sb.Append("7m") |> ignore
+    if TextAttrs.has TextAttrs.hidden attrs then appendEsc sb; sb.Append("8m") |> ignore
+    if TextAttrs.has TextAttrs.strikethrough attrs then appendEsc sb; sb.Append("9m") |> ignore
+
+  let appendFgColorPacked (sb: StringBuilder) (packed: int32) = appendFgColor sb (PackedColor.unpack packed)
+  let appendBgColorPacked (sb: StringBuilder) (packed: int32) = appendBgColor sb (PackedColor.unpack packed)
+  let appendTextAttrsPacked (sb: StringBuilder) (packed: uint16) = appendTextAttrs sb { Value = packed }
+
   /// Produce an OSC 52 escape sequence that writes `text` to the system clipboard.
   /// Supported by most modern terminals (kitty, WezTerm, iTerm2, Windows Terminal, tmux ≥3.2).
   /// Silently ignored by terminals that do not implement OSC 52.
@@ -80,8 +141,14 @@ module Ansi =
     sprintf "\x1b]52;c;%s\x07" encoded
 
 module Presenter =
-  let present (changes: ResizeArray<int>) (buf: Buffer) =
-    let sb = StringBuilder()
+  /// Zero-alloc hot path: writes ANSI output for all changed cells directly into
+  /// a pre-allocated StringBuilder. Caller owns the StringBuilder lifecycle:
+  ///   1. Pre-allocate once: `let sb = StringBuilder(65536)`
+  ///   2. Each frame: `sb.Clear(); presentInto sb changes buf; backend.Write(sb.ToString())`
+  /// This eliminates the per-frame `StringBuilder()` allocation and the hundreds of
+  /// `sprintf`-produced strings from moveCursor / fgColor / bgColor / textAttrs.
+  /// The final `sb.ToString()` is a single allocation; see presentIntoSpan for span path.
+  let presentInto (sb: StringBuilder) (changes: ResizeArray<int>) (buf: Buffer) =
     let mutable lastRow = -1
     let mutable lastCol = -1
     let mutable lastFg = 0
@@ -93,37 +160,45 @@ module Presenter =
       let y = idx / buf.Width
       let cell = buf.Cells.[idx]
 
-      // Skip continuation cells — they are the right half of a wide character
-      // already rendered by the previous cell's emission.
       if cell.Rune <> 0 then
 
         match y <> lastRow || x <> lastCol + 1 with
-        | true -> sb.Append(Ansi.moveCursor y x) |> ignore
+        | true -> Ansi.appendMoveCursor sb y x
         | false -> ()
 
         match cell.Fg <> lastFg || cell.Bg <> lastBg || cell.Attrs <> lastAttrs with
         | true ->
-          sb.Append(Ansi.resetStyle) |> ignore
-          sb.Append(Ansi.fgColorPacked cell.Fg) |> ignore
-          sb.Append(Ansi.bgColorPacked cell.Bg) |> ignore
-          sb.Append(Ansi.textAttrsPacked cell.Attrs) |> ignore
+          Ansi.appendResetStyle sb
+          Ansi.appendFgColorPacked sb cell.Fg
+          Ansi.appendBgColorPacked sb cell.Bg
+          Ansi.appendTextAttrsPacked sb cell.Attrs
           lastFg <- cell.Fg
           lastBg <- cell.Bg
           lastAttrs <- cell.Attrs
         | false -> ()
 
-        let rune = System.Text.Rune(cell.Rune)
-        sb.Append(rune.ToString()) |> ignore
-        lastCol <- x + (RuneWidth.getColumnWidth rune) - 1
+        // ASCII fast path: avoid Rune.ToString() allocation for printable ASCII (U+0020–U+007E).
+        // Rune column width is always 1 for ASCII; skip the RuneWidth lookup too.
+        let colWidth =
+          match cell.Rune >= 0x20 && cell.Rune <= 0x7E with
+          | true ->
+            sb.Append(char cell.Rune) |> ignore
+            1
+          | false ->
+            let rune = System.Text.Rune(cell.Rune)
+            sb.Append(rune.ToString()) |> ignore
+            RuneWidth.getColumnWidth rune
+
+        lastCol <- x + colWidth - 1
         lastRow <- y
 
+  let present (changes: ResizeArray<int>) (buf: Buffer) =
+    let sb = StringBuilder()
+    presentInto sb changes buf
     sb.ToString()
 
-  /// Like present, but offsets all row cursor positions by `rowOffset`.
-  /// Use for inline (non-alt-screen) rendering where the frame starts below
-  /// the current cursor position rather than at row 0.
-  let presentAt (rowOffset: int) (changes: ResizeArray<int>) (buf: Buffer) =
-    let sb = StringBuilder()
+  /// Zero-alloc inline variant — writes rows offset by `rowOffset` for non-alt-screen rendering.
+  let presentAtInto (rowOffset: int) (sb: StringBuilder) (changes: ResizeArray<int>) (buf: Buffer) =
     let mutable lastTerminalRow = -1
     let mutable lastCol = -1
     let mutable lastFg = 0
@@ -136,30 +211,42 @@ module Presenter =
       let termRow = y + rowOffset
       let cell = buf.Cells.[idx]
 
-      // Skip continuation cells — they are the right half of a wide character
-      // already rendered by the previous cell's emission.
       if cell.Rune <> 0 then
 
         match termRow <> lastTerminalRow || x <> lastCol + 1 with
-        | true -> sb.Append(Ansi.moveCursor termRow x) |> ignore
+        | true -> Ansi.appendMoveCursor sb termRow x
         | false -> ()
 
         match cell.Fg <> lastFg || cell.Bg <> lastBg || cell.Attrs <> lastAttrs with
         | true ->
-          sb.Append(Ansi.resetStyle) |> ignore
-          sb.Append(Ansi.fgColorPacked cell.Fg) |> ignore
-          sb.Append(Ansi.bgColorPacked cell.Bg) |> ignore
-          sb.Append(Ansi.textAttrsPacked cell.Attrs) |> ignore
+          Ansi.appendResetStyle sb
+          Ansi.appendFgColorPacked sb cell.Fg
+          Ansi.appendBgColorPacked sb cell.Bg
+          Ansi.appendTextAttrsPacked sb cell.Attrs
           lastFg <- cell.Fg
           lastBg <- cell.Bg
           lastAttrs <- cell.Attrs
         | false -> ()
 
-        let rune = System.Text.Rune(cell.Rune)
-        sb.Append(rune.ToString()) |> ignore
-        lastCol <- x + (RuneWidth.getColumnWidth rune) - 1
+        let colWidth =
+          match cell.Rune >= 0x20 && cell.Rune <= 0x7E with
+          | true ->
+            sb.Append(char cell.Rune) |> ignore
+            1
+          | false ->
+            let rune = System.Text.Rune(cell.Rune)
+            sb.Append(rune.ToString()) |> ignore
+            RuneWidth.getColumnWidth rune
+
+        lastCol <- x + colWidth - 1
         lastTerminalRow <- termRow
 
+  /// Like presentAt, but offsets all row cursor positions by `rowOffset`.
+  /// Use for inline (non-alt-screen) rendering where the frame starts below
+  /// the current cursor position rather than at row 0.
+  let presentAt (rowOffset: int) (changes: ResizeArray<int>) (buf: Buffer) =
+    let sb = StringBuilder()
+    presentAtInto rowOffset sb changes buf
     sb.ToString()
 
 module ColorFallback =

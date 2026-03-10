@@ -304,9 +304,14 @@ module App =
       interpretCmd initCmd
       let mutable subs = program.Subscribe model
       reconcileSubs subs
-      // Pre-allocate the diff buffer once. diffInto clears and fills it each frame,
-      // eliminating the per-frame ResizeArray allocation that would defeat the zero-GC claim.
+      // Pre-allocate hot-path buffers once. Each is cleared and reused every frame.
+      // This eliminates the per-frame heap allocations that would trigger GC gen0.
       let diffChanges = ResizeArray<int>(256)
+      let presentBuf = System.Text.StringBuilder(65536)
+      // Input burst coalescing: pre-allocate collections used in the event polling loop.
+      let burstEvents = System.Collections.Generic.List<TerminalEvent>(32)
+      let lastMotionIdx = System.Collections.Generic.Dictionary<MouseButton, int>(8)
+      let suppressedEvents = System.Collections.Generic.HashSet<int>(32)
 
       while running do
         let mutable msg = Unchecked.defaultof<'msg>
@@ -487,8 +492,9 @@ module App =
           match diffChanges.Count > 0 with
           | true ->
             let presentStart = frameSw.Elapsed.TotalMilliseconds
-            let output = Presenter.present diffChanges backBuf
-            backend.Write(output)
+            presentBuf.Clear() |> ignore
+            Presenter.presentInto presentBuf diffChanges backBuf
+            backend.Write(presentBuf.ToString())
             backend.Flush()
             let presentMs = frameSw.Elapsed.TotalMilliseconds - presentStart
             let timings =
@@ -544,34 +550,32 @@ module App =
 
         match backend.PollEvent 16 with
         | Some firstEvent ->
-          // Collect all available events in this burst
-          let burst = System.Collections.Generic.List<TerminalEvent>()
-          burst.Add(firstEvent)
+          // Collect all available events in this burst (pre-allocated list, cleared each poll)
+          burstEvents.Clear()
+          burstEvents.Add(firstEvent)
           let mutable more = true
           while more do
             match backend.PollEvent 0 with
-            | Some next -> burst.Add(next)
+            | Some next -> burstEvents.Add(next)
             | None -> more <- false
           // Coalesce: for Motion events with the same button, keep only the last one.
-          // Build a set of which Motion buttons have a later Motion for the same button.
-          let suppressed =
-            let lastMotionIdx = System.Collections.Generic.Dictionary<MouseButton, int>()
-            for i in 0 .. burst.Count - 1 do
-              match burst.[i] with
-              | MouseInput me when me.Phase = Motion -> lastMotionIdx.[me.Button] <- i
+          // Use pre-allocated Dictionary and HashSet — clear rather than reallocate.
+          lastMotionIdx.Clear()
+          suppressedEvents.Clear()
+          for i in 0 .. burstEvents.Count - 1 do
+            match burstEvents.[i] with
+            | MouseInput me when me.Phase = Motion -> lastMotionIdx.[me.Button] <- i
+            | _ -> ()
+          for i in 0 .. burstEvents.Count - 1 do
+            match burstEvents.[i] with
+            | MouseInput me when me.Phase = Motion ->
+              match lastMotionIdx.TryGetValue(me.Button) with
+              | true, last when last <> i -> suppressedEvents.Add(i) |> ignore
               | _ -> ()
-            let result = System.Collections.Generic.HashSet<int>()
-            for i in 0 .. burst.Count - 1 do
-              match burst.[i] with
-              | MouseInput me when me.Phase = Motion ->
-                match lastMotionIdx.TryGetValue(me.Button) with
-                | true, last when last <> i -> result.Add(i) |> ignore
-                | _ -> ()
-              | _ -> ()
-            result
-          for i in 0 .. burst.Count - 1 do
-            match suppressed.Contains(i) with
-            | false -> processEvent burst.[i]
+            | _ -> ()
+          for i in 0 .. burstEvents.Count - 1 do
+            match suppressedEvents.Contains(i) with
+            | false -> processEvent burstEvents.[i]
             | true -> ()
         | None ->
           Thread.Sleep 1
@@ -829,6 +833,7 @@ module App =
       let mutable subs = program.Subscribe model
       reconcileSubs subs
       let diffChanges = ResizeArray<int>(256)
+      let presentBuf = System.Text.StringBuilder(65536)
 
       while running do
         let mutable msg = Unchecked.defaultof<'msg>
@@ -874,8 +879,9 @@ module App =
           match diffChanges.Count with
           | 0 -> ()
           | _ ->
-            let output = Presenter.presentAt startRow diffChanges backBuf
-            backend.Write(output)
+            presentBuf.Clear() |> ignore
+            Presenter.presentAtInto startRow presentBuf diffChanges backBuf
+            backend.Write(presentBuf.ToString())
             backend.Flush()
             Array.blit backBuf.Cells 0 frontBuf.Cells 0 frontBuf.Cells.Length
 

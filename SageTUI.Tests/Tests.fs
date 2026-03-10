@@ -5613,3 +5613,100 @@ let sprint46Tests =
     sprint46ParseTests
     sprint46AppWiringTests
   ]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 47: presentInto zero-alloc, pre-alloc burst collections
+// ─────────────────────────────────────────────────────────────────────────────
+
+let makeFilledBuffer (w: int) (h: int) (r: int) : Buffer =
+  let buf = Buffer.create w h
+  for i in 0 .. buf.Cells.Length - 1 do
+    buf.Cells.[i] <- PackedCell.create r 0 0 0us
+  buf
+
+let sprint47PresenterTests = testList "Sprint 47 Presenter" [
+  testCase "presentInto matches present output — blank buffers" <| fun () ->
+    let w, h = 20, 3
+    let front = Buffer.create w h
+    let back  = makeFilledBuffer w h (int 'A')
+    let changes = ResizeArray<int>()
+    Buffer.diffInto changes front back
+    let sb = System.Text.StringBuilder()
+    Presenter.presentInto sb changes back
+    let direct = Presenter.present changes back
+    sb.ToString() |> Expect.equal "presentInto == present" direct
+
+  testCase "presentInto appends to existing content (caller responsibility)" <| fun () ->
+    let w, h = 10, 1
+    let front = Buffer.create w h
+    let back  = makeFilledBuffer w h (int 'X')
+    let changes = ResizeArray<int>()
+    Buffer.diffInto changes front back
+    let sb = System.Text.StringBuilder("PREFIX:")
+    Presenter.presentInto sb changes back
+    sb.ToString() |> Expect.stringStarts "starts with prefix" "PREFIX:"
+
+  testCase "presentInto ASCII fast path: rune 'A' produces same sequence as present" <| fun () ->
+    let w, h = 5, 1
+    let front = Buffer.create w h
+    let back  = Buffer.create w h
+    back.Cells.[2] <- PackedCell.create (int 'A') 0 0 0us
+    let changes = ResizeArray<int>([2])
+    let sb = System.Text.StringBuilder()
+    Presenter.presentInto sb changes back
+    let direct = Presenter.present changes back
+    sb.ToString() |> Expect.equal "ASCII rune matches" direct
+
+  testCase "presentAtInto matches presentAt" <| fun () ->
+    let w, h = 20, 3
+    let front = Buffer.create w h
+    let back  = makeFilledBuffer w h (int 'Z')
+    let changes = ResizeArray<int>()
+    Buffer.diffInto changes front back
+    let sb = System.Text.StringBuilder()
+    Presenter.presentAtInto 5 sb changes back
+    let direct = Presenter.presentAt 5 changes back
+    sb.ToString() |> Expect.equal "presentAtInto == presentAt" direct
+
+  testCase "appendMoveCursor produces row+1;col+1 format" <| fun () ->
+    let sb = System.Text.StringBuilder()
+    Ansi.appendMoveCursor sb 0 0
+    sb.ToString() |> Expect.equal "0,0 → row=1,col=1" "\x1b[1;1H"
+    sb.Clear() |> ignore
+    Ansi.appendMoveCursor sb 4 9
+    sb.ToString() |> Expect.equal "4,9 → row=5,col=10" "\x1b[5;10H"
+
+  testCase "appendFgColor Default produces reset sequence" <| fun () ->
+    let sb = System.Text.StringBuilder()
+    Ansi.appendFgColor sb Default
+    sb.ToString() |> Expect.equal "fg default" "\x1b[39m"
+
+  testCase "appendBgColor Default produces reset sequence" <| fun () ->
+    let sb = System.Text.StringBuilder()
+    Ansi.appendBgColor sb Default
+    sb.ToString() |> Expect.equal "bg default" "\x1b[49m"
+
+  testCase "presentInto produces non-empty output for non-empty changes" <| fun () ->
+    let w, h = 10, 2
+    let front = Buffer.create w h
+    let back  = makeFilledBuffer w h (int 'B')
+    let changes = ResizeArray<int>()
+    Buffer.diffInto changes front back
+    let sb = System.Text.StringBuilder()
+    Presenter.presentInto sb changes back
+    (sb.Length, 0) |> Expect.isGreaterThan "non-empty output"
+
+  testCase "presentInto produces empty output for empty changes" <| fun () ->
+    let w, h = 10, 2
+    let back  = makeFilledBuffer w h (int 'C')
+    let changes = ResizeArray<int>()
+    let sb = System.Text.StringBuilder()
+    Presenter.presentInto sb changes back
+    sb.Length |> Expect.equal "empty output for no changes" 0
+]
+
+[<Tests>]
+let sprint47Tests =
+  testList "Sprint 47" [
+    sprint47PresenterTests
+  ]
