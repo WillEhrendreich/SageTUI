@@ -5,7 +5,7 @@
              ╭────────────────────────────────────────────────────╮             
              │ Create an operator profile                         │             
              │ Move with Tab, edit inline, choose a role, and sub │             
-             │ Name                               ACTIVE          │             
+             │ Name                              ACTIVE           │             
              │ [       ▌                                 ]        │             
              │ Shown in alerts and ownership views.               │             
              │ Email                                              │             
@@ -14,11 +14,11 @@
              │ Role                                               │             
              │ [       Developer [enter]                 ]        │             
              │ Press Enter to open the role list.                 │             
-             │ ╭──────────────────╮   Enter submits the request.  │             
-             │ │ Submit request   │                               │             
-             │ ╰──────────────────╯                               │             
+             │ ╭─────────────────╮   Enter submits the request.   │             
+             │ │ Submit request  │                                │             
+             │ ╰─────────────────╯                                │             
              ╰────────────────────────────────────────────────────╯             
                                                                                 
- Tab    next     Shift+Tab    previous    Enter   submit/select    Esc   quit   
+ Tab   next    Shift+Tab   previous    Enter   submit/select     Esc    quit    
                                                                                 
                                                                                 

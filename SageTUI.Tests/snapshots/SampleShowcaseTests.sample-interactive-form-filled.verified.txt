@@ -8,17 +8,17 @@
              │ Name                                               │             
              │ [       Alice                             ]        │             
              │ Shown in alerts and ownership views.               │             
-             │ Email                              ACTIVE          │             
+             │ Email                             ACTIVE           │             
              │ [       alice@example.com▌                ]        │             
              │ Used for confirmations and deploy notices.         │             
              │ Role                                               │             
              │ [       Developer [enter]                 ]        │             
              │ Press Enter to open the role list.                 │             
-             │ ╭──────────────────╮   Enter submits the request.  │             
-             │ │ Submit request   │                               │             
-             │ ╰──────────────────╯                               │             
+             │ ╭─────────────────╮   Enter submits the request.   │             
+             │ │ Submit request  │                                │             
+             │ ╰─────────────────╯                                │             
              ╰────────────────────────────────────────────────────╯             
                                                                                 
- Tab    next     Shift+Tab    previous    Enter   submit/select    Esc   quit   
+ Tab   next    Shift+Tab   previous    Enter   submit/select     Esc    quit    
                                                                                 
                                                                                 

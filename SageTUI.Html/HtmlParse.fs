@@ -120,7 +120,15 @@ module HtmlParse =
           match System.Int32.TryParse(v.[..v.Length-3]) with
           | true, n -> Some (Max n)
           | _ -> None
-        | "flex" when v = "1 1 auto" -> Some Fill
+        | "flex" ->
+          // Parse "N 1 auto" where N is the flex-grow weight (Fill N)
+          let parts = v.Split(' ')
+          match parts with
+          | [| growStr; "1"; "auto" |] ->
+            match System.Int32.TryParse(growStr) with
+            | true, w -> Some (Fill w)
+            | _ -> None
+          | _ -> None
         | _ -> None)
     tryWidth
 

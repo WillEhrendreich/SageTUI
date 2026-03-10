@@ -9,9 +9,9 @@ module ArenaRender =
     | 1uy -> Min (int value)
     | 2uy -> Max (int value)
     | 3uy -> Percentage (int value)
-    | 4uy -> Fill
+    | 4uy -> Fill (int value)
     | 5uy -> Ratio(int value >>> 8, int value &&& 0xFF)
-    | _ -> Fill
+    | _ -> Fill 1
 
   let unpackBorderStyle (kind: byte) : BorderStyle =
     match kind with
@@ -34,20 +34,25 @@ module ArenaRender =
     count
 
   /// Distribute remaining space to Fill children encoded as negative sizes.
-  /// Fill children use ls.[szBase+i] = -(content+1). After this call, all entries are >= 0.
-  let distributeFill (ls: int array) (szBase: int) (n: int) (fillCount: int) (fillContentTotal: int) (remaining: int) =
-    if fillCount > 0 then
+  /// Fill children use ls.[szBase+i] = -(content+1). ls.[wzBase+i] = weight (0 for non-fill).
+  /// After this call, all fill entries are >= 0.
+  let distributeFill (ls: int array) (szBase: int) (wzBase: int) (n: int) (fillWeightTotal: int) (fillContentTotal: int) (remaining: int) =
+    if fillWeightTotal > 0 then
       if fillContentTotal <= remaining then
         let excess = remaining - fillContentTotal
-        let perExtra = excess / fillCount
-        let mutable extraRem = excess % fillCount
+        // Weighted proportional distribution of excess using Hamilton/sequential-subtraction method
+        let mutable pool = excess
+        let mutable wLeft = fillWeightTotal
         for j in 0 .. n - 1 do
           if ls.[szBase + j] < 0 then
             let cw = -(ls.[szBase + j] + 1)
-            let bonus = if extraRem > 0 then extraRem <- extraRem - 1; 1 else 0
-            ls.[szBase + j] <- cw + perExtra + bonus
+            let w = ls.[wzBase + j]
+            let bonus = if wLeft > 0 then pool * w / wLeft else 0
+            ls.[szBase + j] <- cw + bonus
+            pool <- pool - bonus
+            wLeft <- wLeft - w
       else
-        // Shrink path (rare: content exceeds available space)
+        // Shrink path (rare: total content exceeds available space) — proportional to content
         let pool = max 0 remaining
         let mutable used = 0
         for j in 0 .. n - 1 do
@@ -227,15 +232,16 @@ module ArenaRender =
         let n = countChildren arena node.FirstChild
         let ls = arena.LayoutScratch
         let lp = arena.LayoutPos
-        if lp + n + n > ls.Length then
-          failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n) lp ls.Length)
+        if lp + n + n + n > ls.Length then
+          failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n + n) lp ls.Length)
         let cnBase = lp        // n slots: child node indices
         let szBase = lp + n   // n slots: sizes (negative = Fill with encoded content)
-        arena.LayoutPos <- lp + n + n
+        let wzBase = lp + n + n // n slots: fill weights (0 for non-fill)
+        arena.LayoutPos <- lp + n + n + n
         let mutable idx = node.FirstChild
         let mutable i = 0
         let mutable remaining = area.Width
-        let mutable fillCount = 0
+        let mutable fillWeightTotal = 0
         let mutable fillContentTotal = 0
         while idx >= 0 do
           let cn = arena.Nodes.[idx]
@@ -256,9 +262,11 @@ module ArenaRender =
               ls.[szBase + i] <- area.Width * int cn.ConstraintVal / 100
               remaining <- remaining - ls.[szBase + i]
             | 4uy ->
+              let w = int cn.ConstraintVal
               let cw = measureWidth arena cn.FirstChild
               ls.[szBase + i] <- -(cw + 1)
-              fillCount <- fillCount + 1
+              ls.[wzBase + i] <- w
+              fillWeightTotal <- fillWeightTotal + w
               fillContentTotal <- fillContentTotal + cw
             | 5uy ->
               let num = int cn.ConstraintVal >>> 8
@@ -268,17 +276,19 @@ module ArenaRender =
             | _ ->
               let cw = measureWidth arena cn.FirstChild
               ls.[szBase + i] <- -(cw + 1)
-              fillCount <- fillCount + 1
+              ls.[wzBase + i] <- 1 // implicit Fill 1
+              fillWeightTotal <- fillWeightTotal + 1
               fillContentTotal <- fillContentTotal + cw
-          | _ -> // bare node → implicit Fill
+          | _ -> // bare node → implicit Fill 1
             ls.[cnBase + i] <- idx
             let cw = measureWidth arena idx
             ls.[szBase + i] <- -(cw + 1)
-            fillCount <- fillCount + 1
+            ls.[wzBase + i] <- 1 // implicit Fill 1
+            fillWeightTotal <- fillWeightTotal + 1
             fillContentTotal <- fillContentTotal + cw
           idx <- cn.NextSibling
           i <- i + 1
-        distributeFill ls szBase n fillCount fillContentTotal remaining
+        distributeFill ls szBase wzBase n fillWeightTotal fillContentTotal remaining
         let mutable offset = 0
         for j in 0 .. n - 1 do
           let sz = ls.[szBase + j]
@@ -290,15 +300,16 @@ module ArenaRender =
         let n = countChildren arena node.FirstChild
         let ls = arena.LayoutScratch
         let lp = arena.LayoutPos
-        if lp + n + n > ls.Length then
-          failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n) lp ls.Length)
+        if lp + n + n + n > ls.Length then
+          failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n + n) lp ls.Length)
         let cnBase = lp
         let szBase = lp + n
-        arena.LayoutPos <- lp + n + n
+        let wzBase = lp + n + n
+        arena.LayoutPos <- lp + n + n + n
         let mutable idx = node.FirstChild
         let mutable i = 0
         let mutable remaining = area.Height
-        let mutable fillCount = 0
+        let mutable fillWeightTotal = 0
         let mutable fillContentTotal = 0
         while idx >= 0 do
           let cn = arena.Nodes.[idx]
@@ -319,9 +330,11 @@ module ArenaRender =
               ls.[szBase + i] <- area.Height * int cn.ConstraintVal / 100
               remaining <- remaining - ls.[szBase + i]
             | 4uy ->
+              let w = int cn.ConstraintVal
               let ch = measureHeight arena cn.FirstChild
               ls.[szBase + i] <- -(ch + 1)
-              fillCount <- fillCount + 1
+              ls.[wzBase + i] <- w
+              fillWeightTotal <- fillWeightTotal + w
               fillContentTotal <- fillContentTotal + ch
             | 5uy ->
               let num = int cn.ConstraintVal >>> 8
@@ -331,17 +344,19 @@ module ArenaRender =
             | _ ->
               let ch = measureHeight arena cn.FirstChild
               ls.[szBase + i] <- -(ch + 1)
-              fillCount <- fillCount + 1
+              ls.[wzBase + i] <- 1 // implicit Fill 1
+              fillWeightTotal <- fillWeightTotal + 1
               fillContentTotal <- fillContentTotal + ch
           | _ ->
             ls.[cnBase + i] <- idx
             let ch = measureHeight arena idx
             ls.[szBase + i] <- -(ch + 1)
-            fillCount <- fillCount + 1
+            ls.[wzBase + i] <- 1 // implicit Fill 1
+            fillWeightTotal <- fillWeightTotal + 1
             fillContentTotal <- fillContentTotal + ch
           idx <- cn.NextSibling
           i <- i + 1
-        distributeFill ls szBase n fillCount fillContentTotal remaining
+        distributeFill ls szBase wzBase n fillWeightTotal fillContentTotal remaining
         let mutable offset = 0
         for j in 0 .. n - 1 do
           let sz = ls.[szBase + j]
@@ -423,16 +438,17 @@ module ArenaRender =
           let n = countChildren arena childNode.FirstChild
           let ls = arena.LayoutScratch
           let lp = arena.LayoutPos
-          if lp + n + n > ls.Length then
-            failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n) lp ls.Length)
+          if lp + n + n + n > ls.Length then
+            failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n + n) lp ls.Length)
           let cnBase = lp
           let szBase = lp + n
-          arena.LayoutPos <- lp + n + n
+          let wzBase = lp + n + n
+          arena.LayoutPos <- lp + n + n + n
           let usable = if n > 1 then max 0 (area.Width - gap * (n - 1)) else area.Width
           let mutable idx = childNode.FirstChild
           let mutable i = 0
           let mutable remaining = usable
-          let mutable fillCount = 0
+          let mutable fillWeightTotal = 0
           let mutable fillContentTotal = 0
           while idx >= 0 do
             let cn = arena.Nodes.[idx]
@@ -440,34 +456,47 @@ module ArenaRender =
             | 6uy ->
               ls.[cnBase + i] <- cn.FirstChild
               match cn.ConstraintKind with
-              | 0uy -> ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
-              | 1uy -> ls.[szBase + i] <- int cn.ConstraintVal; remaining <- remaining - ls.[szBase + i]
-              | 2uy -> ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
-              | 3uy -> ls.[szBase + i] <- usable * int cn.ConstraintVal / 100; remaining <- remaining - ls.[szBase + i]
+              | 0uy ->
+                ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
+              | 1uy ->
+                ls.[szBase + i] <- int cn.ConstraintVal; remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
+              | 2uy ->
+                ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
+              | 3uy ->
+                ls.[szBase + i] <- usable * int cn.ConstraintVal / 100; remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
               | 4uy ->
+                let w = int cn.ConstraintVal
                 let cw = measureWidth arena cn.FirstChild
                 ls.[szBase + i] <- -(cw + 1)
-                fillCount <- fillCount + 1
+                ls.[wzBase + i] <- w
+                fillWeightTotal <- fillWeightTotal + w
                 fillContentTotal <- fillContentTotal + cw
               | 5uy ->
                 let num = int cn.ConstraintVal >>> 8
                 let den = int cn.ConstraintVal &&& 0xFF
                 ls.[szBase + i] <- if den > 0 then usable * num / den else 0
                 remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
               | _ ->
                 let cw = measureWidth arena cn.FirstChild
                 ls.[szBase + i] <- -(cw + 1)
-                fillCount <- fillCount + 1
+                ls.[wzBase + i] <- 1
+                fillWeightTotal <- fillWeightTotal + 1
                 fillContentTotal <- fillContentTotal + cw
             | _ ->
               ls.[cnBase + i] <- idx
               let cw = measureWidth arena idx
               ls.[szBase + i] <- -(cw + 1)
-              fillCount <- fillCount + 1
+              ls.[wzBase + i] <- 1
+              fillWeightTotal <- fillWeightTotal + 1
               fillContentTotal <- fillContentTotal + cw
             idx <- cn.NextSibling
             i <- i + 1
-          distributeFill ls szBase n fillCount fillContentTotal remaining
+          distributeFill ls szBase wzBase n fillWeightTotal fillContentTotal remaining
           let mutable offset = 0
           for j in 0 .. n - 1 do
             let sz = ls.[szBase + j]
@@ -479,16 +508,17 @@ module ArenaRender =
           let n = countChildren arena childNode.FirstChild
           let ls = arena.LayoutScratch
           let lp = arena.LayoutPos
-          if lp + n + n > ls.Length then
-            failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n) lp ls.Length)
+          if lp + n + n + n > ls.Length then
+            failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n + n) lp ls.Length)
           let cnBase = lp
           let szBase = lp + n
-          arena.LayoutPos <- lp + n + n
+          let wzBase = lp + n + n
+          arena.LayoutPos <- lp + n + n + n
           let usable = if n > 1 then max 0 (area.Height - gap * (n - 1)) else area.Height
           let mutable idx = childNode.FirstChild
           let mutable i = 0
           let mutable remaining = usable
-          let mutable fillCount = 0
+          let mutable fillWeightTotal = 0
           let mutable fillContentTotal = 0
           while idx >= 0 do
             let cn = arena.Nodes.[idx]
@@ -496,34 +526,47 @@ module ArenaRender =
             | 6uy ->
               ls.[cnBase + i] <- cn.FirstChild
               match cn.ConstraintKind with
-              | 0uy -> ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
-              | 1uy -> ls.[szBase + i] <- int cn.ConstraintVal; remaining <- remaining - ls.[szBase + i]
-              | 2uy -> ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
-              | 3uy -> ls.[szBase + i] <- usable * int cn.ConstraintVal / 100; remaining <- remaining - ls.[szBase + i]
+              | 0uy ->
+                ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
+              | 1uy ->
+                ls.[szBase + i] <- int cn.ConstraintVal; remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
+              | 2uy ->
+                ls.[szBase + i] <- min (int cn.ConstraintVal) remaining; remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
+              | 3uy ->
+                ls.[szBase + i] <- usable * int cn.ConstraintVal / 100; remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
               | 4uy ->
+                let w = int cn.ConstraintVal
                 let ch = measureHeight arena cn.FirstChild
                 ls.[szBase + i] <- -(ch + 1)
-                fillCount <- fillCount + 1
+                ls.[wzBase + i] <- w
+                fillWeightTotal <- fillWeightTotal + w
                 fillContentTotal <- fillContentTotal + ch
               | 5uy ->
                 let num = int cn.ConstraintVal >>> 8
                 let den = int cn.ConstraintVal &&& 0xFF
                 ls.[szBase + i] <- if den > 0 then usable * num / den else 0
                 remaining <- remaining - ls.[szBase + i]
+                ls.[wzBase + i] <- 0
               | _ ->
                 let ch = measureHeight arena cn.FirstChild
                 ls.[szBase + i] <- -(ch + 1)
-                fillCount <- fillCount + 1
+                ls.[wzBase + i] <- 1
+                fillWeightTotal <- fillWeightTotal + 1
                 fillContentTotal <- fillContentTotal + ch
             | _ ->
               ls.[cnBase + i] <- idx
               let ch = measureHeight arena idx
               ls.[szBase + i] <- -(ch + 1)
-              fillCount <- fillCount + 1
+              ls.[wzBase + i] <- 1
+              fillWeightTotal <- fillWeightTotal + 1
               fillContentTotal <- fillContentTotal + ch
             idx <- cn.NextSibling
             i <- i + 1
-          distributeFill ls szBase n fillCount fillContentTotal remaining
+          distributeFill ls szBase wzBase n fillWeightTotal fillContentTotal remaining
           let mutable offset = 0
           for j in 0 .. n - 1 do
             let sz = ls.[szBase + j]

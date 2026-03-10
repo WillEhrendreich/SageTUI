@@ -51,7 +51,7 @@ module HtmlRender =
     | Min n -> sprintf "min-width:%dch" n
     | Max n -> sprintf "max-width:%dch" n
     | Percentage p -> sprintf "width:%d%%" p
-    | Fill -> "flex:1 1 auto"
+    | Fill w -> sprintf "flex:%d 1 auto" w
     | Ratio (n, d) -> sprintf "flex:%d %d auto" n d
 
   let borderStyleToCss (bs: BorderStyle) =

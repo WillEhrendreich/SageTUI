@@ -2,10 +2,7 @@
                                                             
                                                             
                                                             
-                                                            
-                                                            
 Name:                                                       
-                                                            
                                                             
 Email:                                                      
                                                             
@@ -15,6 +12,9 @@ Role: Developer
                                                             
   ERROR: Name is required                                   
                                                             
+                                                            
   ERROR: Invalid email address                              
+                                                            
+                                                            
                                                             
                                                             

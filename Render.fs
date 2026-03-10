@@ -6,7 +6,7 @@ module Render =
   let extractConstraint (elem: Element) =
     match elem with
     | Constrained(c, _) -> c
-    | _ -> Fill
+    | _ -> Fill 1
 
   let unwrapConstrained (elem: Element) =
     match elem with

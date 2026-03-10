@@ -113,7 +113,7 @@ module Arena =
     | Min n -> 1uy, int16 n
     | Max n -> 2uy, int16 n
     | Percentage n -> 3uy, int16 n
-    | Fill -> 4uy, 0s
+    | Fill w -> 4uy, int16 w
     | Ratio(n, d) -> 5uy, int16 ((n <<< 8) ||| (d &&& 0xFF))
 
   let packBorderStyle (bs: BorderStyle) =

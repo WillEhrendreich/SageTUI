@@ -13,7 +13,9 @@ type Constraint =
   | Min of int
   | Max of int
   | Percentage of int
-  | Fill
+  /// Fill available space with the given weight. Fill 1 is the default (equal sharing).
+  /// In a row with Fill 1 and Fill 2 children, the second child gets twice the space.
+  | Fill of weight: int
   | Ratio of int * int
 
 type BorderStyle = Light | Heavy | Double | Rounded | Ascii
@@ -34,8 +36,9 @@ module Layout =
     let mutable remaining = available
     // Min participates in fill distribution only when no Fill items exist.
     // When Fill items exist, Min acts as a floor (Fixed-like) and Fill takes surplus.
-    let hasFill = constraints |> List.exists (function Fill -> true | _ -> false)
-    let mutable fillCount = 0
+    let hasFill = constraints |> List.exists (function Fill _ -> true | _ -> false)
+    let mutable fillWeightTotal = 0
+    let mutable minCount = 0
 
     constraints |> List.iteri (fun i c ->
       match c with
@@ -52,27 +55,42 @@ module Layout =
         sizes[i] <- min minSize remaining
         remaining <- remaining - sizes[i]
         match hasFill with
-        | false -> fillCount <- fillCount + 1  // grows to fill surplus when no Fill items
-        | true  -> ()                          // stays at floor when Fill items exist
+        | false -> minCount <- minCount + 1  // grows to fill surplus when no Fill items
+        | true  -> ()                         // stays at floor when Fill items exist
       | Max maxSize ->
         sizes[i] <- min maxSize remaining
         remaining <- remaining - sizes[i]
-      | Fill ->
-        fillCount <- fillCount + 1
+      | Fill w ->
+        fillWeightTotal <- fillWeightTotal + w
       | _ -> ())
 
-    match fillCount > 0 with
+    match hasFill with
     | true ->
-      let perFill = max 0 (remaining / fillCount)
-      let mutable extra = max 0 (remaining % fillCount)
+      // Weighted proportional distribution using sequential subtraction (Hamilton method).
+      // Each Fill w item gets floor(pool * w / wLeft); last item absorbs remainder.
+      let mutable pool = remaining
+      let mutable wLeft = fillWeightTotal
       constraints |> List.iteri (fun i c ->
         match c with
-        | Fill ->
-          sizes[i] <- perFill + (match extra > 0 with | true -> extra <- extra - 1; 1 | false -> 0)
-        | Min _ when not hasFill ->
-          sizes[i] <- sizes[i] + perFill + (match extra > 0 with | true -> extra <- extra - 1; 1 | false -> 0)
+        | Fill w when wLeft > 0 ->
+          let alloc = pool * w / wLeft
+          sizes[i] <- alloc
+          pool <- pool - alloc
+          wLeft <- wLeft - w
+        | Fill _ -> ()
         | _ -> ())
-    | false -> ()
+    | false ->
+      match minCount > 0 with
+      | true ->
+        let perMin = max 0 (remaining / minCount)
+        let mutable extra = max 0 (remaining % minCount)
+        constraints |> List.iteri (fun i c ->
+          match c with
+          | Min _ ->
+            let bonus = match extra > 0 with | true -> extra <- extra - 1; 1 | false -> 0
+            sizes[i] <- sizes[i] + perMin + bonus
+          | _ -> ())
+      | false -> ()
 
     let mutable offset = 0
     [ for i in 0 .. n - 1 do
@@ -81,14 +99,16 @@ module Layout =
         yield result ]
 
   /// Content-aware layout: Fill children get at least their content size,
-  /// then remaining space is distributed equally (like CSS flex-basis: auto).
+  /// then remaining excess is distributed proportionally by weight (like CSS flex-basis: auto + flex-grow: weight).
   let solveWithContent (available: int) (constraints: Constraint list) (contentSizes: int list) : (int * int) list =
     let n = List.length constraints
     let sizes = Array.create n 0
     let mutable remaining = available
-    let hasFill = constraints |> List.exists (function Fill -> true | _ -> false)
-    let mutable fillCount = 0
+    let hasFill = constraints |> List.exists (function Fill _ -> true | _ -> false)
+    let mutable fillWeightTotal = 0
     let mutable fillContentTotal = 0
+    let mutable minCount = 0
+    let mutable minContentExtra = 0
     let contentArr = List.toArray contentSizes
 
     // Phase 1: allocate non-Fill items (identical to solve)
@@ -108,49 +128,57 @@ module Layout =
         remaining <- remaining - sizes[i]
         match hasFill with
         | false ->
-          fillCount <- fillCount + 1
-          fillContentTotal <- fillContentTotal + max 0 (contentArr[i] - sizes[i])
+          minCount <- minCount + 1
+          minContentExtra <- minContentExtra + max 0 (contentArr[i] - sizes[i])
         | true -> ()
       | Max maxSize ->
         sizes[i] <- min maxSize remaining
         remaining <- remaining - sizes[i]
-      | Fill ->
-        fillCount <- fillCount + 1
+      | Fill w ->
+        fillWeightTotal <- fillWeightTotal + w
         fillContentTotal <- fillContentTotal + contentArr[i]
       | _ -> ())
 
-    // Phase 2: allocate Fill/Min items with content awareness
-    // Min items participate in this phase only when no Fill items exist
-    match fillCount > 0 with
+    // Phase 2: allocate Fill items with content-awareness + weighted excess distribution
+    match hasFill with
     | true ->
       match fillContentTotal <= remaining with
       | true ->
-        // Enough space: each fill participant gets content size + equal share of excess
+        // Enough space: each Fill item gets its content size + weighted share of excess
         let excess = remaining - fillContentTotal
-        let perExtra = excess / fillCount
-        let mutable extraRem = excess % fillCount
+        let mutable pool = excess
+        let mutable wLeft = fillWeightTotal
         constraints |> List.iteri (fun i c ->
           match c with
-          | Fill ->
-            let bonus = match extraRem > 0 with | true -> extraRem <- extraRem - 1; 1 | false -> 0
-            sizes[i] <- contentArr[i] + perExtra + bonus
-          | Min _ when not hasFill ->
-            let bonus = match extraRem > 0 with | true -> extraRem <- extraRem - 1; 1 | false -> 0
-            let extra = max 0 (contentArr[i] - sizes[i])
-            sizes[i] <- sizes[i] + extra + perExtra + bonus - extra  // grow to at least content, then share excess
+          | Fill w when wLeft > 0 ->
+            let bonus = pool * w / wLeft
+            sizes[i] <- contentArr[i] + bonus
+            pool <- pool - bonus
+            wLeft <- wLeft - w
+          | Fill _ ->
+            sizes[i] <- contentArr[i]
           | _ -> ())
       | false ->
-        // Not enough space: proportional shrink (flex-shrink)
+        // Not enough space: proportional shrink by content size (weight not applied in overflow)
         let fillItems =
           constraints |> List.mapi (fun i c ->
-            match c with
-            | Fill -> Some(i, contentArr[i])
-            | Min _ when not hasFill -> Some(i, max 0 (contentArr[i] - sizes[i]))
-            | _ -> None)
+            match c with Fill _ -> Some(i, contentArr[i]) | _ -> None)
           |> List.choose id
         let totalContent = fillItems |> List.sumBy snd
         match totalContent with
-        | 0 -> ()
+        | 0 ->
+          // No content: distribute pool equally by weight
+          let mutable pool = max 0 remaining
+          let mutable wLeft = fillWeightTotal
+          constraints |> List.iteri (fun i c ->
+            match c with
+            | Fill w when wLeft > 0 ->
+              let alloc = pool * w / wLeft
+              sizes[i] <- alloc
+              pool <- pool - alloc
+              wLeft <- wLeft - w
+            | Fill _ -> ()
+            | _ -> ())
         | _ ->
           let pool = max 0 remaining
           let sized = fillItems |> List.map (fun (i, c) -> (i, c * pool / totalContent))
@@ -159,7 +187,39 @@ module Layout =
           sized |> List.iter (fun (i, s) ->
             let bonus = match rem > 0 with | true -> rem <- rem - 1; 1 | false -> 0
             sizes[i] <- sizes[i] + s + bonus)
-    | false -> ()
+    | false ->
+      // No Fill items: Min items grow equally to fill surplus
+      match minCount > 0 with
+      | true ->
+        let totalMinContent = minContentExtra
+        match totalMinContent <= remaining with
+        | true ->
+          let excess = remaining - totalMinContent
+          let perExtra = excess / minCount
+          let mutable extraRem = excess % minCount
+          constraints |> List.iteri (fun i c ->
+            match c with
+            | Min _ ->
+              let bonus = match extraRem > 0 with | true -> extraRem <- extraRem - 1; 1 | false -> 0
+              sizes[i] <- sizes[i] + perExtra + bonus
+            | _ -> ())
+        | false ->
+          let fillItems =
+            constraints |> List.mapi (fun i c ->
+              match c with Min _ -> Some(i, max 0 (contentArr[i] - sizes[i])) | _ -> None)
+            |> List.choose id
+          let totalContent = fillItems |> List.sumBy snd
+          match totalContent with
+          | 0 -> ()
+          | _ ->
+            let pool = max 0 remaining
+            let sized = fillItems |> List.map (fun (i, c) -> (i, c * pool / totalContent))
+            let used = sized |> List.sumBy snd
+            let mutable rem = pool - used
+            sized |> List.iter (fun (i, s) ->
+              let bonus = match rem > 0 with | true -> rem <- rem - 1; 1 | false -> 0
+              sizes[i] <- sizes[i] + s + bonus)
+      | false -> ()
 
     let mutable offset = 0
     [ for i in 0 .. n - 1 do
@@ -193,7 +253,7 @@ module Layout =
     | Min n -> { area with Width = max n area.Width }
     | Max n -> { area with Width = min n area.Width }
     | Percentage pct -> { area with Width = area.Width * pct / 100 }
-    | Fill -> area
+    | Fill _ -> area
     | Ratio(num, den) ->
       match den > 0 with
       | true -> { area with Width = area.Width * num / den }
@@ -205,7 +265,7 @@ module Layout =
     | Min n -> { area with Height = max n area.Height }
     | Max n -> { area with Height = min n area.Height }
     | Percentage pct -> { area with Height = area.Height * pct / 100 }
-    | Fill -> area
+    | Fill _ -> area
     | Ratio(num, den) ->
       match den > 0 with
       | true -> { area with Height = area.Height * num / den }

@@ -240,7 +240,7 @@ let paddingTests = testList "Padding" [
 
 let constraintTests = testList "Constraint" [
   testCase "6 variants" <| fun () ->
-    [ Fixed 10; Min 5; Max 20; Percentage 50; Fill; Ratio(1,3) ]
+    [ Fixed 10; Min 5; Max 20; Percentage 50; Fill 1; Ratio(1,3) ]
     |> List.length
     |> Expect.equal "" 6
 ]
@@ -338,7 +338,7 @@ let heightConstraintTests = testList "Height constraints" [
     result.Height |> Expect.equal "height should be 10" 10
   testCase "applyConstraintV Fill unchanged" <| fun () ->
     let area = { X = 0; Y = 0; Width = 80; Height = 24 }
-    let result = Layout.applyConstraintV Fill area
+    let result = Layout.applyConstraintV (Fill 1) area
     result.Height |> Expect.equal "height unchanged" 24
   testCase "applyConstraintV Ratio constrains height" <| fun () ->
     let area = { X = 0; Y = 0; Width = 80; Height = 100 }
@@ -955,10 +955,10 @@ let arenaLowerTests = testList "Arena.lower" [
 
   testCase "lower Constrained Fill" <| fun () ->
     let a = FrameArena.create 10 100 50
-    let h = Arena.lower a (Constrained(Fill, Empty))
+    let h = Arena.lower a (Constrained(Fill 1, Empty))
     let n = FrameArena.getNode h a
     n.ConstraintKind |> Expect.equal "ck" 4uy
-    n.ConstraintVal |> Expect.equal "cv" 0s
+    n.ConstraintVal |> Expect.equal "cv" 1s
 
   testCase "lower Bordered Rounded" <| fun () ->
     let a = FrameArena.create 10 100 50
@@ -1093,9 +1093,9 @@ let constraintPackTests = testList "packConstraint" [
     v |> Expect.equal "v" 50s
 
   testCase "Fill" <| fun () ->
-    let (k, v) = Arena.packConstraint Fill
+    let (k, v) = Arena.packConstraint (Fill 1)
     k |> Expect.equal "k" 4uy
-    v |> Expect.equal "v" 0s
+    v |> Expect.equal "v" 1s
 
   testCase "Ratio" <| fun () ->
     let (k, v) = Arena.packConstraint (Ratio(1, 3))
@@ -1360,19 +1360,19 @@ let layoutSolveTests = testList "Layout.solve" [
     |> Expect.equal "two fixed" [(0, 30); (30, 40)]
 
   testCase "single Fill takes all" <| fun () ->
-    Layout.solve 80 [Fill]
+    Layout.solve 80 [Fill 1]
     |> Expect.equal "fill" [(0, 80)]
 
   testCase "two Fill splits evenly" <| fun () ->
-    Layout.solve 80 [Fill; Fill]
+    Layout.solve 80 [Fill 1; Fill 1]
     |> Expect.equal "even" [(0, 40); (40, 40)]
 
   testCase "three Fill with remainder" <| fun () ->
-    Layout.solve 100 [Fill; Fill; Fill]
-    |> Expect.equal "3 fill" [(0, 34); (34, 33); (67, 33)]
+    Layout.solve 100 [Fill 1; Fill 1; Fill 1]
+    |> Expect.equal "3 fill" [(0, 33); (33, 33); (66, 34)]
 
   testCase "Fixed + Fill" <| fun () ->
-    Layout.solve 100 [Fixed 20; Fill]
+    Layout.solve 100 [Fixed 20; Fill 1]
     |> Expect.equal "fixed+fill" [(0, 20); (20, 80)]
 
   testCase "Percentage 50" <| fun () ->
@@ -1388,7 +1388,7 @@ let layoutSolveTests = testList "Layout.solve" [
     |> Expect.equal "min grows to 100" [(0, 100)]
 
   testCase "Min acts as floor when Fill items exist" <| fun () ->
-    Layout.solve 100 [Min 20; Fill]
+    Layout.solve 100 [Min 20; Fill 1]
     |> Expect.equal "min=20, fill=80" [(0, 20); (20, 80)]
 
   testCase "two Mins share surplus equally" <| fun () ->
@@ -1412,29 +1412,29 @@ let layoutSolveTests = testList "Layout.solve" [
     |> Expect.equal "empty" []
 
   testCase "complex: Fixed + Fill + Fixed" <| fun () ->
-    Layout.solve 100 [Fixed 20; Fill; Fixed 20]
+    Layout.solve 100 [Fixed 20; Fill 1; Fixed 20]
     |> Expect.equal "sidebar" [(0, 20); (20, 60); (80, 20)]
 
   testCase "Percentage + Fill" <| fun () ->
-    Layout.solve 100 [Percentage 30; Fill]
+    Layout.solve 100 [Percentage 30; Fill 1]
     |> Expect.equal "pct+fill" [(0, 30); (30, 70)]
 ]
 
 let layoutSplitTests = testList "Layout.splitH/splitV" [
   testCase "splitH even" <| fun () ->
-    Layout.splitH [Fill; Fill] (area4 80 24)
+    Layout.splitH [Fill 1; Fill 1] (area4 80 24)
     |> Expect.equal "h split" [areaAt 0 0 40 24; areaAt 40 0 40 24]
 
   testCase "splitV even" <| fun () ->
-    Layout.splitV [Fill; Fill] (area4 80 24)
+    Layout.splitV [Fill 1; Fill 1] (area4 80 24)
     |> Expect.equal "v split" [areaAt 0 0 80 12; areaAt 0 12 80 12]
 
   testCase "splitH with offset area" <| fun () ->
-    Layout.splitH [Fixed 10; Fill] (areaAt 5 3 80 24)
+    Layout.splitH [Fixed 10; Fill 1] (areaAt 5 3 80 24)
     |> Expect.equal "offset" [areaAt 5 3 10 24; areaAt 15 3 70 24]
 
   testCase "splitV with offset area" <| fun () ->
-    Layout.splitV [Fixed 5; Fill] (areaAt 5 3 80 24)
+    Layout.splitV [Fixed 5; Fill 1] (areaAt 5 3 80 24)
     |> Expect.equal "offset" [areaAt 5 3 80 5; areaAt 5 8 80 19]
 ]
 
@@ -4168,13 +4168,13 @@ let allTests = testList "All" [
         let a = El.text "A"
         let b = El.text "B"
         match El.grid 2 EqualWidth [a; b] with
-        | Column [Row [Constrained(Fill, Text("A",_)); Constrained(Fill, Text("B",_))]] -> ()
+        | Column [Row [Constrained(Fill _, Text("A",_)); Constrained(Fill _, Text("B",_))]] -> ()
         | other -> failwithf "unexpected: %A" other
 
       testCase "odd count pads last row with Empty" <| fun () ->
         let items = [El.text "A"; El.text "B"; El.text "C"]
         match El.grid 2 EqualWidth items with
-        | Column [Row _; Row [Constrained(Fill, Text("C",_)); Constrained(Fill, Empty)]] -> ()
+        | Column [Row _; Row [Constrained(Fill _, Text("C",_)); Constrained(Fill _, Empty)]] -> ()
         | other -> failwithf "expected last row padded, got %A" other
 
       testCase "3-column even grid has 2 rows" <| fun () ->
@@ -4207,14 +4207,14 @@ let allTests = testList "All" [
       testCase "WeightedWidths empty list falls back to EqualWidth" <| fun () ->
         let items = [El.text "A"; El.text "B"]
         match El.grid 2 (WeightedWidths []) items with
-        | Column [Row [Constrained(Fill,_); Constrained(Fill,_)]] -> ()
+        | Column [Row [Constrained(Fill _,_); Constrained(Fill _,_)]] -> ()
         | other -> failwithf "expected Fill fallback, got %A" other
 
       testCase "gridEven is shorthand for EqualWidth" <| fun () ->
         let items = [El.text "A"; El.text "B"]
         match El.gridEven 2 items, El.grid 2 EqualWidth items with
-        | Column [Row [Constrained(Fill,_); Constrained(Fill,_)]],
-          Column [Row [Constrained(Fill,_); Constrained(Fill,_)]] -> ()
+        | Column [Row [Constrained(Fill _,_); Constrained(Fill _,_)]],
+          Column [Row [Constrained(Fill _,_); Constrained(Fill _,_)]] -> ()
         | other -> failwithf "expected both to produce equal-width rows, got %A" (fst other)
 
       testCase "grid renders without crash (EqualWidth, 80x10)" <| fun () ->
@@ -4243,7 +4243,7 @@ let allTests = testList "All" [
         match El.grid 1 EqualWidth items with
         | Column rows ->
           rows |> Expect.hasLength "3 rows" 3
-          rows |> List.forall (function Row [Constrained(Fill,_)] -> true | _ -> false)
+          rows |> List.forall (function Row [Constrained(Fill _,_)] -> true | _ -> false)
           |> Expect.isTrue "each row has 1 Fill-constrained child"
         | other -> failwithf "expected Column, got %A" other
     ]

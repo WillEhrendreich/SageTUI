@@ -116,7 +116,7 @@ let htmlRenderConstraintTests = testList "HtmlRender.Constraints" [
     html |> Expect.stringContains "pct width" "width:75%"
 
   testCase "Fill → flex auto" <| fun () ->
-    let html = toHtml (Constrained(Fill, El.text "fill"))
+    let html = toHtml (Constrained(Fill 1, El.text "fill"))
     html |> Expect.stringContains "flex fill" "flex:1 1 auto"
 
   testCase "Ratio → flex-grow" <| fun () ->

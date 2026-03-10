@@ -161,8 +161,10 @@ module El =
   let minHeight n elem = Column [Constrained(Min n, elem)]
   /// Set maximum height in rows.
   let maxHeight n elem = Column [Constrained(Max n, elem)]
-  /// Fill all available space.
-  let fill elem = Constrained(Fill, elem)
+  /// Fill all available space (weight 1).
+  let fill elem = Constrained(Fill 1, elem)
+  /// Fill available space with a given weight. El.fillN 2 gives twice as much space as El.fill.
+  let fillN n elem = Constrained(Fill n, elem)
   /// Size as a percentage of available space.
   let percentage pct elem = Constrained(Percentage pct, elem)
   /// Size as a ratio (num/den) of available space.
@@ -412,7 +414,7 @@ module El =
       | Constrained(c, child) ->
         let cStr =
           match c with
-          | Fill -> "Fill"
+          | Fill w -> if w = 1 then "Fill" else sprintf "Fill%d" w
           | Fixed n -> sprintf "W%d" n
           | Percentage p -> sprintf "%d%%" p
           | Min n -> sprintf "≥%d" n
@@ -457,18 +459,18 @@ module El =
         | _ -> children @ List.replicate (cols - rem) Empty
       let constraints =
         match colWidths with
-        | EqualWidth -> List.replicate cols Fill
-        | FixedWidths [] -> List.replicate cols Fill
+        | EqualWidth -> List.replicate cols (Fill 1)
+        | FixedWidths [] -> List.replicate cols (Fill 1)
         | FixedWidths widths ->
           let lastW = List.last widths
           [ for i in 0 .. cols - 1 ->
               Fixed (List.tryItem i widths |> Option.defaultValue lastW) ]
-        | WeightedWidths [] -> List.replicate cols Fill
+        | WeightedWidths [] -> List.replicate cols (Fill 1)
         | WeightedWidths weights ->
           let lastW = List.last weights
           let totalW = List.sum weights
           match totalW with
-          | 0 -> List.replicate cols Fill
+          | 0 -> List.replicate cols (Fill 1)
           | _ ->
             [ for i in 0 .. cols - 1 ->
                 let w = List.tryItem i weights |> Option.defaultValue lastW

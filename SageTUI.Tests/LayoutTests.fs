@@ -194,61 +194,174 @@ let measureHeightTests = testList "Measure.measureHeight" [
 
 let solveWithContentTests = testList "Layout.solveWithContent" [
   testCase "single Fill uses content + excess" <| fun () ->
-    Layout.solveWithContent 80 [Fill] [5]
+    Layout.solveWithContent 80 [Fill 1] [5]
     |> Expect.equal "content 5 + excess 75 = 80" [(0, 80)]
 
   testCase "two Fill with different content sizes" <| fun () ->
     // Available=20, content=[2, 8], total content=10, excess=10, perExtra=5
     // First: 2+5=7, Second: 8+5=13
-    Layout.solveWithContent 20 [Fill; Fill] [2; 8]
+    Layout.solveWithContent 20 [Fill 1; Fill 1] [2; 8]
     |> Expect.equal "content-proportional" [(0, 7); (7, 13)]
 
   testCase "three Fill with varied content" <| fun () ->
     // Available=30, content=[1, 1, 1], total=3, excess=27, perExtra=9
-    Layout.solveWithContent 30 [Fill; Fill; Fill] [1; 1; 1]
+    Layout.solveWithContent 30 [Fill 1; Fill 1; Fill 1] [1; 1; 1]
     |> Expect.equal "each gets 10" [(0, 10); (10, 10); (20, 10)]
 
   testCase "Fill + Fixed" <| fun () ->
     // Fixed 10 takes 10, remaining=40, Fill content=5, excess=35
-    Layout.solveWithContent 50 [Fixed 10; Fill] [0; 5]
+    Layout.solveWithContent 50 [Fixed 10; Fill 1] [0; 5]
     |> Expect.equal "10 fixed + 40 fill" [(0, 10); (10, 40)]
 
   testCase "content exactly fills available" <| fun () ->
-    Layout.solveWithContent 10 [Fill; Fill] [5; 5]
+    Layout.solveWithContent 10 [Fill 1; Fill 1] [5; 5]
     |> Expect.equal "no excess" [(0, 5); (5, 5)]
 
   testCase "content exceeds available — greedy allocation" <| fun () ->
     // Available=3, content=[1,1,1,1,1], total=5 > 3
     // Greedy: first 3 get 1 each, last 2 get 0
-    Layout.solveWithContent 3 [Fill; Fill; Fill; Fill; Fill] [1; 1; 1; 1; 1]
+    Layout.solveWithContent 3 [Fill 1; Fill 1; Fill 1; Fill 1; Fill 1] [1; 1; 1; 1; 1]
     |> Expect.equal "first 3 get 1, rest 0" [(0, 1); (1, 1); (2, 1); (3, 0); (3, 0)]
 
   testCase "content exceeds — large items get greedy share" <| fun () ->
     // Available=5, content=[3, 4], total=7 > 5
     // Greedy: first gets min(3,5)=3, second gets min(4,2)=2
-    Layout.solveWithContent 5 [Fill; Fill] [3; 4]
+    Layout.solveWithContent 5 [Fill 1; Fill 1] [3; 4]
     |> Expect.equal "greedy 3 then 2" [(0, 3); (3, 2)]
 
   testCase "zero content sizes → equal split (backward compat)" <| fun () ->
-    Layout.solveWithContent 80 [Fill; Fill] [0; 0]
+    Layout.solveWithContent 80 [Fill 1; Fill 1] [0; 0]
     |> Expect.equal "equal 40/40" [(0, 40); (40, 40)]
 
   testCase "Fixed + Fill + Fixed" <| fun () ->
-    Layout.solveWithContent 100 [Fixed 20; Fill; Fixed 20] [0; 5; 0]
+    Layout.solveWithContent 100 [Fixed 20; Fill 1; Fixed 20] [0; 5; 0]
     |> Expect.equal "sidebar layout" [(0, 20); (20, 60); (80, 20)]
 
   testCase "Percentage + Fill with content" <| fun () ->
-    Layout.solveWithContent 100 [Percentage 30; Fill] [0; 10]
+    Layout.solveWithContent 100 [Percentage 30; Fill 1] [0; 10]
     |> Expect.equal "30% + fill" [(0, 30); (30, 70)]
 
   testCase "all Fill zero content = original equal split" <| fun () ->
-    Layout.solveWithContent 90 [Fill; Fill; Fill] [0; 0; 0]
+    Layout.solveWithContent 90 [Fill 1; Fill 1; Fill 1] [0; 0; 0]
     |> Expect.equal "30 each" [(0, 30); (30, 30); (60, 30)]
 
   testCase "excess distributes with remainder" <| fun () ->
-    // Available=10, content=[1,1,1], total=3, excess=7, perExtra=2, rem=1
-    Layout.solveWithContent 10 [Fill; Fill; Fill] [1; 1; 1]
-    |> Expect.equal "1+3=4, 1+2=3, 1+2=3" [(0, 4); (4, 3); (7, 3)]
+    // Available=10, content=[1,1,1], total=3, excess=7
+    // Hamilton: pool=7, wLeft=3; item0=7/3=2+1=3, item1=5/2=2+1=3, item2=3/1=3+1=4
+    Layout.solveWithContent 10 [Fill 1; Fill 1; Fill 1] [1; 1; 1]
+    |> Expect.equal "3, 3, 4 (last gets remainder)" [(0, 3); (3, 3); (6, 4)]
+]
+
+// ═══════════════════════════════════════════════════════════════════════
+// WEIGHTED FILL (Sprint 42)
+// Fill of weight: int enables proportional space distribution.
+// Fill 2 gets twice the space of Fill 1. Hamilton/sequential-subtraction.
+// ═══════════════════════════════════════════════════════════════════════
+
+let weightedFillTests = testList "Weighted Fill (Sprint 42)" [
+
+  // ── Layout.solve ─────────────────────────────────────────────────────
+
+  testCase "solve: Fill 1 + Fill 2 in 90 → [30; 60]" <| fun () ->
+    Layout.solve 90 [Fill 1; Fill 2]
+    |> Expect.equal "2:1 ratio" [(0, 30); (30, 60)]
+
+  testCase "solve: Fill 2 + Fill 1 in 90 → [60; 30]" <| fun () ->
+    Layout.solve 90 [Fill 2; Fill 1]
+    |> Expect.equal "first is heavier" [(0, 60); (60, 30)]
+
+  testCase "solve: Fill 1 + Fill 1 + Fill 2 in 40 → [10; 10; 20]" <| fun () ->
+    Layout.solve 40 [Fill 1; Fill 1; Fill 2]
+    |> Expect.equal "1:1:2 ratio" [(0, 10); (10, 10); (20, 20)]
+
+  testCase "solve: Fixed 10 + Fill 1 + Fill 3 in 50 → [10; 10; 30]" <| fun () ->
+    Layout.solve 50 [Fixed 10; Fill 1; Fill 3]
+    |> Expect.equal "fixed + 1:3 fill" [(0, 10); (10, 10); (20, 30)]
+
+  testCase "solve: Fill 0 gets zero" <| fun () ->
+    Layout.solve 60 [Fill 0; Fill 2]
+    |> Expect.equal "weight 0 gets nothing" [(0, 0); (0, 60)]
+
+  testCase "solve: Fill 3 alone gets all" <| fun () ->
+    Layout.solve 100 [Fill 3]
+    |> Expect.equal "single fill" [(0, 100)]
+
+  testCase "solve: remainder goes to last (Hamilton)" <| fun () ->
+    // 100 / 3 = 33 rem 1: weights [1;1;1], last gets +1
+    Layout.solve 100 [Fill 1; Fill 1; Fill 1]
+    |> Expect.equal "last gets rem" [(0, 33); (33, 33); (66, 34)]
+
+  testCase "solve: weighted remainder to last (Hamilton)" <| fun () ->
+    // 100 / (1+3) = 25 each: weights [1;3], pool=100, item0=25, item1=75
+    Layout.solve 100 [Fill 1; Fill 3]
+    |> Expect.equal "exact 1:3" [(0, 25); (25, 75)]
+
+  // ── Layout.solveWithContent ───────────────────────────────────────────
+
+  testCase "solveWithContent: Fill 1 + Fill 2 in 90, content [0;0] → [30;60]" <| fun () ->
+    Layout.solveWithContent 90 [Fill 1; Fill 2] [0; 0]
+    |> Expect.equal "2:1 weighted" [(0, 30); (30, 60)]
+
+  testCase "solveWithContent: Fill 1 + Fill 2, content [5;5] in 90 → [30;60]" <| fun () ->
+    // content=5+5=10, excess=80; bonus0=80*1/3=26→size=31, bonus1=54*2/2=54→size=59
+    // Wait: pool=80, wLeft=3; item0: 80*1/3=26, pool=54, wLeft=2; item1: 54*2/2=54
+    // sizes: [5+26=31, 5+54=59] — not clean 30/60 due to content offset
+    Layout.solveWithContent 90 [Fill 1; Fill 2] [5; 5]
+    |> Expect.equal "weighted with equal content" [(0, 31); (31, 59)]
+
+  testCase "solveWithContent: Fill 2 + Fill 1 in 60, content [0;0] → [40;20]" <| fun () ->
+    Layout.solveWithContent 60 [Fill 2; Fill 1] [0; 0]
+    |> Expect.equal "heavier first" [(0, 40); (40, 20)]
+
+  // ── El.fillN API ─────────────────────────────────────────────────────
+
+  testCase "El.fillN creates Fill n constraint" <| fun () ->
+    let elem = El.fillN 2 (El.text "wide")
+    match elem with
+    | Constrained(Fill 2, _) -> ()
+    | _ -> failtest "El.fillN 2 should create Fill 2 constraint"
+
+  testCase "El.fill creates Fill 1 (backward compat)" <| fun () ->
+    let elem = El.fill (El.text "x")
+    match elem with
+    | Constrained(Fill 1, _) -> ()
+    | _ -> failtest "El.fill should create Fill 1"
+
+  testCase "El.fillN 1 = El.fill visually" <| fun () ->
+    let buf1 = renderToBuffer 90 1 (El.row [El.fill (El.text "A"); El.fill (El.text "B")])
+    let buf2 = renderToBuffer 90 1 (El.row [El.fillN 1 (El.text "A"); El.fillN 1 (El.text "B")])
+    buf1.Cells |> Expect.sequenceEqual "same layout" buf2.Cells
+
+  // ── Render integration: row with weighted fill ────────────────────────
+
+  testCase "Row: Fill 1 + Fill 2 proportional in 90×1" <| fun () ->
+    let buf = renderToBuffer 90 1
+                (El.row [El.fillN 1 (El.text "A"); El.fillN 2 (El.text "B")])
+    charAt 0 0 buf |> Expect.equal "A at 0" 'A'
+    charAt 30 0 buf |> Expect.equal "B at 30" 'B'
+
+  testCase "Column: Fill 1 + Fill 2 proportional in 90 rows" <| fun () ->
+    let buf = renderToBuffer 10 90
+                (El.column [El.fillN 1 (El.text "A"); El.fillN 2 (El.text "B")])
+    charAt 0 0 buf |> Expect.equal "A at row 0" 'A'
+    charAt 0 30 buf |> Expect.equal "B at row 30" 'B'
+
+  // ── Property: total of sizes = available ─────────────────────────────
+
+  testProperty "solve weighted: sum of sizes = available" <| fun (available: PositiveInt) (weights: NonEmptyArray<PositiveInt>) ->
+    let w = available.Get
+    let cs = weights.Get |> Array.toList |> List.map (fun p -> Fill p.Get)
+    let sizes = Layout.solve w cs |> List.sumBy snd
+    sizes |> Expect.equal (sprintf "sum for available=%d" w) w
+
+  testProperty "solve weighted: proportions hold (2x weight ≈ 2x size)" <| fun (available: PositiveInt) ->
+    let w = available.Get + 2  // at least 2 to avoid degenerate case
+    let result = Layout.solve w [Fill 1; Fill 2]
+    let s0 = result |> List.item 0 |> snd
+    let s1 = result |> List.item 1 |> snd
+    // s1 should be approximately 2*s0 (within 1 due to integer rounding)
+    let diff = abs (s1 - 2 * s0)
+    (diff, 2) |> Expect.isLessThanOrEqual (sprintf "within 2 of 2x for available=%d" w)
 ]
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -260,28 +373,27 @@ let solveWithContentTests = testList "Layout.solveWithContent" [
 
 let blockFlowTests = testList "Block flow layout (Column = block)" [
   testCase "Block children stack vertically" <| fun () ->
-    // 3 texts in 10x10: content [1,1,1], excess=7, per=2, rem=1 → [4,3,3]
+    // 3 texts in 10x10: content [1,1,1], excess=7, Hamilton last-gets-extra → [3,3,4]
     let buf = renderToBuffer 10 10
                 (El.column [El.text "AAA"; El.text "BBB"; El.text "CCC"])
     charAt 0 0 buf |> Expect.equal "row 0" 'A'
-    charAt 0 4 buf |> Expect.equal "row 4" 'B'
-    charAt 0 7 buf |> Expect.equal "row 7" 'C'
+    charAt 0 3 buf |> Expect.equal "row 3" 'B'
+    charAt 0 6 buf |> Expect.equal "row 6" 'C'
 
   testCase "Block children each get full parent width" <| fun () ->
-    // 2 texts in 20x5: content [1,1], excess=3, per=1, rem=1 → [3,2]
+    // 2 texts in 20x5: content [1,1], excess=3, Hamilton last-gets-extra → [2,3]
     let buf = renderToBuffer 20 5
                 (El.column [El.text "Short"; El.text "Longer text here"])
     charAt 0 0 buf |> Expect.equal "first at x=0" 'S'
-    charAt 0 3 buf |> Expect.equal "second at row 3" 'L'
+    charAt 0 2 buf |> Expect.equal "second at row 2" 'L'
 
   testCase "Block height determined by content (3 items in 20 rows)" <| fun () ->
-    // 3 texts in 20 rows: content [1,1,1], excess=17, per=5, rem=2
-    // Sizes: [1+6, 1+6, 1+5] = [7, 7, 6]. B at row 7.
+    // 3 texts in 20 rows: content [1,1,1], excess=17, Hamilton last-gets-extra → [6,7,7]
     let buf = renderToBuffer 20 20
                 (El.column [El.text "A"; El.text "B"; El.text "C"])
     charAt 0 0 buf |> Expect.equal "A at row 0" 'A'
-    charAt 0 7 buf |> Expect.equal "B at row 7" 'B'
-    charAt 0 14 buf |> Expect.equal "C at row 14" 'C'
+    charAt 0 6 buf |> Expect.equal "B at row 6" 'B'
+    charAt 0 13 buf |> Expect.equal "C at row 13" 'C'
 
   testCase "Many block children in tight space — first items get priority" <| fun () ->
     // 5 blocks in 3 rows: content overflows, first 3 render
@@ -379,28 +491,28 @@ let inlineFlowTests = testList "Inline flow layout (Row = inline)" [
 let flexboxTests = testList "Flexbox-like layout" [
   testCase "flex-direction: column — items get content height + excess share" <| fun () ->
     // 2 items in 10 rows: content [1,1], excess=8, perExtra=4
-    let areas = Layout.solveWithContent 10 [Fill; Fill] [1; 1]
+    let areas = Layout.solveWithContent 10 [Fill 1; Fill 1] [1; 1]
     areas |> Expect.equal "5 each" [(0, 5); (5, 5)]
 
   testCase "flex-direction: row — items get content width + excess share" <| fun () ->
     // "Hi"(2) + "World"(5) in 17 cols
     // content [2,5], total=7, excess=10, perExtra=5
-    let areas = Layout.solveWithContent 17 [Fill; Fill] [2; 5]
+    let areas = Layout.solveWithContent 17 [Fill 1; Fill 1] [2; 5]
     areas |> Expect.equal "7 and 10" [(0, 7); (7, 10)]
 
   testCase "flex-grow distributes excess equally" <| fun () ->
     // All items same content size → excess distributed equally
-    Layout.solveWithContent 30 [Fill; Fill; Fill] [2; 2; 2]
+    Layout.solveWithContent 30 [Fill 1; Fill 1; Fill 1] [2; 2; 2]
     |> Expect.equal "10 each" [(0, 10); (10, 10); (20, 10)]
 
   testCase "flex-basis: 0 (zero content) → equal split" <| fun () ->
-    Layout.solveWithContent 60 [Fill; Fill; Fill] [0; 0; 0]
+    Layout.solveWithContent 60 [Fill 1; Fill 1; Fill 1] [0; 0; 0]
     |> Expect.equal "20 each" [(0, 20); (20, 20); (40, 20)]
 
   testCase "flex with one fixed item — remaining to fills" <| fun () ->
     // Header(Fixed 3) + body(Fill) + footer(Fixed 2) in 25 rows
     // Fixed takes 3+2=5, remaining=20 for 1 fill
-    Layout.solveWithContent 25 [Fixed 3; Fill; Fixed 2] [0; 10; 0]
+    Layout.solveWithContent 25 [Fixed 3; Fill 1; Fixed 2] [0; 10; 0]
     |> Expect.equal "3+20+2" [(0, 3); (3, 20); (23, 2)]
 
   testCase "nested flex: Row of Columns renders correctly" <| fun () ->
@@ -719,6 +831,33 @@ let arenaParityTests = testList "Arena render parity (content-aware)" [
     let items = List.init 10 (fun i -> El.text (string (char (int 'A' + i))))
     let (tree, arena) = arenaHelper (El.column items) 10 5
     arena.Cells |> Expect.sequenceEqual "cells match" tree.Cells
+
+  // ── Weighted fill parity (Sprint 42) ─────────────────────────────────
+
+  testCase "row Fill 1 + Fill 2 weighted parity" <| fun () ->
+    let elem = El.row [El.fillN 1 (El.text "A"); El.fillN 2 (El.text "B")]
+    let (tree, arena) = arenaHelper elem 90 1
+    arena.Cells |> Expect.sequenceEqual "arena matches tree render" tree.Cells
+
+  testCase "column Fill 2 + Fill 1 weighted parity" <| fun () ->
+    let elem = El.column [El.fillN 2 (El.text "A"); El.fillN 1 (El.text "B")]
+    let (tree, arena) = arenaHelper elem 10 90
+    arena.Cells |> Expect.sequenceEqual "arena matches tree render" tree.Cells
+
+  testCase "three-way weighted fill row parity" <| fun () ->
+    let elem = El.row [El.fillN 1 (El.text "X"); El.fillN 1 (El.text "Y"); El.fillN 2 (El.text "Z")]
+    let (tree, arena) = arenaHelper elem 40 1
+    arena.Cells |> Expect.sequenceEqual "arena matches tree render" tree.Cells
+
+  testCase "gapped row with weighted fill parity" <| fun () ->
+    let elem = El.row [El.fillN 1 (El.text "A"); El.fillN 2 (El.text "B")] |> El.gap 2
+    let (tree, arena) = arenaHelper elem 92 1
+    arena.Cells |> Expect.sequenceEqual "arena matches tree render" tree.Cells
+
+  testCase "gapped column with weighted fill parity" <| fun () ->
+    let elem = El.column [El.fillN 2 (El.text "Top"); El.fillN 1 (El.text "Bot")] |> El.gap 1
+    let (tree, arena) = arenaHelper elem 10 91
+    arena.Cells |> Expect.sequenceEqual "arena matches tree render" tree.Cells
 ]
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -737,7 +876,7 @@ let edgeCaseTests = testList "Layout edge cases" [
     // No crash expected
 
   testCase "Single column child gets all space" <| fun () ->
-    let areas = Layout.solveWithContent 100 [Fill] [5]
+    let areas = Layout.solveWithContent 100 [Fill 1] [5]
     areas |> Expect.equal "all 100" [(0, 100)]
 
   testCase "Column of 1 text in 1 row" <| fun () ->
@@ -956,32 +1095,32 @@ let overflowClippingTests = testList "Overflow Clipping" [
 
 let flexShrinkTests = testList "Flex-shrink proportional" [
   testCase "equal content shrunk proportionally" <| fun () ->
-    let result = Layout.solveWithContent 10 [Fill; Fill; Fill] [5; 5; 5]
+    let result = Layout.solveWithContent 10 [Fill 1; Fill 1; Fill 1] [5; 5; 5]
     let sizes = result |> List.map snd
     sizes |> Expect.equal "proportional [4,3,3]" [4; 3; 3]
 
   testCase "unequal content shrunk proportionally" <| fun () ->
-    let result = Layout.solveWithContent 5 [Fill; Fill] [8; 2]
+    let result = Layout.solveWithContent 5 [Fill 1; Fill 1] [8; 2]
     let sizes = result |> List.map snd
     sizes |> Expect.equal "proportional [4,1]" [4; 1]
 
   testCase "single Fill overflows" <| fun () ->
-    let result = Layout.solveWithContent 3 [Fill] [10]
+    let result = Layout.solveWithContent 3 [Fill 1] [10]
     let sizes = result |> List.map snd
     sizes |> Expect.equal "clamped to 3" [3]
 
   testCase "mixed Fixed + Fill overflow: Fixed preserved" <| fun () ->
-    let result = Layout.solveWithContent 10 [Fixed 6; Fill] [6; 8]
+    let result = Layout.solveWithContent 10 [Fixed 6; Fill 1] [6; 8]
     let sizes = result |> List.map snd
     sizes |> Expect.equal "fixed 6, fill 4" [6; 4]
 
   testCase "total sizes never exceed available" <| fun () ->
-    let result = Layout.solveWithContent 10 [Fill; Fill; Fill; Fill] [10; 10; 10; 10]
+    let result = Layout.solveWithContent 10 [Fill 1; Fill 1; Fill 1; Fill 1] [10; 10; 10; 10]
     let total = result |> List.sumBy snd
     total |> Expect.equal "total = 10" 10
 
   testCase "no shrink when content fits" <| fun () ->
-    let result = Layout.solveWithContent 20 [Fill; Fill] [3; 3]
+    let result = Layout.solveWithContent 20 [Fill 1; Fill 1] [3; 3]
     let sizes = result |> List.map snd
     // Excess 14 split equally: each gets 3 + 7 = 10
     sizes |> Expect.equal "equal split" [10; 10]
@@ -1004,7 +1143,7 @@ let layoutConservationPropertyTests =
       fun (available: byte) (n: byte) ->
         let avail = int available
         let count = max 1 (int n % 6)
-        let constraints = List.replicate count Fill
+        let constraints = List.replicate count (Fill 1)
         let contents = List.replicate count 0
         let result = Layout.solveWithContent avail constraints contents
         let total = result |> List.sumBy snd
@@ -1014,7 +1153,7 @@ let layoutConservationPropertyTests =
       fun (available: byte) (n: byte) ->
         let avail = int available
         let count = max 1 (int n % 6)
-        let constraints = List.replicate count Fill
+        let constraints = List.replicate count (Fill 1)
         let contents = List.replicate count 0
         let result = Layout.solveWithContent avail constraints contents
         result |> List.forall (fun (_, w) -> w >= 0)
@@ -1023,7 +1162,7 @@ let layoutConservationPropertyTests =
       fun (available: byte) (n: byte) ->
         let avail = max 1 (int available)
         let count = max 1 (int n % 5)
-        let constraints = List.replicate count Fill
+        let constraints = List.replicate count (Fill 1)
         // Zero content sizes → must sum exactly to avail (no overflow)
         let result = Layout.solveWithContent avail constraints (List.replicate count 0)
         let total = result |> List.sumBy snd
@@ -1033,7 +1172,7 @@ let layoutConservationPropertyTests =
       fun (available: byte) (n: byte) ->
         let avail = int available
         let count = max 1 (int n % 8)
-        let constraints = List.replicate count Fill
+        let constraints = List.replicate count (Fill 1)
         let contents = List.replicate count 0
         let result = Layout.solveWithContent avail constraints contents
         List.length result = count
@@ -1054,7 +1193,7 @@ let layoutConservationPropertyTests =
       fun (available: byte) (n: byte) ->
         let avail = max 1 (int available)
         let count = max 1 (int n % 6)
-        let constraints = List.replicate count Fill
+        let constraints = List.replicate count (Fill 1)
         let contents = List.replicate count 0
         let offsets = Layout.solveWithContent avail constraints contents |> List.map fst
         offsets
@@ -1080,7 +1219,7 @@ let layoutConservationPropertyTests =
       fun (available: byte) (pct: byte) ->
         let avail = max 1 (int available)
         let p = max 0 (min 100 (int pct % 101))
-        let result = Layout.solveWithContent avail [Percentage p; Fill] [0; 0]
+        let result = Layout.solveWithContent avail [Percentage p; Fill 1] [0; 0]
         let total = result |> List.sumBy snd
         // Allow off-by-one from integer rounding
         abs (total - avail) <= 1
@@ -1272,4 +1411,5 @@ let allLayoutTests = testList "MDN CSS Layout Compliance" [
   layoutConservationPropertyTests
   diffInvariantPropertyTests
   renderEquivalencePropertyTests
+  weightedFillTests
 ]

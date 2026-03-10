@@ -2100,10 +2100,10 @@ let vtSortFillTests = testList "VirtualTable sort+fill" [
     match Table.view [fixedCol; fillCol] [(42, "Alice")] None with
     | Column (Row headerCells :: _sep :: Row dataCells :: _) ->
       match List.item 1 headerCells with
-      | Constrained(Fill, _) -> ()
+      | Constrained(Fill _, _) -> ()
       | other -> failwithf "fill column header not wrapped in El.fill: %A" other
       match List.item 1 dataCells with
-      | Constrained(Fill, _) -> ()
+      | Constrained(Fill _, _) -> ()
       | other -> failwithf "fill column data cell not wrapped in El.fill: %A" other
     | other -> failwithf "unexpected: %A" other
   }
