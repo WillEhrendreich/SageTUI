@@ -4839,7 +4839,7 @@ let sprint39AppConfigTests =
     testCase "AppConfig.defaults.MaxDrainMessages is 10_000" <| fun () ->
       AppConfig.defaults.MaxDrainMessages |> Expect.equal "default drain limit" 10_000
 
-    testCase "custom MaxDrainMessages is respected — lower limit causes failwith before 10k" <| fun () ->
+    testCase "custom MaxDrainMessages is respected — lower limit raises InvalidOperationException before 10k" <| fun () ->
       // Program dispatches Cmd.ofMsg in a chain: 0 → 1 → 2 → ... → 4 → quit
       // With MaxDrainMessages = 3, the 4th dispatch triggers the guard.
       let config = { AppConfig.defaults with MaxDrainMessages = 3 }
@@ -4853,7 +4853,7 @@ let sprint39AppConfigTests =
           Subscribe = fun _ -> []
           OnError = None }
       let run () = App.runInlineWith config 3 false backend program |> ignore
-      run |> Expect.throwsT<System.Exception> "guard fires before 10k"
+      run |> Expect.throwsT<System.InvalidOperationException> "guard fires before 10k"
 
     testCase "AppConfig with MaxDrainMessages = 10_000 (explicit) passes a 5-message chain" <| fun () ->
       let config = { AppConfig.defaults with MaxDrainMessages = 10_000 }
@@ -9015,4 +9015,133 @@ let sprint63DrainOnErrorTests =
 let sprint63Tests =
   testList "Sprint 63" [
     sprint63DrainOnErrorTests
+  ]
+
+// SPRINT 64 — DrainMessages OnError routing, debug layout, Program.combine, Cmd.saveBytes
+// ==========================================================================================
+
+/// Config with a tiny MaxDrainMessages limit to trigger overflow without sending 10,001 messages.
+let private tinyDrainConfig = { AppConfig.defaults with MaxDrainMessages = 5 }
+
+let sprint64DrainLimitTests =
+  testList "drain limit: OnError routing replaces failwith" [
+
+    test "drain limit: OnError=Some handler receives exn and dispatches recovery message" {
+      let mutable recovered = false
+      let program : Program<int, Choice<int, unit>> =
+        { Init      = fun () -> 0, Batch [ for i in 1..6 -> DirectMsg (Choice1Of2 i) ]
+          Update    = fun msg model ->
+                        match msg with
+                        | Choice1Of2 n  -> model + n, NoCmd
+                        | Choice2Of2 () -> recovered <- true; model, Quit 0
+          View      = fun n -> El.text (string n)
+          Subscribe = fun _ -> []
+          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+      let backend = makeMockBackend 40 10 []
+      App.runWith tinyDrainConfig backend program
+      recovered |> Expect.isTrue "recovery message should have been dispatched after drain limit"
+    }
+
+    test "drain limit: OnError=Some returning None absorbs error, app continues and can quit via event" {
+      let mutable handlerCalled = false
+      let program : Program<int, Choice<int, unit>> =
+        { Init      = fun () -> 0, Batch [ for i in 1..6 -> DirectMsg (Choice1Of2 i) ]
+          Update    = fun msg model ->
+                        match msg with
+                        | Choice1Of2 n  -> model + n, NoCmd
+                        | Choice2Of2 () -> model, Quit 0
+          View      = fun n -> El.text (string n)
+          Subscribe = fun _ ->
+            [ KeySub (fun (k, _) ->
+                match k with
+                | Key.Escape -> Some (Choice2Of2 ())
+                | _          -> None) ]
+          OnError   = Some (fun _ -> handlerCalled <- true; None) }
+      let backend = makeMockBackend 40 10 [
+        None
+        Some (KeyPressed(Key.Escape, Modifiers.None))
+        None ]
+      App.runWith tinyDrainConfig backend program
+      handlerCalled |> Expect.isTrue "OnError handler should have been called for drain limit"
+    }
+
+    test "drain limit: OnError=None raises InvalidOperationException (not raw failwith)" {
+      let program : Program<int, int> =
+        { Init      = fun () -> 0, Batch [ for i in 1..6 -> DirectMsg i ]
+          Update    = fun n model -> model + n, NoCmd
+          View      = fun n -> El.text (string n)
+          Subscribe = fun _ -> []
+          OnError   = None }
+      let backend = makeMockBackend 40 10 []
+      let mutable caughtInvalidOp = false
+      try
+        App.runWith tinyDrainConfig backend program
+      with :? System.InvalidOperationException as ex ->
+        caughtInvalidOp <- true
+        ex.Message |> Expect.stringContains "exception message should mention drain" "drain"
+      caughtInvalidOp |> Expect.isTrue "should raise InvalidOperationException (not random failwith)"
+    }
+
+    test "drain limit: messages processed before limit are applied correctly" {
+      // With maxDrain=5 and 6 messages, exactly 5 messages should be processed.
+      // message 6 triggers the limit, queue is cleared, recovery dispatched.
+      let mutable processedNormal = 0
+      let program : Program<int, Choice<int, unit>> =
+        { Init      = fun () -> 0, Batch [ for i in 1..6 -> DirectMsg (Choice1Of2 i) ]
+          Update    = fun msg model ->
+                        match msg with
+                        | Choice1Of2 n  -> processedNormal <- processedNormal + 1; model + n, NoCmd
+                        | Choice2Of2 () -> model, Quit 0
+          View      = fun n -> El.text (string n)
+          Subscribe = fun _ -> []
+          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+      let backend = makeMockBackend 40 10 []
+      App.runWith tinyDrainConfig backend program
+      // Messages 1..5 processed (count = 1..5, ≤ maxDrain=5), message 6 triggers limit.
+      processedNormal |> Expect.equal "exactly 5 normal messages processed before limit" 5
+    }
+
+    test "drain limit: queue is cleared after overflow so next frame starts clean" {
+      // After drain overflow, any messages remaining in queue must be discarded.
+      // We verify by checking the recovery path only fires once (not repeatedly).
+      let mutable recoveryCount = 0
+      let program : Program<int, Choice<int, unit>> =
+        { Init      = fun () ->
+            // 6 msgs → triggers drain limit → recovery dispatched → Quit
+            0, Batch [ for i in 1..6 -> DirectMsg (Choice1Of2 i) ]
+          Update    = fun msg model ->
+                        match msg with
+                        | Choice1Of2 n  -> model + n, NoCmd
+                        | Choice2Of2 () -> recoveryCount <- recoveryCount + 1; model, Quit 0
+          View      = fun n -> El.text (string n)
+          Subscribe = fun _ -> []
+          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+      let backend = makeMockBackend 40 10 [ None; None ]
+      App.runWith tinyDrainConfig backend program
+      recoveryCount |> Expect.equal "recovery dispatched exactly once" 1
+    }
+
+    testProperty "drain limit: OnError=Some never panics regardless of message count above limit" <| fun (n: int) ->
+      let extra = abs n % 200 + 1  // 1..200 extra messages beyond limit
+      let msgCount = 5 + extra      // always > maxDrain(5)
+      let mutable recovered = false
+      let program : Program<int, Choice<int, unit>> =
+        { Init      = fun () -> 0, Batch [ for i in 1..msgCount -> DirectMsg (Choice1Of2 i) ]
+          Update    = fun msg model ->
+                        match msg with
+                        | Choice1Of2 n  -> model + n, NoCmd
+                        | Choice2Of2 () -> recovered <- true; model, Quit 0
+          View      = fun n -> El.text (string n)
+          Subscribe = fun _ -> []
+          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+      let backend = makeMockBackend 40 10 []
+      App.runWith tinyDrainConfig backend program
+      recovered |> Expect.isTrue "recovery message dispatched — no panic"
+
+  ]
+
+[<Tests>]
+let sprint64Tests =
+  testList "Sprint 64" [
+    sprint64DrainLimitTests
   ]

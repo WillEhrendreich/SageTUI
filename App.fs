@@ -72,24 +72,40 @@ module App =
     let mutable changed = false
     let mutable count   = 0
     let mutable msg     = Unchecked.defaultof<'msg>
-    while msgChannel.TryDequeue(&msg) do
+    let mutable stop    = false
+    while not stop && msgChannel.TryDequeue(&msg) do
       count <- count + 1
       if count > maxDrain then
-        failwith (sprintf "[SageTUI] Message drain loop exceeded %d messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains." maxDrain)
-      try
-        let nm, cmd = program.Update msg m
-        m       <- nm
-        changed <- true
-        interpretCmd cmd
-      with ex ->
+        // Route overflow through OnError instead of hard-crashing — correctness invariant.
+        // Clear remaining messages first so the next frame starts clean.
+        msgChannel.Clear()
+        let drainEx =
+          System.InvalidOperationException(
+            sprintf "[SageTUI] Message drain loop exceeded %d messages in one frame. \
+                     Possible Cmd.ofMsg cycle detected. Check your Update function for \
+                     infinite message chains." maxDrain)
         match program.OnError with
         | Some handler ->
-          // Some recoveryMsg → dispatch recovery; None → handler absorbed it, continue silently.
-          // To reraise from inside a handler call `raise ex` in the handler body.
-          match handler ex with
+          match handler drainEx with
           | Some recoveryMsg -> dispatch recoveryMsg
           | None             -> ()
-        | None -> reraise()
+        | None -> raise drainEx
+        stop <- true
+      else
+        try
+          let nm, cmd = program.Update msg m
+          m       <- nm
+          changed <- true
+          interpretCmd cmd
+        with ex ->
+          match program.OnError with
+          | Some handler ->
+            // Some recoveryMsg → dispatch recovery; None → handler absorbed it, continue silently.
+            // To reraise from inside a handler call `raise ex` in the handler body.
+            match handler ex with
+            | Some recoveryMsg -> dispatch recoveryMsg
+            | None             -> ()
+          | None -> reraise()
     m, changed
 
   let runWith (config: AppConfig) (backend: TerminalBackend) (program: Program<'model, 'msg>) =
