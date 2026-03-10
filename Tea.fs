@@ -338,6 +338,29 @@ module Sub =
           enumerator.DisposeAsync().AsTask() |> Async.AwaitTask |> Async.StartImmediate
       })
 
+  /// Create a ClickSub from a list of element-key-to-message bindings.
+  /// Symmetric with `Keys.bind` — O(1) Dictionary lookup on the element key string.
+  ///
+  /// IMPORTANT — call at module/let level, NOT inside the Subscribe lambda:
+  ///   let clickBindings = Sub.clicks [ "submit-btn", Submit; "cancel-btn", Cancel ]  // ✅ allocated once
+  ///   Subscribe = fun _ -> [ clickBindings; keyBindings ]
+  ///
+  /// Calling Sub.clicks inside Subscribe allocates a new Dictionary on every model update:
+  ///   Subscribe = fun _ -> [ Sub.clicks [ "submit-btn", Submit ] ]    // ⚠️ allocs every update
+  ///
+  /// Pair with `El.clickRegion "submit-btn" submitButton` in your view.
+  let clicks (bindings: (string * 'msg) list) : Sub<'msg> =
+    let lookup = System.Collections.Generic.Dictionary(bindings.Length)
+    for (k, msg) in bindings do
+      lookup[k] <- msg
+    ClickSub(fun (_, key) ->
+      match key with
+      | None -> None
+      | Some k ->
+        match lookup.TryGetValue(k) with
+        | true, msg -> Some msg
+        | false, _  -> None)
+
 /// Generic undo/redo wrapper for any model type.
 /// Wrap your model in `UndoableModel` and use `Undoable.commit` in Update
 /// to get Ctrl+Z / Ctrl+Y for free.

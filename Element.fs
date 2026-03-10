@@ -211,6 +211,23 @@ module El =
   let keyed key elem =
     Keyed(key, Fade 0<ms>, Fade 0<ms>, elem)
 
+  /// Mark a region of the UI as clickable with the given key.
+  /// Wraps `child` in a `Keyed` element with no transitions, so click events
+  /// on this region will report `key` to ClickSub handlers.
+  ///
+  /// Pair with `Sub.clicks` in your Subscribe function:
+  /// <code>
+  /// // View:
+  /// El.clickRegion "submit" submitButton
+  ///
+  /// // Subscribe (at module level — allocates once):
+  /// let clickBindings = Sub.clicks [ "submit", Submit; "cancel", Cancel ]
+  /// ...
+  /// Subscribe = fun _ -> [ keyBindings; clickBindings ]
+  /// </code>
+  let clickRegion (key: string) (elem: Element) : Element =
+    Keyed(key, Fade 0<ms>, Fade 0<ms>, elem)
+
   let onEnter t elem =
     match elem with
     | Keyed(k, _, exit, child) -> Keyed(k, t, exit, child)
@@ -255,6 +272,183 @@ module El =
 
   // Formatted text
   let textf fmt = Printf.ksprintf text fmt
+
+  // Inline markup parsing — lightweight tag-based styled text.
+  // Grammar: literal text interspersed with [tag] ... [/] or [/tag] close markers.
+  //
+  // Supported tags (case-insensitive):
+  //   Attrs:  [bold] [dim] [italic] [under] [blink] [rev] [strike]
+  //   Colors: [black] [red] [green] [yellow] [blue] [magenta] [cyan] [white]
+  //           [bblack] [bred] [bgreen] [byellow] [bblue] [bmagenta] [bcyan] [bwhite]  (bright variants)
+  //           [bg:red] [bg:cyan] ... (background color via bg: prefix)
+  //           [rgb:r,g,b] [fg:rgb:r,g,b] [bg:rgb:r,g,b] (RGB values)
+  //   Close:  [/] or [/bold] or [/red] etc. — pops the innermost open tag
+  //
+  // Returns a Row of styled Text nodes. Returns El.empty for empty input.
+  // Unknown tags are treated as literal text (the tag characters are preserved).
+
+  /// Private markup parser internals
+  module private Markup =
+    let private parseColor (tag: string) : Color option =
+      let t = tag.ToLowerInvariant()
+      match t with
+      | "black"   -> Some (Color.Named(BaseColor.Black,   Intensity.Normal))
+      | "red"     -> Some (Color.Named(BaseColor.Red,     Intensity.Normal))
+      | "green"   -> Some (Color.Named(BaseColor.Green,   Intensity.Normal))
+      | "yellow"  -> Some (Color.Named(BaseColor.Yellow,  Intensity.Normal))
+      | "blue"    -> Some (Color.Named(BaseColor.Blue,    Intensity.Normal))
+      | "magenta" -> Some (Color.Named(BaseColor.Magenta, Intensity.Normal))
+      | "cyan"    -> Some (Color.Named(BaseColor.Cyan,    Intensity.Normal))
+      | "white"   -> Some (Color.Named(BaseColor.White,   Intensity.Normal))
+      | "bblack"   -> Some (Color.Named(BaseColor.Black,   Intensity.Bright))
+      | "bred"     -> Some (Color.Named(BaseColor.Red,     Intensity.Bright))
+      | "bgreen"   -> Some (Color.Named(BaseColor.Green,   Intensity.Bright))
+      | "byellow"  -> Some (Color.Named(BaseColor.Yellow,  Intensity.Bright))
+      | "bblue"    -> Some (Color.Named(BaseColor.Blue,    Intensity.Bright))
+      | "bmagenta" -> Some (Color.Named(BaseColor.Magenta, Intensity.Bright))
+      | "bcyan"    -> Some (Color.Named(BaseColor.Cyan,    Intensity.Bright))
+      | "bwhite"   -> Some (Color.Named(BaseColor.White,   Intensity.Bright))
+      | _ when t.StartsWith("rgb:") ->
+        let parts = t[4..].Split(',')
+        match parts.Length with
+        | 3 ->
+          match System.Byte.TryParse(parts.[0]), System.Byte.TryParse(parts.[1]), System.Byte.TryParse(parts.[2]) with
+          | (true, r), (true, g), (true, b) -> Some (Color.Rgb(r, g, b))
+          | _ -> None
+        | _ -> None
+      | _ -> None
+
+    let private parseAttr (tag: string) : TextAttrs option =
+      match tag.ToLowerInvariant() with
+      | "bold"   -> Some TextAttrs.bold
+      | "dim"    -> Some TextAttrs.dim
+      | "italic" -> Some TextAttrs.italic
+      | "under"  -> Some TextAttrs.underline
+      | "blink"  -> Some TextAttrs.blink
+      | "rev"    -> Some TextAttrs.reverse
+      | "strike" -> Some TextAttrs.strikethrough
+      | _ -> None
+
+    type private StyleChange =
+      | PushFg of Color
+      | PushBg of Color
+      | PushAttr of TextAttrs
+      | Pop
+
+    let private parseTag (tag: string) : StyleChange option =
+      let t = tag.Trim()
+      match t with
+      | "" -> None
+      | "/" -> Some Pop
+      | _ when t.StartsWith("/") -> Some Pop
+      | _ when t.ToLowerInvariant().StartsWith("bg:") ->
+        let rest = t[3..]
+        parseColor rest |> Option.map PushBg
+      | _ when t.ToLowerInvariant().StartsWith("fg:") ->
+        let rest = t[3..]
+        parseColor rest |> Option.map PushFg
+      | _ ->
+        match parseAttr t with
+        | Some a -> Some (PushAttr a)
+        | None ->
+          parseColor t |> Option.map PushFg
+
+    // Split input into alternating (text, tag) segments.
+    // Returns list of (literal: string, tag: string option) pairs.
+    let private tokenize (input: string) : (string * string option) list =
+      let result = System.Collections.Generic.List<string * string option>()
+      let mutable i = 0
+      let mutable literal = System.Text.StringBuilder()
+      while i < input.Length do
+        let c = input.[i]
+        match c with
+        | '[' ->
+          let close = input.IndexOf(']', i + 1)
+          match close with
+          | -1 ->
+            // No closing bracket: treat as literal
+            literal.Append(c) |> ignore
+            i <- i + 1
+          | j ->
+            let tag = input.[i+1..j-1]
+            result.Add(literal.ToString(), Some tag)
+            literal.Clear() |> ignore
+            i <- j + 1
+        | _ ->
+          literal.Append(c) |> ignore
+          i <- i + 1
+      if literal.Length > 0 then
+        result.Add(literal.ToString(), None)
+      result |> Seq.toList
+
+    // Merge a stack of StyleChanges into a single Style.
+    let private stackToStyle (stack: StyleChange list) : Style =
+      let mutable fg: Color option = None
+      let mutable bg: Color option = None
+      let mutable attrs = TextAttrs.none
+      for change in stack do
+        match change with
+        | PushFg c  -> fg    <- Some c
+        | PushBg c  -> bg    <- Some c
+        | PushAttr a -> attrs <- TextAttrs.combine attrs a
+        | Pop        -> ()
+      { Fg = fg; Bg = bg; Attrs = attrs }
+
+    /// Parse markup string into a list of (text, style) pairs.
+    let parse (input: string) : (string * Style) list =
+      let tokens = tokenize input
+      let mutable stack: StyleChange list = []
+      let mutable results: (string * Style) list = []
+      for (lit, tagOpt) in tokens do
+        match lit with
+        | "" -> ()
+        | s ->
+          let style = stackToStyle stack
+          results <- results @ [(s, style)]
+        match tagOpt with
+        | None -> ()
+        | Some tag ->
+          match parseTag tag with
+          | None -> ()
+          | Some Pop ->
+            // Pop last non-Pop entry from stack
+            match stack with
+            | [] -> ()
+            | _ :: rest -> stack <- rest
+          | Some change -> stack <- change :: stack
+      results
+
+  /// Parse inline markup into a `Row` of styled `Text` nodes.
+  ///
+  /// Supported tags: [bold] [dim] [italic] [under] [blink] [rev] [strike]
+  /// for attributes; [red] [green] [blue] [yellow] [cyan] [magenta] [white] [black]
+  /// and bright variants [bred] [bgreen] etc. for foreground colors;
+  /// [bg:red] [bg:cyan] etc. for background; [rgb:r,g,b] for RGB;
+  /// [/] or [/tag] to close the innermost open tag.
+  ///
+  /// Returns `El.empty` for empty input. Unknown tags are silently ignored.
+  ///
+  /// Example:
+  ///   El.markup "Loaded [bold]42[/bold] records in [green]0.3s[/green]"
+  ///   El.markup "[red]ERROR[/] in [bold]main.fs[/bold]:[yellow]42[/]"
+  let markup (input: string) : Element =
+    match input with
+    | "" -> Empty
+    | _ ->
+      match Markup.parse input with
+      | [] -> Empty
+      | [(s, st)] -> Text(s, st)
+      | parts ->
+        Row(parts |> List.map (fun (s, st) ->
+          match st = Style.empty with
+          | true -> Text(s, Style.empty)
+          | false -> Text(s, st)))
+
+  /// Printf-style inline markup builder.
+  ///
+  /// Example:
+  ///   El.markupf "Found [bold]%d[/bold] matches in [cyan]%s[/]" count filename
+  let markupf fmt = Printf.ksprintf markup fmt
 
   // Text wrapping (composition — no new DU case)
   let private wordWrap (maxWidth: int) (s: string) =

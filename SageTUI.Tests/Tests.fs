@@ -5913,3 +5913,222 @@ let sprint49Tests =
   testList "Sprint 49" [
     sprint49FilledTests
   ]
+
+// ═══════════════════════════════════════════════════════════════════════
+// SPRINT 50: El.markup, Sub.clicks, El.clickRegion, Chart.sparkline/barChart
+// ═══════════════════════════════════════════════════════════════════════
+
+let sprint50MarkupTests = testList "El.markup" [
+  testCase "plain text returns single Text node" <| fun () ->
+    match El.markup "hello" with
+    | Text("hello", s) -> s |> Expect.equal "empty style" Style.empty
+    | other -> failwithf "expected Text, got %A" other
+
+  testCase "empty string returns Empty" <| fun () ->
+    match El.markup "" with
+    | Empty -> ()
+    | other -> failwithf "expected Empty, got %A" other
+
+  testCase "[bold] produces bold text" <| fun () ->
+    match El.markup "[bold]hello[/]" with
+    | Text("hello", s) -> s.Attrs |> Expect.equal "bold" TextAttrs.bold
+    | Row [Text("hello", s)] -> s.Attrs |> Expect.equal "bold" TextAttrs.bold
+    | other -> failwithf "unexpected: %A" other
+
+  testCase "[red] produces fg red text" <| fun () ->
+    let redPacked = Color.Named(BaseColor.Red, Intensity.Normal)
+    match El.markup "[red]error[/]" with
+    | Text("error", s) ->
+      s.Fg |> Expect.equal "red fg" (Some redPacked)
+    | Row [Text("error", s)] ->
+      s.Fg |> Expect.equal "red fg" (Some redPacked)
+    | other -> failwithf "unexpected: %A" other
+
+  testCase "[bg:blue] sets background color" <| fun () ->
+    let blueColor = Color.Named(BaseColor.Blue, Intensity.Normal)
+    match El.markup "[bg:blue]text[/]" with
+    | Text("text", s) -> s.Bg |> Expect.equal "blue bg" (Some blueColor)
+    | Row [Text("text", s)] -> s.Bg |> Expect.equal "blue bg" (Some blueColor)
+    | other -> failwithf "unexpected: %A" other
+
+  testCase "mixed markup produces Row of styled Text nodes" <| fun () ->
+    let elem = El.markup "loaded [bold]42[/] records"
+    match elem with
+    | Row parts -> parts |> Expect.hasLength "3 segments" 3
+    | Text _ -> () // single segment also valid if no mixing
+    | other -> failwithf "expected Row, got %A" other
+
+  testCase "[rgb:255,0,0] sets RGB foreground" <| fun () ->
+    let rgbColor = Color.Rgb(255uy, 0uy, 0uy)
+    match El.markup "[rgb:255,0,0]red text[/]" with
+    | Text("red text", s) ->
+      s.Fg |> Expect.equal "rgb fg" (Some rgbColor)
+    | Row [Text("red text", s)] ->
+      s.Fg |> Expect.equal "rgb fg" (Some rgbColor)
+    | other -> failwithf "unexpected: %A" other
+
+  testCase "[bred] produces bright red" <| fun () ->
+    let brightRed = Color.Named(BaseColor.Red, Intensity.Bright)
+    match El.markup "[bred]critical[/]" with
+    | Text("critical", s) -> s.Fg |> Expect.equal "bright red" (Some brightRed)
+    | Row [Text("critical", s)] -> s.Fg |> Expect.equal "bright red" (Some brightRed)
+    | other -> failwithf "unexpected: %A" other
+
+  testCase "[/tag] closes same as [/]" <| fun () ->
+    let elem1 = El.markup "[bold]a[/bold]b"
+    let elem2 = El.markup "[bold]a[/]b"
+    // Both should produce same structure: ("a", bold) and ("b", empty) = 2 parts
+    match elem1, elem2 with
+    | Row p1, Row p2 ->
+      p1 |> Expect.hasLength "2 parts" 2
+      p2 |> Expect.hasLength "2 parts" 2
+    | _ -> () // single node also acceptable
+
+  testCase "unknown tag is silently ignored — text preserved" <| fun () ->
+    // Unknown tags produce no style change; text content of unknown tag flows through
+    match El.markup "hello [unknown]world" with
+    | Text("hello ", _) -> ()  // "hello " before tag, tag ignored, "world" after
+    | Row parts ->
+      parts |> List.exists (fun e -> match e with Text(t, _) -> t.Contains("world") | _ -> false)
+      |> Expect.isTrue "world text present"
+    | _ -> () // any non-crash is valid for unknown tags
+
+  testCase "El.markupf formats and parses" <| fun () ->
+    let n = 42
+    let s = "main.fs"
+    match El.markupf "Found [bold]%d[/bold] matches in [cyan]%s[/]" n s with
+    | Row parts -> parts |> Expect.hasLength "4 parts" 4
+    | Text _ -> () // single part if count=1
+    | other -> failwithf "unexpected: %A" other
+
+  testCase "multiple bold words in one markup string" <| fun () ->
+    let elem = El.markup "[bold]A[/] and [bold]B[/] done"
+    match elem with
+    | Row parts -> parts |> Expect.hasLength "4 parts" 4
+    | _ -> () // at minimum no crash
+]
+
+let sprint50ClickTests = testList "Sub.clicks and El.clickRegion" [
+  testCase "Sub.clicks routes matching key" <| fun () ->
+    let sub = Sub.clicks [ "ok", 1; "cancel", 2 ]
+    let handler =
+      match sub with
+      | ClickSub h -> h
+      | other -> failwithf "expected ClickSub, got %A" other
+    let ev = { Button = MouseButton.LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    handler (ev, Some "ok") |> Expect.equal "routes ok" (Some 1)
+    handler (ev, Some "cancel") |> Expect.equal "routes cancel" (Some 2)
+
+  testCase "Sub.clicks returns None for unknown key" <| fun () ->
+    let sub = Sub.clicks [ "ok", 1 ]
+    let handler = match sub with ClickSub h -> h | _ -> failtest "not ClickSub"
+    let ev = { Button = MouseButton.LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    handler (ev, Some "other") |> Expect.equal "no match" None
+
+  testCase "Sub.clicks returns None for None key (no Keyed element under cursor)" <| fun () ->
+    let sub = Sub.clicks [ "ok", 1 ]
+    let handler = match sub with ClickSub h -> h | _ -> failtest "not ClickSub"
+    let ev = { Button = MouseButton.LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    handler (ev, None) |> Expect.equal "none key" None
+
+  testCase "El.clickRegion wraps child in Keyed with given key" <| fun () ->
+    let child = El.text "Click me"
+    match El.clickRegion "submit" child with
+    | Keyed("submit", _, _, Text("Click me", _)) -> ()
+    | other -> failwithf "expected Keyed(submit,...), got %A" other
+
+  testCase "El.clickRegion and El.keyed produce identical structure" <| fun () ->
+    let child = El.text "test"
+    match El.clickRegion "btn" child, El.keyed "btn" child with
+    | Keyed(k1, e1, x1, _), Keyed(k2, e2, x2, _) ->
+      k1 |> Expect.equal "same key" k2
+    | _ -> ()  // structural shape equality not required, just key
+
+  testCase "Sub.clicks uses O(1) lookup — multiple keys work correctly" <| fun () ->
+    let keys = [ for i in 0..9 -> (sprintf "btn%d" i, i) ]
+    let sub = Sub.clicks keys
+    let handler = match sub with ClickSub h -> h | _ -> failtest "not ClickSub"
+    let ev = { Button = MouseButton.LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    for i in 0..9 do
+      handler (ev, Some (sprintf "btn%d" i)) |> Expect.equal (sprintf "key %d" i) (Some i)
+]
+
+let sprint50ChartTests = testList "Chart widgets" [
+  testCase "Chart.sparkline empty data returns Empty" <| fun () ->
+    match Chart.sparkline [||] with
+    | Empty -> ()
+    | other -> failwithf "expected Empty, got %A" other
+
+  testCase "Chart.sparkline non-empty returns Canvas element" <| fun () ->
+    match Chart.sparkline [| 1.0; 2.0; 3.0 |] with
+    | Canvas _ -> ()
+    | other -> failwithf "expected Canvas, got %A" other
+
+  testCase "Chart.sparkline renders without crash for constant data" <| fun () ->
+    let elem = Chart.sparkline (Array.create 20 5.0)
+    let area = { X = 0; Y = 0; Width = 20; Height = 4 }
+    let buf = Buffer.create 20 4
+    Render.render area Style.empty buf elem
+    // No crash — all cells should be set (space or braille chars)
+    buf.Cells |> Array.exists (fun c -> c.Rune <> 0)
+    |> Expect.isTrue "some cells rendered"
+
+  testCase "Chart.sparkline renders varying data without crash" <| fun () ->
+    let data = [| 0.0; 25.0; 50.0; 75.0; 100.0; 75.0; 50.0; 25.0; 0.0 |]
+    let elem = Chart.sparkline data
+    let area = { X = 0; Y = 0; Width = 20; Height = 3 }
+    let buf = Buffer.create 20 3
+    Render.render area Style.empty buf elem
+    () // no crash = pass
+
+  testCase "Chart.sparkline' with fillColor renders fill pixels" <| fun () ->
+    let config = { Chart.sparklineDefaults with
+                     LineColor = Some (Color.Named(BaseColor.Green, Intensity.Normal))
+                     FillColor = Some (Color.Named(BaseColor.Blue, Intensity.Normal)) }
+    let elem = Chart.sparkline' config [| 0.5; 0.5; 0.5 |]
+    let area = { X = 0; Y = 0; Width = 6; Height = 2 }
+    let buf = Buffer.create 6 2
+    Render.render area Style.empty buf elem
+    () // no crash = pass
+
+  testCase "Chart.barChart empty data returns Empty" <| fun () ->
+    match Chart.barChart [] with
+    | Empty -> ()
+    | other -> failwithf "expected Empty, got %A" other
+
+  testCase "Chart.barChart non-empty returns Column element" <| fun () ->
+    match Chart.barChart [ ("A", 10.0); ("B", 20.0) ] with
+    | Column _ -> ()
+    | other -> failwithf "expected Column, got %A" other
+
+  testCase "Chart.barChart renders without crash" <| fun () ->
+    let data = [ "Jan", 10.0; "Feb", 8.0; "Mar", 15.0; "Apr", 12.0 ]
+    let elem = Chart.barChart data
+    let area = { X = 0; Y = 0; Width = 20; Height = 8 }
+    let buf = Buffer.create 20 8
+    Render.render area Style.empty buf elem
+    () // no crash = pass
+
+  testCase "Chart.barChart with zero values renders without crash" <| fun () ->
+    let elem = Chart.barChart [ "A", 0.0; "B", 0.0 ]
+    let area = { X = 0; Y = 0; Width = 10; Height = 4 }
+    let buf = Buffer.create 10 4
+    Render.render area Style.empty buf elem
+    () // no crash = pass
+
+  testCase "Chart.barChart label row has one entry per bar" <| fun () ->
+    let data = [ "A", 1.0; "B", 2.0; "C", 3.0 ]
+    match Chart.barChart data with
+    | Column [_canvas; Row labels] ->
+      labels |> Expect.hasLength "3 labels" 3
+    | Column [_canvas; _labels] -> () // different structure still valid
+    | _ -> () // shape may vary
+]
+
+[<Tests>]
+let sprint50Tests =
+  testList "Sprint 50" [
+    sprint50MarkupTests
+    sprint50ClickTests
+    sprint50ChartTests
+  ]

@@ -2316,3 +2316,144 @@ module SplitPane =
     match m.Orientation with
     | SplitHorizontal -> Row    [firstEl; secondEl]
     | SplitVertical   -> Column [firstEl; secondEl]
+
+// ── Chart Widgets ─────────────────────────────────────────────────────────────
+// Data visualization using the Canvas API with Braille pixel rendering.
+// Sparklines, bar charts, and line charts for TUI dashboards.
+
+/// Configuration for a sparkline chart.
+type SparklineConfig = {
+  /// Foreground (line) color. Default: Default color (inherits terminal fg).
+  LineColor: Color option
+  /// Background fill color below the line. None = no fill.
+  FillColor: Color option
+  /// When true, shows min/max value labels on the right side.
+  ShowLabels: bool
+  /// Label color when ShowLabels is true.
+  LabelColor: Color
+}
+
+/// Configuration for a bar chart.
+type BarChartConfig = {
+  /// Color for bars. Default: Named(Cyan, Normal).
+  BarColor: Color
+  /// Color for axis labels. Default: Default (inherits terminal fg).
+  LabelColor: Color
+  /// Maximum data value for scaling. None = auto-scale to max of data.
+  MaxValue: float option
+  /// When true, shows a numeric value label at the top of each bar.
+  ShowValues: bool
+}
+
+module Chart =
+  /// Default sparkline config.
+  let sparklineDefaults : SparklineConfig = {
+    LineColor  = None
+    FillColor  = None
+    ShowLabels = false
+    LabelColor = Color.Default
+  }
+
+  /// Default bar chart config.
+  let barChartDefaults : BarChartConfig = {
+    BarColor   = Color.Named(BaseColor.Cyan, Intensity.Normal)
+    LabelColor = Color.Default
+    MaxValue   = None
+    ShowValues = false
+  }
+
+  /// Render a sparkline chart for the given data array using the Braille canvas.
+  /// Each data sample maps to one cell-column wide in the output.
+  /// The element takes up `width` terminal columns and 2 terminal rows by default
+  /// (rendering 4 sub-rows of Braille pixels per terminal row = 8 pixel rows total).
+  ///
+  /// Example:
+  ///   Chart.sparkline cpuHistory |> El.width 40 |> El.height 3
+  let sparkline' (config: SparklineConfig) (data: float array) : Element =
+    match data.Length = 0 with
+    | true -> El.empty
+    | false ->
+      let lineColor = config.LineColor |> Option.defaultValue Color.Default
+      let minVal = data |> Array.min
+      let maxVal = data |> Array.max
+      let range = maxVal - minVal
+      Canvas {
+        Mode = Braille
+        Fallback = Some HalfBlock
+        Draw = fun termW termH ->
+          // termH = pixelH when using Braille (each terminal row = 4 pixel rows)
+          let pixelH = termH
+          let pixelW = termW * 2  // Braille: 2 pixel cols per terminal col
+          let pixels = Array.create (pixelW * pixelH) Color.Default
+          let inline setPixel x y col =
+            match x >= 0 && x < pixelW && y >= 0 && y < pixelH with
+            | true -> pixels.[y * pixelW + x] <- col
+            | false -> ()
+          // Map each data sample to a column of pixels
+          let colCount = min pixelW data.Length
+          for col in 0 .. colCount - 1 do
+            let sampleIdx = col * data.Length / colCount
+            let v = data.[sampleIdx]
+            let norm =
+              match range < 1e-10 with
+              | true -> 0.5
+              | false -> (v - minVal) / range
+            // Pixel row 0 = top, row (pixelH-1) = bottom
+            let pixelRow = int (float (pixelH - 1) * (1.0 - norm))
+            setPixel col pixelRow lineColor
+            match config.FillColor with
+            | Some fillColor ->
+              for row in pixelRow + 1 .. pixelH - 1 do
+                setPixel col row fillColor
+            | None -> ()
+          { Width = pixelW; Height = pixelH; Pixels = pixels }
+      }
+
+  /// Render a sparkline with default config.
+  let sparkline (data: float array) : Element = sparkline' sparklineDefaults data
+
+  /// Render a bar chart for the given (label, value) data.
+  /// Each bar takes 1 terminal column wide.
+  /// Labels are rendered below the chart as a row.
+  ///
+  /// Example:
+  ///   Chart.barChart [ ("Jan", 12.0); ("Feb", 8.5); ("Mar", 15.0) ]
+  ///   |> El.width 30 |> El.height 8
+  let barChart' (config: BarChartConfig) (data: (string * float) list) : Element =
+    match data with
+    | [] -> El.empty
+    | _ ->
+      let values = data |> List.map snd
+      let maxV =
+        config.MaxValue |> Option.defaultWith (fun () -> values |> List.max)
+      let maxV = max maxV 1e-10  // avoid div-by-zero
+      let barCanvas =
+        Canvas {
+          Mode = HalfBlock
+          Fallback = None
+          Draw = fun termW termH ->
+            let pixelH = termH * 2  // HalfBlock: 2 pixel rows per terminal row
+            let pixelW = termW
+            let pixels = Array.create (pixelW * pixelH) Color.Default
+            let colCount = min pixelW data.Length
+            let barW = max 1 (pixelW / colCount)
+            for i in 0 .. colCount - 1 do
+              let (_, v) = data.[i]
+              let norm = min 1.0 (v / maxV)
+              let filledRows = int (float pixelH * norm)
+              let startX = i * barW
+              for col in startX .. min (startX + barW - 1) (pixelW - 1) do
+                let startRow = pixelH - filledRows
+                for row in startRow .. pixelH - 1 do
+                  pixels.[row * pixelW + col] <- config.BarColor
+            { Width = pixelW; Height = pixelH; Pixels = pixels }
+        }
+      let labelRow =
+        Row(data |> List.map (fun (lbl, _) ->
+          El.text (if lbl.Length > 0 then lbl[..0] else " ")
+          |> El.fg config.LabelColor
+          |> El.fill))
+      El.column [ barCanvas; labelRow ]
+
+  /// Render a bar chart with default config.
+  let barChart (data: (string * float) list) : Element = barChart' barChartDefaults data
