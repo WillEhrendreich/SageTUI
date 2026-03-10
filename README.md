@@ -188,9 +188,12 @@ let main _ = App.run program; 0
 |----------|-------------|
 | **Architecture** | Elm Architecture (init/update/view/subscribe), pure state management |
 | **Layout** | Row, Column, Fill, Percentage, Min/Max, padding, borders, alignment, gap, flex-shrink |
+| **Elements** | Text, Row, Column, Overlay, Constrained, Bordered, Padded, Keyed, Canvas, **Scroll** (viewport clipping) |
+| **Borders** | 6 border styles (Rounded, Light, Heavy, Double, ASCII, None) with optional **titled borders** (`El.borderedWithTitle`) |
 | **Rendering** | Arena-allocated zero-GC frame loop, SIMD-accelerated diff, 24-bit TrueColor |
-| **Widgets** | TextInput, Select, Table, Tabs, Modal, TreeView, ProgressBar, Checkbox, Toggle, RadioGroup, SpinnerWidget, Toast, Form |
-| **Scrolling** | ScrollState, scroll indicators, mouse wheel, ScrollableList, keyboard navigation |
+| **Widgets** | TextInput, Select, Table, Tabs, Modal, TreeView, ProgressBar, Checkbox, Toggle, RadioGroup, SpinnerWidget, Toast, Form, FuzzyFinder, TextEditor, SplitPane, VirtualList, VirtualTable |
+| **Focus** | `FocusRing<'F>` with `next`/`prev`/`isFocusedAt` — tab cycling with no allocations, works with any type including `[<NoEquality>]` via index |
+| **Scrolling** | ScrollState, VirtualList with scroll indicators, `El.scroll` element for viewport clipping |
 | **Canvas** | HalfBlock (▀/▄) and Braille (⠿) pixel modes |
 | **Transitions** | Runtime support for Fade, Wipe, Dissolve, and ColorMorph, with additional transition shapes modeled in the API |
 | **Themes** | 5 built-in themes (dark, light, nord, dracula, catppuccin) |

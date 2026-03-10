@@ -2,6 +2,7 @@ module WidgetTests
 
 open Expecto
 open Expecto.Flip
+open FsCheck
 open SageTUI
 
 let progressBarTests = testList "ProgressBar" [
@@ -1395,6 +1396,53 @@ let focusRingTests = testList "FocusRing" [
     let ring = FocusRing.create ([] : string list)
     ring |> FocusRing.isFocusedAt 0 |> Expect.isFalse "no items, never focused"
   }
+  test "current returns None for empty ring" {
+    FocusRing.create ([] : int list) |> FocusRing.current |> Expect.isNone "empty ring has no current"
+  }
+  test "current returns Some for non-empty ring" {
+    FocusRing.create [42; 99] |> FocusRing.current |> Expect.isSome "non-empty ring has current"
+  }
+  test "next wraps around from last to first" {
+    let ring = FocusRing.create ["a"; "b"; "c"] |> FocusRing.next |> FocusRing.next |> FocusRing.next
+    ring |> FocusRing.isFocusedAt 0 |> Expect.isTrue "3 nexts wraps to 0 on 3-item ring"
+  }
+  test "prev wraps from first to last" {
+    let ring = FocusRing.create ["a"; "b"; "c"] |> FocusRing.prev
+    ring |> FocusRing.isFocusedAt 2 |> Expect.isTrue "prev from 0 wraps to last (index 2)"
+  }
+  test "next on empty ring is identity" {
+    let ring = FocusRing.create ([] : string list)
+    (FocusRing.next ring) |> Expect.equal "empty ring unchanged" ring
+  }
+  test "prev on empty ring is identity" {
+    let ring = FocusRing.create ([] : string list)
+    (FocusRing.prev ring) |> Expect.equal "empty ring unchanged" ring
+  }
+  test "isFocused uses structural equality" {
+    let ring = FocusRing.create ["x"; "y"; "z"]
+    ring |> FocusRing.isFocused "x" |> Expect.isTrue "x is the current item"
+    ring |> FocusRing.isFocused "y" |> Expect.isFalse "y is not current"
+  }
+  testProperty "next then prev = identity for non-empty ring" <| fun (NonEmptyArray (items: string[])) ->
+    let ring = FocusRing.create (Array.toList items)
+    let roundtrip = ring |> FocusRing.next |> FocusRing.prev
+    roundtrip.Index |> Expect.equal "next·prev = id" ring.Index
+  testProperty "prev then next = identity for non-empty ring" <| fun (NonEmptyArray (items: string[])) ->
+    let ring = FocusRing.create (Array.toList items)
+    let roundtrip = ring |> FocusRing.prev |> FocusRing.next
+    roundtrip.Index |> Expect.equal "prev·next = id" ring.Index
+  testProperty "next n times wraps by modulo" <| fun (NonEmptyArray (items: string[])) (PositiveInt n) ->
+    let ring = FocusRing.create (Array.toList items)
+    let len = items.Length
+    let byN = List.fold (fun r _ -> FocusRing.next r) ring [1..n]
+    byN.Index |> Expect.equal "n nexts = n mod len" (n % len)
+  testProperty "isFocusedAt index matches current index" <| fun (NonEmptyArray (items: string[])) ->
+    let ring = FocusRing.create (Array.toList items)
+    ring |> FocusRing.isFocusedAt ring.Index |> Expect.isTrue "isFocusedAt(current index) = true"
+  testProperty "exactly one index is focused at a time" <| fun (NonEmptyArray (items: string[])) ->
+    let ring = FocusRing.create (Array.toList items)
+    let focusedCount = [0..items.Length - 1] |> List.filter (fun i -> FocusRing.isFocusedAt i ring) |> List.length
+    focusedCount |> Expect.equal "exactly one focused" 1
 ]
 
 

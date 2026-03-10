@@ -21,6 +21,9 @@
   <Folder Name="/samples/11-FilePicker/">
     <Project Path="samples/11-FilePicker/FilePicker.fsproj" />
   </Folder>
+  <Folder Name="/samples/12-FocusRing/">
+    <Project Path="samples/12-FocusRing/FocusRing.fsproj" />
+  </Folder>
   <Project Path="SageTUI.Benchmarks/SageTUI.Benchmarks.fsproj" />
   <Project Path="SageTUI.Html/SageTUI.Html.fsproj" />
   <Project Path="SageTUI.Library.fsproj" />
