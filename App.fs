@@ -57,6 +57,41 @@ module App =
         |> isTruthyEnvVar
         |> not }
 
+  /// Drain all queued messages for one frame, calling Update for each.
+  /// Returns the updated model and a flag indicating whether any message was processed.
+  /// Both runWith and runInlineWith share this single implementation.
+  let private drainMessages
+    (msgChannel  : System.Collections.Concurrent.ConcurrentQueue<'msg>)
+    (program     : Program<'model, 'msg>)
+    (maxDrain    : int)
+    (interpretCmd: Cmd<'msg> -> unit)
+    (dispatch    : 'msg -> unit)
+    (model       : 'model)
+    : 'model * bool =
+    let mutable m       = model
+    let mutable changed = false
+    let mutable count   = 0
+    let mutable msg     = Unchecked.defaultof<'msg>
+    while msgChannel.TryDequeue(&msg) do
+      count <- count + 1
+      if count > maxDrain then
+        failwith (sprintf "[SageTUI] Message drain loop exceeded %d messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains." maxDrain)
+      try
+        let nm, cmd = program.Update msg m
+        m       <- nm
+        changed <- true
+        interpretCmd cmd
+      with ex ->
+        match program.OnError with
+        | Some handler ->
+          // Some recoveryMsg → dispatch recovery; None → handler absorbed it, continue silently.
+          // To reraise from inside a handler call `raise ex` in the handler body.
+          match handler ex with
+          | Some recoveryMsg -> dispatch recoveryMsg
+          | None             -> ()
+        | None -> reraise()
+    m, changed
+
   let runWith (config: AppConfig) (backend: TerminalBackend) (program: Program<'model, 'msg>) =
     let mutable width, height = backend.Size()
     // Mutable program reference enables live-reload: caller may swap the program record
@@ -307,7 +342,14 @@ module App =
               needsFullRedraw <- true
             with _ -> ()
           )
-        [ tstp; cont ]
+        // SIGTERM: graceful shutdown on `docker stop`, `systemd stop`, `kill <pid>`.
+        // Exit code 143 = 128 + SIGTERM(15), POSIX convention.
+        let term =
+          PosixSignalRegistration.Create(PosixSignal.SIGTERM, fun ctx ->
+            ctx.Cancel <- true   // prevent default kill so cleanup() runs first
+            cleanup()
+            System.Environment.Exit(143))
+        [ tstp; cont; term ]
 
     try
       interpretCmd initCmd
@@ -323,28 +365,8 @@ module App =
       let suppressedEvents = System.Collections.Generic.HashSet<int>(32)
 
       while running do
-        let mutable msg = Unchecked.defaultof<'msg>
-        let mutable modelChanged = false
-        let mutable drainCount = 0
-        while msgChannel.TryDequeue(&msg) do
-          drainCount <- drainCount + 1
-          if drainCount > config.MaxDrainMessages then
-            failwith (sprintf "[SageTUI] Message drain loop exceeded %d messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains." config.MaxDrainMessages)
-          try
-            let newModel, cmd = program.Update msg model
-            model <- newModel
-            modelChanged <- true
-            interpretCmd cmd
-          with ex ->
-            match program.OnError with
-            | Some handler ->
-              // Some recoveryMsg: dispatch the recovery message
-              // None: handler handled it (e.g. logged); continue without dispatch
-              // To reraise from inside a handler, call `raise ex` in the handler body
-              match handler ex with
-              | Some recoveryMsg -> dispatch recoveryMsg
-              | None -> ()
-            | None -> reraise()
+        let model', modelChanged = drainMessages msgChannel program config.MaxDrainMessages interpretCmd dispatch model
+        model <- model'
 
         match modelChanged with
         | true ->
@@ -620,6 +642,9 @@ module App =
       if exitCode <> 0 then
         System.Environment.Exit exitCode
     with ex ->
+      // Cancel background subscriptions so timers/custom subs don't outlive the crash.
+      for kvp in activeSubs do try kvp.Value.Cancel(); kvp.Value.Dispose() with _ -> ()
+      activeSubs.Clear()
       match mouseTrackingActive with
       | true -> backend.Write Ansi.disableMouseTracking
       | false -> ()
@@ -846,6 +871,34 @@ module App =
         cleanup()
         System.Environment.Exit(130))
 
+    // POSIX suspend/resume + graceful SIGTERM for runInlineWith.
+    // runWith has the same registrations; inline mode adds them here.
+    let _sigHandlers =
+      match RuntimeInformation.IsOSPlatform(OSPlatform.Windows) with
+      | true -> []
+      | false ->
+        let tstp =
+          PosixSignalRegistration.Create(PosixSignal.SIGTSTP, fun _ ->
+            try
+              backend.Write(Ansi.showCursor)
+              backend.Flush()
+              backend.LeaveRawMode()
+            with _ -> ())
+        let cont =
+          PosixSignalRegistration.Create(PosixSignal.SIGCONT, fun _ ->
+            try
+              backend.EnterRawMode()
+              backend.Write(Ansi.hideCursor)
+              backend.Flush()
+              needsFullRedraw <- true
+            with _ -> ())
+        let term =
+          PosixSignalRegistration.Create(PosixSignal.SIGTERM, fun ctx ->
+            ctx.Cancel <- true
+            cleanup()
+            System.Environment.Exit(143))
+        [ tstp; cont; term ]
+
     try
       Console.CancelKeyPress.AddHandler(cancelHandler)
       backend.EnterRawMode()
@@ -857,28 +910,8 @@ module App =
       let presentBuf = System.Text.StringBuilder(65536)
 
       while running do
-        let mutable msg = Unchecked.defaultof<'msg>
-        let mutable modelChanged = false
-        let mutable drainCount = 0
-        while msgChannel.TryDequeue(&msg) do
-          drainCount <- drainCount + 1
-          if drainCount > config.MaxDrainMessages then
-            failwith (sprintf "[SageTUI] Message drain loop exceeded %d messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains." config.MaxDrainMessages)
-          try
-            let newModel, cmd = program.Update msg model
-            model <- newModel
-            modelChanged <- true
-            interpretCmd cmd
-          with ex ->
-            match program.OnError with
-            | Some handler ->
-              // Some recoveryMsg: dispatch the recovery message
-              // None: handler handled it (e.g. logged); continue without dispatch
-              // To reraise from inside a handler, call `raise ex` in the handler body
-              match handler ex with
-              | Some recoveryMsg -> dispatch recoveryMsg
-              | None -> ()
-            | None -> reraise()
+        let model', modelChanged = drainMessages msgChannel program config.MaxDrainMessages interpretCmd dispatch model
+        model <- model'
 
         match modelChanged with
         | true ->
@@ -943,6 +976,9 @@ module App =
       | code -> System.Environment.Exit code
     with ex ->
       Console.CancelKeyPress.RemoveHandler(cancelHandler)
+      // Cancel background subscriptions so timers/custom subs don't outlive the crash.
+      for kvp in activeSubs do try kvp.Value.Cancel(); kvp.Value.Dispose() with _ -> ()
+      activeSubs.Clear()
       match mouseTrackingActive with
       | true -> backend.Write Ansi.disableMouseTracking
       | false -> ()

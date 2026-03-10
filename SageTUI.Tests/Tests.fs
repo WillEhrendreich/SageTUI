@@ -8876,3 +8876,143 @@ let sprint60Tests =
   testList "Sprint 60" [
     sprint60CmdMonoidTests
   ]
+
+// ============================================================
+// SPRINT 63 — Drain loop extraction, SIGTERM, OnError routing
+// ============================================================
+
+/// A minimal no-op backend for unit-testing App.runWith without a real terminal.
+/// Events are consumed in order; the queue returns None when exhausted.
+let private makeMockBackend (w: int) (h: int) (events: TerminalEvent option list) : TerminalBackend =
+  let mutable remaining = events
+  { Size       = fun ()  -> (w, h)
+    Write      = fun _   -> ()
+    Flush      = fun ()  -> ()
+    PollEvent  = fun _   ->
+      match remaining with
+      | []        -> None
+      | ev :: rest -> remaining <- rest; ev
+    EnterRawMode = fun () -> ()
+    LeaveRawMode = fun () -> ()
+    Profile      = SafeProfile.minimum w h }
+
+let sprint63DrainOnErrorTests =
+  testList "App.runWith drain-loop and OnError routing" [
+
+    test "App.runWith: Init returns Quit 0, exits cleanly without entering loop" {
+      let program : Program<unit, unit> =
+        { Init      = fun () -> (), Quit 0
+          Update    = fun () () -> (), NoCmd
+          View      = fun () -> El.text ""
+          Subscribe = fun _ -> []
+          OnError   = None }
+      let backend = makeMockBackend 40 10 []
+      App.runWith AppConfig.defaults backend program
+    }
+
+    test "App.runWith: DirectMsg from Init processed before first render" {
+      let mutable updateCalled = 0
+      let program : Program<int, unit> =
+        { Init      = fun () -> 0, DirectMsg ()
+          Update    = fun () model ->
+                        updateCalled <- updateCalled + 1
+                        model + 1, Quit 0
+          View      = fun n -> El.text (string n)
+          Subscribe = fun _ -> []
+          OnError   = None }
+      let backend = makeMockBackend 40 10 []
+      App.runWith AppConfig.defaults backend program
+      updateCalled |> Expect.equal "Update called exactly once" 1
+    }
+
+    test "App.runWith: exception in Update with OnError=None propagates to caller" {
+      let program : Program<int, unit> =
+        { Init      = fun () -> 0, DirectMsg ()
+          Update    = fun () _ -> raise (System.Exception "boom"), NoCmd
+          View      = fun _ -> El.text ""
+          Subscribe = fun _ -> []
+          OnError   = None }
+      let backend = makeMockBackend 40 10 []
+      let threw =
+        try App.runWith AppConfig.defaults backend program; false
+        with _ -> true
+      threw |> Expect.isTrue "unhandled exception should propagate"
+    }
+
+    test "App.runWith: OnError=Some dispatches recovery message and continues" {
+      let mutable recovered = false
+      let program : Program<int, Choice<unit, unit>> =
+        { Init      = fun () -> 0, DirectMsg (Choice1Of2 ())
+          Update    = fun msg model ->
+                        match msg with
+                        | Choice1Of2 () -> raise (System.Exception "boom"), NoCmd
+                        | Choice2Of2 () -> recovered <- true; model, Quit 0
+          View      = fun _ -> El.text ""
+          Subscribe = fun _ -> []
+          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+      // One extra None to give the recovery message time to dispatch
+      let backend = makeMockBackend 40 10 [ None; None ]
+      App.runWith AppConfig.defaults backend program
+      recovered |> Expect.isTrue "recovery message should have been dispatched"
+    }
+
+    test "App.runWith: OnError=Some returning None continues silently, app still runs" {
+      let mutable handlerCalled = false
+      let program : Program<int, Choice<unit, unit>> =
+        { Init      = fun () -> 0, DirectMsg (Choice1Of2 ())
+          Update    = fun msg model ->
+                        match msg with
+                        | Choice1Of2 () -> raise (System.Exception "boom"), NoCmd
+                        | Choice2Of2 () -> model, Quit 0
+          View      = fun _ -> El.text ""
+          Subscribe = fun _ ->
+            [ KeySub (fun (k, _) ->
+                match k with
+                | Key.Escape -> Some (Choice2Of2 ())
+                | _          -> None) ]
+          OnError   = Some (fun _ -> handlerCalled <- true; None) }
+      // Three empty frames then Escape to quit
+      let backend = makeMockBackend 40 10 [
+        None
+        None
+        None
+        Some (KeyPressed(Key.Escape, Modifiers.None))
+        None ]
+      App.runWith AppConfig.defaults backend program
+      handlerCalled |> Expect.isTrue "OnError handler should have been called"
+    }
+
+    test "App.runWith: multiple DirectMsg commands in Init all processed" {
+      let mutable count = 0
+      let program : Program<int, int> =
+        { Init      = fun () ->
+            0, Batch [ DirectMsg 1; DirectMsg 2; DirectMsg 3; DirectMsg 99 ]
+          Update    = fun msg model ->
+                        count <- count + 1
+                        match msg with
+                        | 99 -> model, Quit 0
+                        | n  -> model + n, NoCmd
+          View      = fun n -> El.text (string n)
+          Subscribe = fun _ -> []
+          OnError   = None }
+      let backend = makeMockBackend 40 10 []
+      App.runWith AppConfig.defaults backend program
+      // msgs 1, 2, 3 processed (model 6), then 99 triggers quit → 4 Update calls
+      count |> Expect.equal "all 4 DirectMsgs processed" 4
+    }
+
+    // SIGTERM: documents the contract; integration test skipped until PTY subprocess is wired.
+    // The implementation registers PosixSignalRegistration.Create(PosixSignal.SIGTERM, ...) in
+    // both runWith and runInlineWith. Exit code 143 = 128 + SIGTERM(15), POSIX convention.
+    ptestCase "SIGTERM exits with code 143 (integration, Unix PTY — pending automation)" <| fun () ->
+      // TODO: spawn HelloWorld sample as PTY subprocess, P/Invoke kill(pid, 15),
+      //       assert Process.ExitCode = 143.  Blocked on PTY send-signal helper.
+      ()
+
+  ]
+
+[<Tests>]
+let sprint63Tests =
+  testList "Sprint 63" [
+    sprint63DrainOnErrorTests
+  ]

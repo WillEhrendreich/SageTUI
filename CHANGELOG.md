@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Performance
+### Breaking Changes
+
+- **`Program.OnError` handler: `None` return value semantics changed** (was: reraise; now: continue silently)
+
+  In previous releases a handler that returned `None` caused the original exception to be
+  re-raised (identical to having no handler at all). This was a footgun: the idiomatic F#
+  reading of `None` is "no result / do nothing", not "crash". The new behavior:
+
+  | Handler return | Old behavior     | **New behavior**          |
+  |----------------|------------------|---------------------------|
+  | `Some msg`     | dispatch `msg`   | dispatch `msg` *(unchanged)* |
+  | `None`         | reraise exception | **continue silently**     |
+  | No handler (`OnError = None`) | reraise | reraise *(unchanged)* |
+
+  **Migration:** if you relied on `handler ex -> None` to propagate the crash, replace it
+  with an explicit `raise ex` inside the handler body:
+
+  ```fsharp
+  OnError = Some (fun ex ->
+    logError ex       // do your logging
+    raise ex)         // explicitly re-raise — now the only way to crash from a handler
+  ```
+
 
 - **Zero-alloc arena render path** (Sprints 21–22): Per-frame heap allocation in the hot path reduced from ~3,640 bytes/frame to < 100 bytes/frame — a **97 % reduction**.
   - _Before_: `Area` was a reference record (one heap object per layout child per frame), text rendering used `StringBuilder` + `string`-per-rune, keyed nodes materialised a `string` per `El.keyed` node per frame into `HitEntry.Key: string`.
@@ -26,6 +48,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FieldId()` anywhere, replace it with `FieldId.create "your-id"`.
 
 ### Added
+
+- **SIGTERM graceful shutdown** (`runWith` and `runInlineWith`): When the process receives
+  `SIGTERM` (e.g. `docker stop`, `systemd stop`, `kill <pid>`) on non-Windows platforms,
+  SageTUI now cancels all active subscriptions, restores the terminal (cursor, alt-screen, raw
+  mode, mouse/paste tracking), and exits with code **143** (= 128 + 15, POSIX convention).
+  Previously a SIGTERM left the terminal in raw mode.
+- **SIGTSTP/SIGCONT on inline** (`runInlineWith`): Inline-mode programs now suspend/resume
+  the terminal correctly on Ctrl-Z, matching the behavior already present in full-screen `runWith`.
+- **Active subscriptions cancelled on unhandled crash**: When an exception propagates out of the
+  main loop (no `OnError` handler, or handler re-raises), background timer/custom subscriptions
+  are now cancelled before the terminal is restored. Previously, orphan async loops continued
+  running until the process died.
+- **Drain loop de-duplicated**: `runWith` and `runInlineWith` previously contained identical
+  per-frame message drain implementations. Both now delegate to a single private
+  `drainMessages` function, eliminating the maintenance risk of the two diverging silently.
+- `AppConfig.LogSink: string -> unit` — override the default `sagetui-errors.log` file write
+  to integrate with your structured logging infrastructure. All async exception log lines are
+  routed through this sink.
 
 - `FieldId.create` — factory function that validates the input string is non-null. Prefer
   this over the raw `FieldId` constructor when the value originates from external input.
