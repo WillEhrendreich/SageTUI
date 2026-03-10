@@ -766,7 +766,58 @@ module El =
       let bodyGrid = bodyFlat |> grid cols EqualWidth
       Column [ headerRow; sepRow; bodyGrid ]
 
-/// Computation expression buildersfor declarative, imperative-style layout construction.
+  /// Subtree memoisation by **reference equality**.
+  ///
+  /// Returns a function that calls `factory` the first time or when the
+  /// argument is a different heap object (via `obj.ReferenceEquals`).
+  /// On subsequent calls with the same reference the cached `Element` is
+  /// returned without re-invoking `factory`.
+  ///
+  /// ⚠ Value types (`int`, `struct`) are boxed on each call, so
+  /// `ReferenceEquals` will always return `false` for them — `factory`
+  /// will be called every time. Use `lazyEq` for value types.
+  ///
+  /// Typical usage (declare at module/let scope, never inside a view function):
+  ///
+  ///   let renderItems = El.lazyRef (fun (items: Item array) -> El.column (items |> Array.toList |> List.map renderItem))
+  let lazyRef (factory: 'a -> Element) : 'a -> Element =
+    let mutable lastArg    : obj     = null
+    let mutable lastResult : Element = Empty
+    fun arg ->
+      let boxed = box arg
+      match obj.ReferenceEquals(lastArg, boxed) with
+      | true -> lastResult
+      | false ->
+        let result = factory arg
+        lastArg    <- boxed
+        lastResult <- result
+        result
+
+  /// Subtree memoisation by **structural equality** (`=`).
+  ///
+  /// Returns a function that calls `factory` the first time or when
+  /// the argument is not equal to the last argument.  Equal values
+  /// reuse the cached `Element` without re-invoking `factory`.
+  ///
+  /// Works correctly for value types, strings, records, and any type
+  /// with an `equality` constraint.
+  ///
+  /// Typical usage (declare at module/let scope, never inside a view function):
+  ///
+  ///   let renderCount = El.lazyEq (fun (n: int) -> El.text (sprintf "Items: %d" n))
+  let lazyEq<'a when 'a : equality> (factory: 'a -> Element) : 'a -> Element =
+    let mutable lastArg    : 'a option = None
+    let mutable lastResult : Element   = Empty
+    fun arg ->
+      match lastArg with
+      | Some prev when prev = arg -> lastResult
+      | _ ->
+        let result = factory arg
+        lastArg    <- Some arg
+        lastResult <- result
+        result
+
+/// Computation expression builders for declarative, imperative-style layout construction.
 ///
 /// Instead of wrapping lists in `[` `]`:
 ///   `El.column [ El.text "A"; if cond then El.text "B" else El.empty ]`

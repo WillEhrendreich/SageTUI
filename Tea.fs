@@ -671,6 +671,97 @@ module Deferred =
     | Failed ex -> error ex
     | Loaded a -> render a
 
+// ---------------------------------------------------------------------------
+// KeyMap<'msg> — composable, zero-alloc-at-runtime modal key bindings
+// ---------------------------------------------------------------------------
+
+/// Named input modes for modal keybinding (Vim-style or custom).
+[<RequireQualifiedAccess>]
+type KeyMode =
+  | Normal
+  | Insert
+  | Visual
+  | Custom of string
+
+/// A key sequence: either a single key press or a two-key chord.
+/// Recursive so chords can be composed from simpler sequences.
+[<RequireQualifiedAccess>]
+type KeySeq =
+  | Press of key: Key * mods: Modifiers
+  | Chord of first: KeySeq * second: KeySeq
+
+/// Composable, immutable keybinding map.
+/// The internal `Map` is created once and closed over by `toSub`,
+/// eliminating the `Keys.bind` allocation footgun (Dictionary created
+/// on every Subscribe call = every model update).
+type KeyMap<'msg> = private KeyMap of Map<KeyMode * KeySeq, 'msg>
+
+/// Functions for building and using `KeyMap<'msg>` values.
+module KeyMap =
+  /// An empty KeyMap with no bindings.
+  let empty<'msg> : KeyMap<'msg> = KeyMap Map.empty
+
+  /// Bind a key sequence in a given mode to a message.
+  let bind (mode: KeyMode) (seq: KeySeq) (msg: 'msg) (KeyMap m) : KeyMap<'msg> =
+    KeyMap (Map.add (mode, seq) msg m)
+
+  /// Convenience: bind a key (no modifiers) in Normal mode.
+  let normal (key: Key) (msg: 'msg) (km: KeyMap<'msg>) : KeyMap<'msg> =
+    bind KeyMode.Normal (KeySeq.Press(key, Modifiers.None)) msg km
+
+  /// Convenience: bind a key (no modifiers) in Insert mode.
+  let insert (key: Key) (msg: 'msg) (km: KeyMap<'msg>) : KeyMap<'msg> =
+    bind KeyMode.Insert (KeySeq.Press(key, Modifiers.None)) msg km
+
+  /// Merge two KeyMaps. Right-biased: when both maps bind the same (mode, seq),
+  /// the right-hand value wins.
+  let merge (KeyMap a) (KeyMap b) : KeyMap<'msg> =
+    KeyMap (Map.fold (fun acc k v -> Map.add k v acc) a b)
+
+  /// Right-biased merge operator. `km1 <+> km2` is `merge km1 km2`.
+  let (<+>) km1 km2 = merge km1 km2
+
+  /// Transform all bound messages with `f`.
+  let map (f: 'a -> 'b) (KeyMap m) : KeyMap<'b> =
+    KeyMap (Map.map (fun _ v -> f v) m)
+
+  /// Produce a `Sub<'msg>` that dispatches messages for direct key presses in
+  /// the given mode. The closure captures the immutable `Map` — **zero allocation
+  /// at subscription time**, unlike `Keys.bind` which allocates a Dictionary.
+  let toSub (mode: KeyMode) (KeyMap m) : Sub<'msg> =
+    KeySub (fun (key, mods) -> Map.tryFind (mode, KeySeq.Press(key, mods)) m)
+
+  /// Advance a chord-aware key handler.
+  ///
+  /// - `mode`: current input mode
+  /// - `incoming`: the key just pressed (as a `KeySeq.Press`)
+  /// - `pending`: the previous unresolved `KeySeq.Press`, if any (for chord tracking)
+  /// - Returns `(msg option, hasPendingChord)`:
+  ///   - `(Some msg, false)` — key/chord resolved to a message
+  ///   - `(None, true)`      — incoming is a chord prefix; store it and wait for next key
+  ///   - `(None, false)`     — no match; clear pending state
+  let advance (mode: KeyMode) (incoming: KeySeq) (pending: KeySeq option) (KeyMap m) : 'msg option * bool =
+    match pending with
+    | Some prefix ->
+      let chord = KeySeq.Chord(prefix, incoming)
+      match Map.tryFind (mode, chord) m with
+      | Some msg -> Some msg, false
+      | None ->
+        match Map.tryFind (mode, incoming) m with
+        | Some msg -> Some msg, false
+        | None -> None, false
+    | None ->
+      match Map.tryFind (mode, incoming) m with
+      | Some msg -> Some msg, false
+      | None ->
+        let isPrefix =
+          m |> Map.exists (fun (km, seq) _ ->
+            km = mode &&
+            match seq with
+            | KeySeq.Chord(first, _) -> first = incoming
+            | KeySeq.Press _ -> false)
+        None, isPrefix
+
 type TerminalBackend = {
   Size: unit -> int * int
   Write: string -> unit

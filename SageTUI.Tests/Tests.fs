@@ -6551,3 +6551,194 @@ let sprint52Tests =
     sprint52ToastQueueTests
     sprint52MarkupSpansTests
   ]
+
+// ---------------------------------------------------------------------------
+// Sprint 53: KeyMap<'msg> + El.lazyRef / El.lazyEq
+// ---------------------------------------------------------------------------
+
+let sprint53KeyMapTests = testList "KeyMap" [
+  testCase "empty has no bindings" <| fun () ->
+    let km = KeyMap.empty<int>
+    let sub = KeyMap.toSub KeyMode.Normal km
+    match sub with
+    | KeySub f -> f (Key.Escape, Modifiers.None) |> Expect.isNone "empty map"
+    | _ -> failtest "expected KeySub"
+
+  testCase "bind and toSub resolves key" <| fun () ->
+    let km =
+      KeyMap.empty
+      |> KeyMap.bind KeyMode.Normal (KeySeq.Press(Key.Escape, Modifiers.None)) 99
+    let sub = KeyMap.toSub KeyMode.Normal km
+    match sub with
+    | KeySub f -> f (Key.Escape, Modifiers.None) |> Expect.equal "resolves Escape→99" (Some 99)
+    | _ -> failtest "expected KeySub"
+
+  testCase "toSub ignores bindings from different mode" <| fun () ->
+    let km =
+      KeyMap.empty
+      |> KeyMap.bind KeyMode.Insert (KeySeq.Press(Key.Escape, Modifiers.None)) 99
+    let sub = KeyMap.toSub KeyMode.Normal km
+    match sub with
+    | KeySub f -> f (Key.Escape, Modifiers.None) |> Expect.isNone "Normal ignores Insert binding"
+    | _ -> failtest "expected KeySub"
+
+  testCase "normal shorthand binds in Normal mode with no mods" <| fun () ->
+    let km = KeyMap.empty |> KeyMap.normal (Key.Char (System.Text.Rune 'q')) 42
+    let sub = KeyMap.toSub KeyMode.Normal km
+    match sub with
+    | KeySub f -> f (Key.Char (System.Text.Rune 'q'), Modifiers.None) |> Expect.equal "q→42" (Some 42)
+    | _ -> failtest "expected KeySub"
+
+  testCase "insert shorthand binds in Insert mode with no mods" <| fun () ->
+    let km = KeyMap.empty |> KeyMap.insert Key.Escape 7
+    let sub = KeyMap.toSub KeyMode.Insert km
+    match sub with
+    | KeySub f -> f (Key.Escape, Modifiers.None) |> Expect.equal "Escape→7 in Insert" (Some 7)
+    | _ -> failtest "expected KeySub"
+
+  testCase "merge right-biases on conflict" <| fun () ->
+    let km1 = KeyMap.empty |> KeyMap.normal Key.Enter 1
+    let km2 = KeyMap.empty |> KeyMap.normal Key.Enter 2
+    let merged = KeyMap.merge km1 km2
+    let sub = KeyMap.toSub KeyMode.Normal merged
+    match sub with
+    | KeySub f -> f (Key.Enter, Modifiers.None) |> Expect.equal "right wins: 2" (Some 2)
+    | _ -> failtest "expected KeySub"
+
+  testCase "merge combines non-conflicting bindings" <| fun () ->
+    let km1 = KeyMap.empty |> KeyMap.normal Key.Enter 1
+    let km2 = KeyMap.empty |> KeyMap.normal (Key.Char (System.Text.Rune 'q')) 2
+    let merged = KeyMap.merge km1 km2
+    let sub = KeyMap.toSub KeyMode.Normal merged
+    match sub with
+    | KeySub f ->
+      f (Key.Enter, Modifiers.None) |> Expect.equal "enter from km1" (Some 1)
+      f (Key.Char (System.Text.Rune 'q'), Modifiers.None) |> Expect.equal "q from km2" (Some 2)
+    | _ -> failtest "expected KeySub"
+
+  testCase "map transforms all messages" <| fun () ->
+    let km =
+      KeyMap.empty
+      |> KeyMap.normal Key.Enter 1
+      |> KeyMap.normal (Key.Char (System.Text.Rune 'q')) 2
+      |> KeyMap.map (fun n -> n * 10)
+    let sub = KeyMap.toSub KeyMode.Normal km
+    match sub with
+    | KeySub f ->
+      f (Key.Enter, Modifiers.None) |> Expect.equal "Enter→10" (Some 10)
+      f (Key.Char (System.Text.Rune 'q'), Modifiers.None) |> Expect.equal "q→20" (Some 20)
+    | _ -> failtest "expected KeySub"
+
+  testCase "toSub returns None for unbound key" <| fun () ->
+    let km = KeyMap.empty |> KeyMap.normal Key.Enter 1
+    let sub = KeyMap.toSub KeyMode.Normal km
+    match sub with
+    | KeySub f -> f (Key.Escape, Modifiers.None) |> Expect.isNone "Escape not bound"
+    | _ -> failtest "expected KeySub"
+
+  testCase "advance resolves direct match" <| fun () ->
+    let km = KeyMap.empty |> KeyMap.normal Key.Enter 99
+    let msg, isPending = KeyMap.advance KeyMode.Normal (KeySeq.Press(Key.Enter, Modifiers.None)) None km
+    msg |> Expect.equal "msg=Some 99" (Some 99)
+    isPending |> Expect.isFalse "not pending"
+
+  testCase "advance returns pending for chord prefix" <| fun () ->
+    let g = KeySeq.Press(Key.Char (System.Text.Rune 'g'), Modifiers.None)
+    let gg = KeySeq.Chord(g, g)
+    let km = KeyMap.empty |> KeyMap.bind KeyMode.Normal gg 42
+    let msg, isPending = KeyMap.advance KeyMode.Normal g None km
+    msg |> Expect.isNone "no msg on first g"
+    isPending |> Expect.isTrue "g is chord prefix"
+
+  testCase "advance resolves chord when pending" <| fun () ->
+    let g = KeySeq.Press(Key.Char (System.Text.Rune 'g'), Modifiers.None)
+    let gg = KeySeq.Chord(g, g)
+    let km = KeyMap.empty |> KeyMap.bind KeyMode.Normal gg 77
+    let msg, isPending = KeyMap.advance KeyMode.Normal g (Some g) km
+    msg |> Expect.equal "gg→77" (Some 77)
+    isPending |> Expect.isFalse "resolved, not pending"
+]
+
+let sprint53LazyTests = testList "El.lazy" [
+  testCase "lazyRef calls factory once on first call" <| fun () ->
+    let callCount = ref 0
+    let memoFn = El.lazyRef (fun (arr: int array) ->
+      incr callCount
+      El.text (sprintf "n=%d" arr.[0]))
+    let arr = [| 1; 2; 3 |]
+    let _ = memoFn arr
+    !callCount |> Expect.equal "factory called once" 1
+
+  testCase "lazyRef returns cached element for same reference" <| fun () ->
+    let callCount = ref 0
+    let memoFn = El.lazyRef (fun (arr: int array) ->
+      incr callCount
+      El.text "cached")
+    let arr = [| 1; 2; 3 |]
+    let _ = memoFn arr
+    let _ = memoFn arr
+    let _ = memoFn arr
+    !callCount |> Expect.equal "factory called only once" 1
+
+  testCase "lazyRef re-evaluates for different reference" <| fun () ->
+    let callCount = ref 0
+    let memoFn = El.lazyRef (fun (arr: int array) ->
+      incr callCount
+      El.text "x")
+    let arr1 = [| 1 |]
+    let arr2 = [| 1 |]  // different heap object, same content
+    let _ = memoFn arr1
+    let _ = memoFn arr2
+    !callCount |> Expect.equal "factory called twice for distinct refs" 2
+
+  testCase "lazyRef result reflects factory output" <| fun () ->
+    let memoFn = El.lazyRef (fun (arr: int array) -> El.text (sprintf "val=%d" arr.[0]))
+    let arr = [| 7 |]
+    let el = memoFn arr
+    match el with
+    | Text("val=7", _) -> ()
+    | _ -> failtest (sprintf "expected Text(val=7), got %A" el)
+
+  testCase "lazyEq calls factory once on first call" <| fun () ->
+    let callCount = ref 0
+    let memoFn = El.lazyEq (fun (n: int) ->
+      incr callCount
+      El.text (string n))
+    let _ = memoFn 42
+    !callCount |> Expect.equal "factory called once" 1
+
+  testCase "lazyEq returns cached element for equal values" <| fun () ->
+    let callCount = ref 0
+    let memoFn = El.lazyEq (fun (n: int) ->
+      incr callCount
+      El.text (string n))
+    let _ = memoFn 42
+    let _ = memoFn 42
+    let _ = memoFn 42
+    !callCount |> Expect.equal "factory called only once" 1
+
+  testCase "lazyEq re-evaluates for changed value" <| fun () ->
+    let callCount = ref 0
+    let memoFn = El.lazyEq (fun (n: int) ->
+      incr callCount
+      El.text (string n))
+    let _ = memoFn 1
+    let _ = memoFn 2
+    !callCount |> Expect.equal "factory called twice" 2
+
+  testCase "lazyEq element reflects new value after change" <| fun () ->
+    let memoFn = El.lazyEq (fun (n: int) -> El.text (string n))
+    let e5  = memoFn 5
+    let e5b = memoFn 5
+    let e10 = memoFn 10
+    match e5 with Text("5",_) -> () | _ -> failtest "e5"
+    match e5b with Text("5",_) -> () | _ -> failtest "e5b cached"
+    match e10 with Text("10",_) -> () | _ -> failtest "e10"
+]
+
+[<Tests>]
+let sprint53Tests =
+  testList "Sprint 53" [
+    sprint53KeyMapTests
+    sprint53LazyTests
+  ]
