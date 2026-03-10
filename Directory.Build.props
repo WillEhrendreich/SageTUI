@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    SageTUI.Templates.fsproj and SageTUI.Library.fsproj are both in the root directory.
+    Without a separate MSBuildProjectExtensionsPath, they share the same obj/project.assets.json.
+    Since SageTUI.Templates targets only net8.0, its restore would overwrite the Library's
+    assets file (which covers net8.0;net9.0;net10.0), causing NETSDK1005 build errors.
+    This property must be set before Microsoft.Common.props is imported (i.e., here in
+    Directory.Build.props) — it cannot be set inside the .fsproj PropertyGroup.
+  -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'SageTUI.Templates'">
+    <MSBuildProjectExtensionsPath>obj\SageTUI.Templates\</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+</Project>

@@ -45,6 +45,7 @@
     <PackageReference Include="Expecto" Version="10.2.3" />
     <PackageReference Include="Expecto.FsCheck" Version="10.2.3" />
     <PackageReference Include="FsCheck" Version="2.16.6" />
+    <PackageReference Update="FSharp.Core" Version="10.0.103" />
     <PackageReference Include="Hex1b" Version="0.109.0" />
     <PackageReference Include="Verify.Expecto" Version="31.13.2" />
   </ItemGroup>
