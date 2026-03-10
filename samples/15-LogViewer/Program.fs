@@ -43,13 +43,13 @@ type Model =
   { AllEntries: LogEntry array
     FilterInput: TextInputModel
     LogList: VirtualListModel<LogEntry>
-    Toasts: Toast.ToastModel list
+    Toasts: ToastQueue
     Focus: FocusRing<FocusField> }
 
 type Msg =
   | KeyInput of Key * Modifiers
   | ClipboardWritten
-  | DismissToasts
+  | DismissToast of ToastId
   | Quit
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ let init () =
   { AllEntries = sampleEntries
     FilterInput = TextInput.empty
     LogList     = VirtualList.ofArray viewportHeight sampleEntries
-    Toasts      = []
+    Toasts      = ToastQueue.empty
     Focus       = FocusRing.create [FilterField; ListField] },
   Cmd.none
 
@@ -123,7 +123,7 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
   match msg with
   | Quit         -> model, Cmd.quit
   | ClipboardWritten -> model, Cmd.none
-  | DismissToasts -> { model with Toasts = [] }, Cmd.none
+  | DismissToast id -> { model with Toasts = ToastQueue.dismiss id model.Toasts }, Cmd.none
 
   | KeyInput(key, mods) ->
     let focused = FocusRing.current model.Focus
@@ -164,11 +164,11 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
       | Some i ->
         let entry = model.LogList.Items[i]
         let text  = sprintf "[%s] %s %s: %s" entry.Timestamp (levelLabel entry.Level) entry.Source entry.Message
-        let toast = Toast.create (sprintf "Copied entry #%d" entry.Index) 30
-        { model with Toasts = [toast] },
+        let toasts', id = ToastQueue.push (sprintf "Copied entry #%d" entry.Index) 30 Style.empty model.Toasts
+        { model with Toasts = toasts' },
         Cmd.batch [
           Cmd.copyToClipboard text ClipboardWritten
-          Cmd.delay 3000 DismissToasts
+          Cmd.delay 3000 (DismissToast id)
         ]
 
     | _ -> model, Cmd.none
@@ -276,10 +276,7 @@ let view (model: Model) =
     |> El.height 5
     |> El.bordered Light
 
-  let toasts =
-    model.Toasts
-    |> List.map Toast.view
-    |> El.column
+  let toasts = ToastQueue.view model.Toasts
 
   El.column [
     title

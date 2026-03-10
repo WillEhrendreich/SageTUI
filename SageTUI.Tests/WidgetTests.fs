@@ -1,5 +1,6 @@
 module WidgetTests
 
+open System.Text
 open Expecto
 open Expecto.Flip
 open FsCheck
@@ -2349,10 +2350,15 @@ let private shrinkTextOp = function
 
 type TextOpArb =
   static member TextOp() : Arbitrary<TextOp> =
-    let printableChar = Gen.map char (Gen.choose (32, 126))
+    // ASCII printable chars (U+0020–U+007E)
+    let asciiChar    = Gen.map char (Gen.choose (32, 126))
+    // Latin Extended A/B (U+00C0–U+024F) — BMP, single char, good Unicode coverage
+    let latinExtChar = Gen.map char (Gen.choose (0xC0, 0x24F))
+    // Mix: 6 parts ASCII + 3 parts Latin Extended → broader Unicode without changing the TextOp type
+    let charGen = Gen.frequency [ 6, asciiChar; 3, latinExtChar ]
     let gen =
       Gen.frequency [
-        5, printableChar |> Gen.map TInsert
+        9, charGen      |> Gen.map TInsert
         2, Gen.constant TDeleteBack
         2, Gen.constant TDeleteFwd
         1, Gen.constant TMoveLeft
@@ -2550,6 +2556,295 @@ let virtualListPropTests = testList "VirtualList property invariants" [
       | Some i -> i >= m2.ScrollOffset && i < m2.ScrollOffset + m2.ViewportHeight
 ]
 
+// ── Sprint 61: Unicode / Latin Extended coverage property ────────────────────
+
+let textInputUnicodePropTests = testList "TextInput Unicode extended coverage (Sprint 61)" [
+  let unicodeCfg = { FsCheckConfig.defaultConfig with maxTest = 300; arbitrary = [ typeof<TextOpArb> ] }
+
+  testPropertyWithConfig unicodeCfg "Latin Extended chars: cursor stays in [0, text.Length]" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      m.Cursor >= 0 && m.Cursor <= m.Text.Length
+
+  testPropertyWithConfig unicodeCfg "Latin Extended chars: no text corruption on deleteBackward" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      let m2 = TextInput.deleteBackward m
+      m2.Cursor >= 0 && m2.Cursor <= m2.Text.Length
+
+  test "insert Latin Extended char ä (U+00E4) inserts correctly" {
+    let m = TextInput.insert (char 0xE4) TextInput.empty
+    m.Text |> Expect.equal "got ä" "ä"
+    m.Cursor |> Expect.equal "cursor at 1" 1
+  }
+
+  test "insert Latin Extended sequence preserves all chars" {
+    let chars = [char 0xC0; char 0xE9; char 0xFF]
+    let m = chars |> List.fold (fun m c -> TextInput.insert c m) TextInput.empty
+    m.Text.Length |> Expect.equal "3 chars" 3
+  }
+
+  test "emoji round-trip via insertText: insert then delete restores prior state" {
+    let m0 = TextInput.ofString "ab"
+    let m0AtEnd = { m0 with Cursor = 2 }
+    let m1 = TextInput.insertText "\U0001F600" m0AtEnd
+    m1.Text |> Expect.equal "ab+emoji" ("ab" + "\U0001F600")
+    let m2 = TextInput.deleteBackward m1
+    m2.Text |> Expect.equal "emoji removed" "ab"
+    m2.Cursor |> Expect.equal "cursor at 2" 2
+  }
+]
+
+// ── Sprint 61: Viewport tests ────────────────────────────────────────────────
+
+let viewportTests = testList "Viewport (Sprint 61)" [
+  test "ofString creates model with ScrollTop = 0" {
+    let vm = Viewport.ofString "line1\nline2\nline3"
+    vm.ScrollTop |> Expect.equal "starts at 0" 0
+  }
+
+  test "ofString parses correct number of lines" {
+    let vm = Viewport.ofString "a\nb\nc"
+    vm.Lines.Length |> Expect.equal "3 lines" 3
+  }
+
+  test "scrollDown increments ScrollTop by 1" {
+    let vm = Viewport.ofString "a\nb\nc\nd\ne" |> Viewport.withHeight 2
+    let vm2 = Viewport.scrollDown vm
+    vm2.ScrollTop |> Expect.equal "scrolled to 1" 1
+  }
+
+  test "scrollUp on ScrollTop=0 stays at 0" {
+    let vm = Viewport.ofString "a\nb\nc"
+    let vm2 = Viewport.scrollUp vm
+    vm2.ScrollTop |> Expect.equal "stays at 0" 0
+  }
+
+  test "pageDown moves by viewport height" {
+    let content = Array.init 20 string |> String.concat "\n"
+    let vm = Viewport.ofString content |> Viewport.withHeight 5
+    let vm2 = Viewport.pageDown vm
+    vm2.ScrollTop |> Expect.equal "jumped by height=5" 5
+  }
+
+  test "pageUp from ScrollTop=0 stays at 0" {
+    let vm = Viewport.ofString "a\nb\nc" |> Viewport.withHeight 5
+    let vm2 = Viewport.pageUp vm
+    vm2.ScrollTop |> Expect.equal "stays at 0" 0
+  }
+
+  test "scrollDown clamps at max = totalLines - height" {
+    let vm = Viewport.ofString "a\nb\nc" |> Viewport.withHeight 2
+    let vm2 = vm |> Viewport.scrollDown |> Viewport.scrollDown |> Viewport.scrollDown
+    vm2.ScrollTop |> Expect.equal "clamped at 1" 1
+  }
+
+  test "wrapLines is no-op for empty array" {
+    Viewport.wrapLines 20 [||] |> Expect.isEmpty "no lines"
+  }
+
+  test "wrapLines splits long line at word boundary" {
+    let result = Viewport.wrapLines 10 [| "hello world foo bar" |]
+    (result.Length, 1) |> Expect.isGreaterThan "multiple lines produced"
+  }
+
+  test "VPScrollToTop resets ScrollTop to 0" {
+    let content = Array.init 10 string |> String.concat "\n"
+    let vm = Viewport.ofString content |> Viewport.withHeight 3
+    let vm2 = vm |> Viewport.pageDown |> Viewport.pageDown
+    let vm3 = Viewport.update VPScrollToTop vm2
+    vm3.ScrollTop |> Expect.equal "reset to 0" 0
+  }
+
+  test "VPSetContent replaces content and resets scroll" {
+    let vm = Viewport.ofString "a\nb\nc" |> Viewport.withHeight 2
+    let vm2 = Viewport.scrollDown vm
+    let vm3 = Viewport.update (VPSetContent "x\ny") vm2
+    vm3.ScrollTop  |> Expect.equal "scroll reset" 0
+    vm3.Lines.Length |> Expect.equal "2 new lines" 2
+  }
+
+  test "VPResize updates LastWidth and rewraps" {
+    let content = String.replicate 5 "word "
+    let vm = Viewport.ofString content
+    let vm2 = Viewport.update (VPResize 10) vm
+    vm2.LastWidth |> Expect.equal "width stored" 10
+  }
+
+  testProperty "scrollTop is always non-negative after scrollDown sequence" <|
+    fun (NonEmptyArray (lines: string[])) (PositiveInt n) ->
+      let content = lines |> String.concat "\n"
+      let vm = Viewport.ofString content |> Viewport.withHeight 3
+      let vFinal = List.replicate (n % 30 + 1) () |> List.fold (fun v _ -> Viewport.scrollDown v) vm
+      vFinal.ScrollTop >= 0
+
+  testProperty "scrollTop never exceeds max(0, totalLines - height)" <|
+    fun (NonEmptyArray (lines: string[])) (PositiveInt n) ->
+      let content = lines |> String.concat "\n"
+      let vm = Viewport.ofString content |> Viewport.withHeight 3
+      let vFinal = List.replicate (n % 30 + 1) () |> List.fold (fun v _ -> Viewport.scrollDown v) vm
+      let maxScroll = max 0 (vFinal.WrappedLines.Length - vFinal.Height)
+      vFinal.ScrollTop <= maxScroll
+
+  testProperty "scrollUp from any position: scrollTop stays non-negative" <|
+    fun (NonEmptyArray (lines: string[])) (PositiveInt n) ->
+      let content = lines |> String.concat "\n"
+      let vm = Viewport.ofString content |> Viewport.withHeight 3
+      let vmScrolled = List.replicate 10 () |> List.fold (fun v _ -> Viewport.scrollDown v) vm
+      let vmUp = List.replicate (n % 20 + 1) () |> List.fold (fun v _ -> Viewport.scrollUp v) vmScrolled
+      vmUp.ScrollTop >= 0
+
+  testProperty "pageDown never moves past last line" <|
+    fun (NonEmptyArray (lines: string[])) ->
+      let content = lines |> String.concat "\n"
+      let vm = Viewport.ofString content |> Viewport.withHeight 3
+      let vmDown = Viewport.pageDown vm
+      let maxScroll = max 0 (vmDown.WrappedLines.Length - vmDown.Height)
+      vmDown.ScrollTop <= maxScroll
+]
+
+// ── Sprint 61: VirtualList.filter ────────────────────────────────────────────
+
+let virtualListFilterTests = testList "VirtualList.filter (Sprint 61)" [
+  test "filter always-false yields empty items and no selection" {
+    let m = VirtualList.ofArray 5 [|1;2;3;4;5|]
+    let filtered = VirtualList.filter (fun _ -> false) m
+    filtered.Items        |> Expect.isEmpty "no items"
+    filtered.SelectedIndex |> Expect.isNone  "no selection"
+  }
+
+  test "filter always-true preserves all items" {
+    let m = VirtualList.ofArray 5 [|1;2;3;4;5|]
+    let filtered = VirtualList.filter (fun _ -> true) m
+    filtered.Items |> Expect.hasLength "all 5 items kept" 5
+  }
+
+  test "filter keeps matching items in original order" {
+    let m = VirtualList.ofArray 5 [|1;2;3;4;5|]
+    let filtered = VirtualList.filter (fun x -> x % 2 = 0) m
+    filtered.Items |> Expect.equal "even items in order" [|2;4|]
+  }
+
+  test "filter on empty list yields empty" {
+    let m = VirtualList.ofArray 5 [||]
+    let filtered = VirtualList.filter (fun _ -> true) m
+    filtered.Items        |> Expect.isEmpty "no items"
+    filtered.SelectedIndex |> Expect.isNone  "no selection"
+  }
+
+  test "filter resets selection to first matching item" {
+    let m = VirtualList.ofArray 5 [|1;2;3;4;5|] |> VirtualList.selectLast
+    let filtered = VirtualList.filter (fun x -> x > 3) m
+    filtered.SelectedIndex |> Expect.equal "selection at 0" (Some 0)
+  }
+
+  test "filter resets ScrollOffset to 0" {
+    let m = { VirtualList.ofArray 3 [|1;2;3;4;5;6|] with ScrollOffset = 3 }
+    let filtered = VirtualList.filter (fun _ -> true) m
+    filtered.ScrollOffset |> Expect.equal "offset reset" 0
+  }
+
+  testProperty "filter: selectedIndex is always valid in filtered result" <|
+    fun (items: int[]) (PositiveInt vp) ->
+      let m = VirtualList.ofArray (max 1 vp) items
+      let filtered = VirtualList.filter (fun x -> x % 2 = 0) m
+      match filtered.SelectedIndex with
+      | None   -> filtered.Items.Length = 0
+      | Some i -> i >= 0 && i < filtered.Items.Length
+
+  testProperty "filter (always-true) then filter p = filter p directly" <|
+    fun (items: int[]) ->
+      let p (x: int) = x % 2 = 0
+      let m      = VirtualList.ofArray 5 items
+      let double = m |> VirtualList.filter (fun _ -> true) |> VirtualList.filter p
+      let single = m |> VirtualList.filter p
+      double.Items = single.Items
+
+  testProperty "filter (always-false) yields empty regardless of input" <|
+    fun (items: int[]) ->
+      let m = VirtualList.ofArray 5 items
+      (VirtualList.filter (fun _ -> false) m).Items = [||]
+]
+
+// ── Sprint 61: ToastQueue with per-toast IDs ─────────────────────────────────
+
+let toastQueueIdTests = testList "ToastQueue per-toast ID (Sprint 61)" [
+  test "empty queue has count 0" {
+    ToastQueue.empty |> ToastQueue.count |> Expect.equal "empty" 0
+  }
+
+  test "push increases count by 1 and returns a ToastId" {
+    let q, _id = ToastQueue.empty |> ToastQueue.push "hello" 10 Style.empty
+    ToastQueue.count q |> Expect.equal "count = 1" 1
+  }
+
+  test "two pushes return different ToastIds" {
+    let q1, id1 = ToastQueue.empty |> ToastQueue.push "a" 10 Style.empty
+    let _q2, id2 = q1 |> ToastQueue.push "b" 10 Style.empty
+    id1 |> Expect.notEqual "IDs are distinct" id2
+  }
+
+  test "dismiss removes only the targeted toast" {
+    let q1, id1 = ToastQueue.empty |> ToastQueue.push "a" 10 Style.empty
+    let q2, _   = q1 |> ToastQueue.push "b" 10 Style.empty
+    let q3 = ToastQueue.dismiss id1 q2
+    ToastQueue.count q3   |> Expect.equal "one remaining" 1
+    ToastQueue.messages q3 |> Expect.contains "b survives" "b"
+  }
+
+  test "dismiss with non-existent ToastId is a no-op" {
+    let q, _id = ToastQueue.empty |> ToastQueue.push "a" 10 Style.empty
+    let bogus   = ToastId 999
+    let q2 = ToastQueue.dismiss bogus q
+    ToastQueue.count q2 |> Expect.equal "count unchanged" 1
+  }
+
+  test "dismiss all toasts one-by-one yields empty queue" {
+    let q1, id1 = ToastQueue.empty |> ToastQueue.push "a" 10 Style.empty
+    let q2, id2 = q1 |> ToastQueue.push "b" 10 Style.empty
+    let q3 = q2 |> ToastQueue.dismiss id1 |> ToastQueue.dismiss id2
+    ToastQueue.count q3 |> Expect.equal "queue empty" 0
+  }
+
+  test "tickAll removes toasts whose ticks hit zero" {
+    let q1, _ = ToastQueue.empty |> ToastQueue.push "short" 3 Style.empty
+    let q2, _ = q1 |> ToastQueue.push "long" 20 Style.empty
+    let q3 = ToastQueue.tickAll 3 q2
+    ToastQueue.count q3    |> Expect.equal "only long remains" 1
+    ToastQueue.messages q3 |> Expect.contains "long survives" "long"
+  }
+
+  test "tickAll 0 removes nothing" {
+    let q, _ = ToastQueue.empty |> ToastQueue.push "x" 5 Style.empty
+    let q2 = ToastQueue.tickAll 0 q
+    ToastQueue.count q2 |> Expect.equal "unchanged" 1
+  }
+
+  testProperty "dismiss A never removes toast B when messages differ" <|
+    fun () ->
+      let q1, idA = ToastQueue.empty |> ToastQueue.push "toast-A" 10 Style.empty
+      let q2, _   = q1 |> ToastQueue.push "toast-B" 10 Style.empty
+      let q3 = ToastQueue.dismiss idA q2
+      ToastQueue.messages q3 |> List.contains "toast-B"
+
+  testProperty "push then dismiss: count returns to original" <|
+    fun (PositiveInt n) ->
+      let pushN times q0 =
+        List.replicate times () |> List.fold (fun (q, ids) _ ->
+          let q', id = ToastQueue.push "x" 10 Style.empty q
+          (q', id :: ids)) (q0, [])
+      let (qFull, ids) = pushN (n % 10 + 1) ToastQueue.empty
+      let qEmpty = ids |> List.fold (fun q id -> ToastQueue.dismiss id q) qFull
+      ToastQueue.count qEmpty = 0
+
+  testProperty "tickAll n: toasts with RemainingTicks <= n are removed" <|
+    fun (PositiveInt n) ->
+      let q1, _ = ToastQueue.empty |> ToastQueue.push "short" n Style.empty
+      let q2, _ = q1 |> ToastQueue.push "long" (n + 100) Style.empty
+      let q3 = ToastQueue.tickAll n q2
+      ToastQueue.count q3 = 1
+]
+
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -2584,4 +2879,9 @@ let allWidgetTests = testList "Widgets" [
   splitPaneTests
   textInputPropTests
   virtualListPropTests
+  textInputUnicodePropTests
+  viewportTests
+  virtualListFilterTests
+  toastQueueIdTests
 ]
+

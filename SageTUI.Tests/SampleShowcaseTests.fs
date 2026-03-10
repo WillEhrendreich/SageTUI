@@ -74,7 +74,7 @@ let sampleLogViewerTests =
 
     test "init: no toasts on start" {
       let m, _ = LogViewer.init ()
-      m.Toasts |> Expect.isEmpty "no toasts on init"
+      ToastQueue.count m.Toasts |> Expect.equal "no toasts on init" 0
     }
 
     test "matchesFilter: empty filter matches everything" {
@@ -203,15 +203,15 @@ let sampleLogViewerTests =
         |> TestHarness.pressKey Key.Tab    // focus list
         |> TestHarness.typeText "j"         // select entry 1
         |> TestHarness.pressKey Key.Enter  // copy
-      (app.Model.Toasts.Length, 0) |> Expect.isGreaterThan "pressing Enter on a selected entry should add a toast"
+      (ToastQueue.count app.Model.Toasts, 0) |> Expect.isGreaterThan "pressing Enter on a selected entry should add a toast"
     }
 
-    test "DismissToasts clears all toasts" {
+    test "DismissToast removes a specific toast" {
       let m0, _ = LogViewer.init ()
-      let toast  = Toast.create "Test message" 30
-      let mWithToast = { m0 with Toasts = [toast] }
-      let m1, _ = LogViewer.update LogViewer.DismissToasts mWithToast
-      m1.Toasts |> Expect.isEmpty "DismissToasts should clear all toasts"
+      let toasts1, id = ToastQueue.push "Test message" 30 Style.empty m0.Toasts
+      let mWithToast = { m0 with Toasts = toasts1 }
+      let m1, _ = LogViewer.update (LogViewer.DismissToast id) mWithToast
+      ToastQueue.count m1.Toasts |> Expect.equal "DismissToast should remove the toast" 0
     }
 
     test "filter by 'debug' returns only Debug-level entries plus message matches" {

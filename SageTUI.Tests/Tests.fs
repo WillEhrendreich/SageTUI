@@ -6483,25 +6483,21 @@ let sprint52ToastQueueTests = testList "ToastQueue" [
     ToastQueue.empty |> ToastQueue.count |> Expect.equal "count=0" 0
 
   testCase "push adds a toast" <| fun () ->
-    ToastQueue.empty
-    |> ToastQueue.push "hello" 5 Style.empty
-    |> ToastQueue.count
-    |> Expect.equal "count=1" 1
+    let q, _ = ToastQueue.empty |> ToastQueue.push "hello" 5 Style.empty
+    q |> ToastQueue.count |> Expect.equal "count=1" 1
 
   testCase "push multiple toasts" <| fun () ->
-    ToastQueue.empty
-    |> ToastQueue.push "a" 5 Style.empty
-    |> ToastQueue.push "b" 5 Style.empty
-    |> ToastQueue.count
-    |> Expect.equal "count=2" 2
+    let q1, _ = ToastQueue.empty |> ToastQueue.push "a" 5 Style.empty
+    let q2, _ = q1 |> ToastQueue.push "b" 5 Style.empty
+    q2 |> ToastQueue.count |> Expect.equal "count=2" 2
 
   testCase "tickAll decrements ticks and keeps active" <| fun () ->
-    let q = ToastQueue.empty |> ToastQueue.push "a" 5 Style.empty
+    let q, _ = ToastQueue.empty |> ToastQueue.push "a" 5 Style.empty
     let q2 = ToastQueue.tickAll 1 q
     q2 |> ToastQueue.count |> Expect.equal "still one" 1
 
   testCase "tickAll removes expired toasts" <| fun () ->
-    let q = ToastQueue.empty |> ToastQueue.push "a" 1 Style.empty
+    let q, _ = ToastQueue.empty |> ToastQueue.push "a" 1 Style.empty
     let q2 = ToastQueue.tickAll 1 q
     q2 |> ToastQueue.count |> Expect.equal "expired and gone" 0
 
@@ -6511,7 +6507,7 @@ let sprint52ToastQueueTests = testList "ToastQueue" [
     | _ -> failtest "Expected Empty element for empty ToastQueue"
 
   testCase "view non-empty queue returns non-empty element" <| fun () ->
-    let q = ToastQueue.empty |> ToastQueue.push "Alert" 10 Style.empty
+    let q, _ = ToastQueue.empty |> ToastQueue.push "Alert" 10 Style.empty
     match ToastQueue.view q with
     | Empty -> failtest "Expected non-Empty element from ToastQueue.view"
     | _ -> ()
@@ -8318,6 +8314,93 @@ let sprint60CmdMonoidTests = testList "Cmd monoid laws (Sprint 60)" [
     msgs |> Expect.hasLength "exactly one message" 1
     msgs |> Expect.contains "contains 99" 99
 ]
+
+// ── Sprint 61: Cmd.map + Sub.map functor laws ─────────────────────────────────
+
+let sprint61CmdFunctorTests = testList "Cmd.map functor laws (Sprint 61)" [
+  testProperty "Cmd.map id = id: identity law" <|
+    fun (msgs: int list) ->
+      let cmd = Cmd.batch (msgs |> List.map Cmd.ofMsg)
+      let mapped = Cmd.map id cmd
+      collectSyncMsgs mapped = collectSyncMsgs cmd
+
+  testProperty "Cmd.map composition law: map (f >> g) = map f >> map g" <|
+    fun (msgs: int list) ->
+      let cmd = Cmd.batch (msgs |> List.map Cmd.ofMsg)
+      let f (x: int) = x * 2
+      let g (x: int) = x + 1
+      let direct   = Cmd.map (f >> g) cmd
+      let composed = cmd |> Cmd.map f |> Cmd.map g
+      collectSyncMsgs direct = collectSyncMsgs composed
+
+  testProperty "Cmd.map preserves batch count" <|
+    fun (msgs: int list) ->
+      let cmd = Cmd.batch (msgs |> List.map Cmd.ofMsg)
+      let f (x: int) = x * 3 - 1
+      let before = collectSyncMsgs cmd
+      let after  = collectSyncMsgs (Cmd.map f cmd)
+      before |> List.map f = after
+
+  testCase "Cmd.map over Cmd.none yields Cmd.none" <| fun () ->
+    collectSyncMsgs (Cmd.map (fun (x: int) -> x + 1) Cmd.none)
+    |> Expect.isEmpty "none mapped is none"
+
+  testCase "Cmd.map applies transform to messages" <| fun () ->
+    let cmd    = Cmd.batch [Cmd.ofMsg 1; Cmd.ofMsg 2; Cmd.ofMsg 3]
+    let mapped = Cmd.map (fun x -> x * 10) cmd
+    let result = collectSyncMsgs mapped |> List.sort
+    result |> Expect.equal "transformed correctly" [10; 20; 30]
+]
+
+let sprint61SubFunctorTests = testList "Sub.map functor laws (Sprint 61)" [
+  test "Sub.map id over KeySub: message type unchanged" {
+    let baseSub : Sub<int> = KeySub(fun (k, _) -> if k = Key.Char (Rune 'q') then Some 99 else None)
+    let mapped = Sub.map id baseSub
+    let result =
+      match mapped with
+      | KeySub handler -> handler (Key.Char (Rune 'q'), Modifiers.None)
+      | _ -> None
+    result |> Expect.equal "got 99" (Some 99)
+  }
+
+  test "Sub.map transforms dispatched message" {
+    let baseSub : Sub<int> = KeySub(fun (k, _) -> if k = Key.Char (Rune 'x') then Some 42 else None)
+    let mapped = Sub.map string baseSub
+    let result =
+      match mapped with
+      | KeySub handler -> handler (Key.Char (Rune 'x'), Modifiers.None)
+      | _ -> None
+    result |> Expect.equal "got \"42\"" (Some "42")
+  }
+
+  test "Sub.map composition: map (f >> g) = map f >> map g for KeySub" {
+    let baseSub : Sub<int> = KeySub(fun (k, _) -> if k = Key.Char (Rune 'a') then Some 7 else None)
+    let f (x: int) = x * 2
+    let g (x: int) = $"val:{x}"
+    let direct   = Sub.map (f >> g) baseSub
+    let composed = Sub.map g (Sub.map f baseSub)
+    let invoke (sub: Sub<string>) =
+      match sub with KeySub h -> h (Key.Char (Rune 'a'), Modifiers.None) | _ -> None
+    invoke direct |> Expect.equal "direct = composed" (invoke composed)
+  }
+
+  test "Sub.map over ResizeSub transforms width message" {
+    let baseSub : Sub<int*int> = ResizeSub(fun (w, h) -> Some (w, h))
+    let mapped = Sub.map fst baseSub
+    let result =
+      match mapped with
+      | ResizeSub handler -> handler (80, 24)
+      | _ -> None
+    result |> Expect.equal "width = 80" (Some 80)
+  }
+]
+
+[<Tests>]
+let sprint61Tests =
+  testList "Sprint 61" [
+    sprint61CmdFunctorTests
+    sprint61SubFunctorTests
+  ]
 
 [<Tests>]
 let sprint60Tests =

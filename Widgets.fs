@@ -1219,6 +1219,14 @@ module VirtualList =
   let isChecked (i: int) (m: VirtualListModel<'row>) : bool =
     Set.contains i m.Selected
 
+  /// Filter items in the list using a predicate.
+  /// Resets `SelectedIndex` to `Some 0` if any items remain, `None` if empty.
+  /// Always resets `ScrollOffset` to 0.
+  let filter (predicate: 'row -> bool) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+    let filtered = m.Items |> Array.filter predicate
+    let sel = match filtered.Length with 0 -> None | _ -> Some 0
+    { m with Items = filtered; SelectedIndex = sel; ScrollOffset = 0 }
+
 // ── VirtualTable ─────────────────────────────────────────────────────────────
 // Combines the column-header/separator structure of Table with VirtualList's
 // efficient windowed rendering. Use for large datasets in a table layout.
@@ -2959,34 +2967,49 @@ type ViewportModel = {
   Height: int
 }
 
+/// Opaque identifier for a specific toast in a `ToastQueue`, enabling targeted dismissal.
+type ToastId = ToastId of int
+
 /// A production-ready toast notification queue supporting concurrent toasts with
-/// automatic expiry, severity levels, and stacked overlay rendering.
+/// automatic expiry, severity levels, per-toast IDs, and stacked overlay rendering.
 type ToastQueue = {
-  Toasts: Toast.ToastModel list
+  Toasts: (ToastId * Toast.ToastModel) list
+  NextId: int
 }
 
-/// Operations on `ToastQueue` — a concurrent multi-toast manager with automatic expiry.
+/// Operations on `ToastQueue` — a concurrent multi-toast manager with automatic expiry
+/// and per-toast dismissal via `ToastId`.
 module ToastQueue =
   /// An empty queue with no active toasts.
-  let empty : ToastQueue = { Toasts = [] }
+  let empty : ToastQueue = { Toasts = []; NextId = 0 }
 
   /// Return the number of active (non-expired) toasts in the queue.
   let count (q: ToastQueue) : int = q.Toasts.Length
 
-  /// Prepend a new toast to the queue.
+  /// Return the message strings of all active toasts (useful in tests).
+  let messages (q: ToastQueue) : string list =
+    q.Toasts |> List.map (fun (_, t) -> t.Message)
+
+  /// Prepend a new toast to the queue and return the assigned `ToastId`.
   /// `msg` — display text; `ticks` — lifetime in update ticks; `style` — visual style.
-  let push (msg: string) (ticks: int) (style: Style) (q: ToastQueue) : ToastQueue =
-    { q with Toasts = Toast.createStyled msg ticks style :: q.Toasts }
+  let push (msg: string) (ticks: int) (style: Style) (q: ToastQueue) : ToastQueue * ToastId =
+    let id    = ToastId q.NextId
+    let toast = Toast.createStyled msg ticks style
+    { q with Toasts = (id, toast) :: q.Toasts; NextId = q.NextId + 1 }, id
+
+  /// Remove the toast with the given `ToastId`. No-op if the ID is not found.
+  let dismiss (id: ToastId) (q: ToastQueue) : ToastQueue =
+    { q with Toasts = q.Toasts |> List.filter (fun (tid, _) -> tid <> id) }
 
   /// Tick every toast in the queue by `n` ticks, removing any that have expired.
   let tickAll (n: int) (q: ToastQueue) : ToastQueue =
     let ticked =
       q.Toasts
-      |> List.choose (fun t ->
+      |> List.choose (fun (id, t) ->
         let remaining = t.RemainingTicks - n
         match remaining <= 0 with
-        | true -> None
-        | false -> Some { t with RemainingTicks = remaining })
+        | true  -> None
+        | false -> Some (id, { t with RemainingTicks = remaining }))
     { q with Toasts = ticked }
 
   /// Render all active toasts stacked vertically.
@@ -2994,7 +3017,7 @@ module ToastQueue =
   let view (q: ToastQueue) : Element =
     match q.Toasts with
     | [] -> El.empty
-    | toasts -> El.column (toasts |> List.map Toast.view)
+    | toasts -> El.column (toasts |> List.map (fun (_, t) -> Toast.view t))
 
 /// Operations on `ViewportModel` — an enhanced read-only, scrollable text pane with
 /// word-wrap, resize-awareness, keyboard navigation, and proportional scrollbar.
