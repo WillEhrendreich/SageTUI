@@ -377,7 +377,79 @@ Returning `None` ignores that key.
 
 ---
 
-## 9. What's Next
+## 9. Mouse Click Routing
+
+SageTUI's hit-test system lets you route mouse clicks to specific widgets without
+writing position math. Wrap an element with `El.clickRegion "key" element`, then
+subscribe with `ClickSub` to receive `(MouseEvent, hitKey option)` pairs.
+
+### Tabs with click activation
+
+```fsharp
+type Msg = TabClicked of (MouseEvent * string option) | KeyMsg of Key
+
+// In view:
+let view model =
+  Tabs.viewKeyed "main-tabs" model.Tabs
+  // Each tab row cell is automatically wrapped with El.clickRegion "main-tabs:0", "main-tabs:1", etc.
+
+// In subscribe:
+let subscribe _ =
+  [ ClickSub (fun (ev, key) -> Some (TabClicked (ev, key))) ]
+
+// In update:
+let update msg model =
+  match msg with
+  | TabClicked (ev, key) ->
+    let tabs' = Tabs.clickActivate "main-tabs" (ev, key) model.Tabs
+    { model with Tabs = tabs' }, Cmd.none
+  | ...
+```
+
+### Scroll wheel in TestHarness
+
+Testing scroll events is first-class in SageTUI:
+
+```fsharp
+let app =
+  TestHarness.init 80 24 myProgram
+  |> TestHarness.scrollAt 40 12 ScrollDown   // fire ScrollDown at (40,12)
+  |> TestHarness.scrollAt 40 12 ScrollUp    // fire ScrollUp
+```
+
+`scrollAt` routes to both `MouseSub` and `ClickSub` handlers, just like a real terminal.
+
+---
+
+## 10. Click-Positioning in Text Inputs
+
+`TextInput.clickAt` converts a visual column (from a mouse click X coordinate) into
+a UTF-16 cursor index, using the same `RuneWidth.getColumnWidth` oracle as the renderer.
+Wide characters (CJK, emoji) are handled correctly: clicking in column 2 of a 2-column
+character lands the cursor at the character boundary before it.
+
+```fsharp
+// In update, after receiving a MouseEvent on the text input row:
+let update msg model =
+  match msg with
+  | TextAreaClicked ev ->
+    let col = ev.X - inputStartX  // relative X within the input widget
+    { model with Input = TextInput.clickAt col model.Input }, Cmd.none
+  | ...
+```
+
+`VirtualList.clickToggleAt` similarly provides one-shot click-to-toggle for multi-select lists:
+
+```fsharp
+let update msg model =
+  match msg with
+  | ListClicked relY ->
+    { model with List = VirtualList.clickToggleAt relY model.List }, Cmd.none
+```
+
+---
+
+## 11. What's Next
 
 | Topic | Where to look |
 |---|---|

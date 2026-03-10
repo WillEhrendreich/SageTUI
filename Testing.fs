@@ -262,6 +262,31 @@ module TestHarness =
           | _ -> () ]
     applyMsgs app.VirtualTime app msgs
 
+  /// Simulate a scroll wheel event at (x, y) with the given button (ScrollUp or ScrollDown).
+  /// Routes to both MouseSub and ClickSub handlers with Phase = Pressed, just as a real
+  /// terminal would deliver wheel events. No hit-testing is performed — all matching
+  /// subscribers receive the event regardless of position.
+  ///
+  /// Use this to test Viewport.handleMouse, VirtualList.moveDown/Up, Select.handleMouse,
+  /// and any other component that reacts to scroll wheel input.
+  let scrollAt (x: int) (y: int) (button: MouseButton) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
+    let arena, _ = renderArena app
+    let hitKey = ArenaRender.hitTest arena x y
+    let mouseEvent = { Button = button; X = x; Y = y; Modifiers = Modifiers.None; Phase = Pressed }
+    let msgs =
+      [ for sub in app.Program.Subscribe app.Model do
+          match sub with
+          | ClickSub handler ->
+            match handler (mouseEvent, hitKey) with
+            | Some msg -> yield msg
+            | None -> ()
+          | MouseSub handler ->
+            match handler mouseEvent with
+            | Some msg -> yield msg
+            | None -> ()
+          | _ -> () ]
+    applyMsgs app.VirtualTime app msgs
+
   /// Simulate a terminal resize. Routes through ResizeSub handlers and updates
   /// Width/Height so subsequent renders use the new dimensions.
   let resize (width: int) (height: int) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =

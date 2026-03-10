@@ -441,6 +441,30 @@ module TextInput =
     | Pasted text -> handlePaste text model
     | _ -> model
 
+  /// Place the cursor at the given visual column (0-based), using the same
+  /// `RuneWidth.getColumnWidth` oracle as the renderer. Wide characters (CJK etc.)
+  /// occupy 2 columns; clicking in the second column of a wide char lands BEFORE it.
+  /// The resulting `Cursor` value is a UTF-16 code-unit index clamped to [0, text.Length].
+  /// Clears `SelectionAnchor`.
+  let clickAt (visualCol: int) (model: TextInputModel) : TextInputModel =
+    let col = max 0 visualCol
+    let mutable utf16Idx  = 0
+    let mutable colSoFar  = 0
+    let mutable found     = false
+    for rune in model.Text.EnumerateRunes() do
+      if not found then
+        let w = RuneWidth.getColumnWidth rune
+        match colSoFar + w > col with
+        | true ->
+          // The target column falls inside or just at the start of this rune.
+          found <- true
+        | false ->
+          colSoFar <- colSoFar + w
+          utf16Idx <- utf16Idx + rune.Utf16SequenceLength
+    // If we exhausted all runes without finding, cursor is at end.
+    let cursor = if found then utf16Idx else model.Text.Length
+    { model with Cursor = cursor; SelectionAnchor = None }
+
   /// Render the text input with visual cursor (reversed char) and selection highlight.
   /// When unfocused, renders plain text or placeholder. Empty unfocused renders as a space.
   let view (focused: bool) (model: TextInputModel) =
@@ -709,6 +733,27 @@ module Select =
     match model.Options.Length > 0 with
     | true -> Some model.Options.[model.Selected]
     | false -> None
+
+  /// Handle a mouse event for the select widget. Released events are ignored.
+  /// - `ScrollDown` / `ScrollUp`: move selection (clamped, works open or closed)
+  /// - `LeftButton` when closed: opens the dropdown
+  /// - `LeftButton` when open: selects the row at `relativeY` (0-based, clamped) and closes
+  /// - Any other button: no-op
+  /// `relativeY` is the click position relative to the top of the rendered option list.
+  let handleMouse (relativeY: int) (event: MouseEvent) (model: SelectModel<'a>) : SelectModel<'a> =
+    match event.Phase with
+    | Released -> model
+    | _ ->
+      match event.Button with
+      | ScrollDown -> moveDown model
+      | ScrollUp   -> moveUp model
+      | LeftButton ->
+        match model.IsOpen with
+        | false -> toggle model
+        | true  ->
+          let idx = max 0 (min (model.Options.Length - 1) relativeY)
+          { model with Selected = idx; IsOpen = false }
+      | _ -> model
 
   /// Render the select. When open, shows all options with a `▸` cursor. When closed,
   /// shows the selected value with a `▾` arrow. Apply underline when focused.
@@ -1261,6 +1306,13 @@ module VirtualList =
         | true  -> Set.remove i m.Selected
         | false -> Set.add    i m.Selected
       { m with Selected = updated }
+
+  /// Click a row by visual position, then toggle it in the multi-select `Selected` set.
+  /// Combines `clickSelectAt` (moves cursor) with `toggleSelect` (flips membership).
+  /// `relativeY` is 0-based from the top of the visible area. Negative values clamp to 0.
+  /// No-op when the list is empty.
+  let clickToggleAt (relativeY: int) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+    m |> clickSelectAt relativeY |> toggleSelect
 
   /// Add every item index to the `Selected` set.
   let selectAll (m: VirtualListModel<'row>) : VirtualListModel<'row> =

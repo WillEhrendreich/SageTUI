@@ -9688,3 +9688,274 @@ let sprint65Tests =
     sprint65TabsClickTests
     sprint65VListClickTests
   ]
+
+// ── Sprint 66 ─────────────────────────────────────────────────────────────────
+
+let sprint66ClickToggleTests =
+  testList "VirtualList.clickToggleAt" [
+
+    test "clickToggleAt row 0 adds index 0 to Selected set" {
+      let m = VirtualList.ofList 5 ["a"; "b"; "c"; "d"; "e"]
+      let m2 = VirtualList.clickToggleAt 0 m
+      m2.Selected |> Set.contains 0 |> Expect.isTrue "row 0 should be in Selected"
+      m2.SelectedIndex |> Expect.equal "cursor at 0" (Some 0)
+    }
+
+    test "clickToggleAt row 2 adds index 2 to Selected set" {
+      let m = VirtualList.ofList 5 ["a"; "b"; "c"; "d"; "e"]
+      let m2 = VirtualList.clickToggleAt 2 m
+      m2.Selected |> Set.contains 2 |> Expect.isTrue "row 2 should be in Selected"
+    }
+
+    test "clickToggleAt twice on same row removes it from Selected" {
+      let m = VirtualList.ofList 5 ["a"; "b"; "c"; "d"; "e"]
+      let m2 = VirtualList.clickToggleAt 0 m
+      let m3 = VirtualList.clickToggleAt 0 m2
+      m3.Selected |> Set.contains 0 |> Expect.isFalse "double-toggle should deselect"
+    }
+
+    test "clickToggleAt accumulates multiple rows in Selected" {
+      let m = VirtualList.ofList 5 ["a"; "b"; "c"; "d"; "e"]
+      let m2 = VirtualList.clickToggleAt 0 m |> VirtualList.clickToggleAt 2
+      m2.Selected |> Expect.equal "both rows selected" (Set.ofList [0; 2])
+    }
+
+    test "clickToggleAt on empty list is no-op" {
+      let m = VirtualList.ofList 5 ([] : string list)
+      let m2 = VirtualList.clickToggleAt 0 m
+      m2.Selected |> Expect.equal "still empty" Set.empty
+    }
+
+    testProperty "clickToggleAt double-toggle leaves Selected unchanged" <| fun (n: int) ->
+      let clamped = max 1 (abs n % 5 + 1)
+      let items = List.init clamped (fun i -> sprintf "item%d" i)
+      let m = VirtualList.ofList 3 items
+      let row = 0
+      let m2 = VirtualList.clickToggleAt row m |> VirtualList.clickToggleAt row
+      m2.Selected = m.Selected
+
+  ]
+
+let sprint66TextInputClickTests =
+  testList "TextInput.clickAt" [
+
+    test "clickAt col 0 places cursor at 0" {
+      let m = TextInput.ofString "hello"
+      let m2 = TextInput.clickAt 0 m
+      m2.Cursor |> Expect.equal "cursor at 0" 0
+    }
+
+    test "clickAt col 5 on 'hello' places cursor at 5 (end)" {
+      let m = TextInput.ofString "hello"
+      let m2 = TextInput.clickAt 5 m
+      m2.Cursor |> Expect.equal "cursor at 5" 5
+    }
+
+    test "clickAt col 3 on 'hello' places cursor at 3" {
+      let m = TextInput.ofString "hello"
+      let m2 = TextInput.clickAt 3 m
+      m2.Cursor |> Expect.equal "cursor at 3" 3
+    }
+
+    test "clickAt beyond text length clamps to end" {
+      let m = TextInput.ofString "hi"
+      let m2 = TextInput.clickAt 99 m
+      m2.Cursor |> Expect.equal "clamped to 2" 2
+    }
+
+    test "clickAt negative column clamps to 0" {
+      let m = TextInput.ofString "hello"
+      let m2 = TextInput.clickAt -5 m
+      m2.Cursor |> Expect.equal "clamped to 0" 0
+    }
+
+    test "clickAt on empty text stays at 0" {
+      let m = TextInput.empty
+      let m2 = TextInput.clickAt 3 m
+      m2.Cursor |> Expect.equal "empty stays 0" 0
+    }
+
+    test "clickAt clears SelectionAnchor" {
+      let m = { TextInput.ofString "hello" with SelectionAnchor = Some 2 }
+      let m2 = TextInput.clickAt 1 m
+      m2.SelectionAnchor |> Expect.equal "anchor cleared" None
+    }
+
+    test "clickAt col 2 on wide chars places cursor after 1 wide char (2 cols)" {
+      // "日" is 2 columns wide; clicking col 2 lands after char 0 (cursor = 1 Rune = could be >1 UTF-16 code units)
+      // "日本" — col 0 = start, col 2 = after 日 (index of 日 in runes = 0, UTF-16 length = 1 per CJK BMP char)
+      let m = TextInput.ofString "日本語"
+      let m2 = TextInput.clickAt 2 m
+      // "日" is U+65E5, BMP, 1 UTF-16 code unit, 2 terminal columns
+      // col 0 = before 日; col 2 = after 日 → cursor at UTF-16 index 1
+      m2.Cursor |> Expect.equal "cursor after wide char" 1
+    }
+
+    test "clickAt col 1 on wide char rounds down to start of char" {
+      // Clicking in the middle of a 2-column wide char should land at its start
+      let m = TextInput.ofString "日本語"
+      let m2 = TextInput.clickAt 1 m
+      m2.Cursor |> Expect.equal "col 1 rounds to col 0 (before 日)" 0
+    }
+
+    testProperty "cursor is always in [0, text.Length]" <| fun (text: string) (col: int) ->
+      let safeText = if isNull text then "" else text
+      let m = TextInput.ofString safeText
+      let m2 = TextInput.clickAt col m
+      m2.Cursor >= 0 && m2.Cursor <= safeText.Length
+
+  ]
+
+// Module-level types for TestHarness.scrollAt tests (F# types cannot be declared inside test bodies)
+type private ScrollTestMsg = ScrollTestScrolled of MouseEvent | ScrollTestNoop
+type private ScrollTestMsg2 = ScrollTest2Scrolled of MouseEvent | ScrollTest2Noop
+type private ScrollTestMsg3 = ScrollTest3Mouse of MouseEvent
+
+let private makeScrollVListProgram (items: string array) (_mkMsg: MouseEvent -> ScrollTestMsg) (sub: Sub<ScrollTestMsg>) : Program<VirtualListModel<string>, ScrollTestMsg> =
+  { Init      = fun () -> VirtualList.ofList 3 (Array.toList items), Cmd.none
+    Update    = fun msg (m: VirtualListModel<string>) ->
+                  match msg with
+                  | ScrollTestScrolled ev ->
+                    let m' = match ev.Button with
+                             | ScrollDown -> VirtualList.selectNext m
+                             | ScrollUp   -> VirtualList.selectPrev m
+                             | _          -> m
+                    m', Cmd.none
+                  | ScrollTestNoop -> m, Cmd.none
+    View      = fun m -> VirtualList.view (VirtualList.create (fun _ s -> El.text s)) m
+    Subscribe = fun _ -> [ sub ]
+    OnError   = None }
+
+let private makeScrollVListProgram2 (items: string array) : Program<VirtualListModel<string>, ScrollTestMsg2> =
+  { Init      = fun () -> VirtualList.ofList 3 (Array.toList items), Cmd.none
+    Update    = fun msg (m: VirtualListModel<string>) ->
+                  match msg with
+                  | ScrollTest2Scrolled ev ->
+                    let m' = match ev.Button with
+                             | ScrollDown -> VirtualList.selectNext m
+                             | ScrollUp   -> VirtualList.selectPrev m
+                             | _          -> m
+                    m', Cmd.none
+                  | ScrollTest2Noop -> m, Cmd.none
+    View      = fun m -> VirtualList.view (VirtualList.create (fun _ s -> El.text s)) m
+    Subscribe = fun _ -> [ MouseSub (fun ev -> Some (ScrollTest2Scrolled ev)) ]
+    OnError   = None }
+
+let sprint66TestHarnessScrollTests =
+  testList "TestHarness.scrollAt" [
+
+    test "scrollAt ScrollDown routes to MouseSub and can scroll VirtualList" {
+      let items = [| "a"; "b"; "c"; "d"; "e" |]
+      let prog = makeScrollVListProgram items ScrollTestScrolled (MouseSub (fun ev -> Some (ScrollTestScrolled ev)))
+      let app =
+        TestHarness.init 20 5 prog
+        |> TestHarness.scrollAt 0 0 ScrollDown
+      app.Model.SelectedIndex |> Expect.equal "scrolled down" (Some 1)
+    }
+
+    test "scrollAt ScrollUp after ScrollDown returns to original" {
+      let items = [| "a"; "b"; "c"; "d"; "e" |]
+      let prog = makeScrollVListProgram2 items
+      let app =
+        TestHarness.init 20 5 prog
+        |> TestHarness.scrollAt 0 0 ScrollDown
+        |> TestHarness.scrollAt 0 0 ScrollUp
+      app.Model.SelectedIndex |> Expect.equal "back to 0" (Some 0)
+    }
+
+    test "scrollAt with LeftButton is a no-op for scroll-only MouseSub" {
+      let prog : Program<int, ScrollTestMsg3> = {
+        Init      = fun () -> 0, Cmd.none
+        Update    = fun (ScrollTest3Mouse _ev) n -> n + 1, Cmd.none
+        View      = fun _ -> El.empty
+        Subscribe = fun _ ->
+          [ MouseSub (fun ev ->
+              match ev.Button with
+              | ScrollUp | ScrollDown -> Some (ScrollTest3Mouse ev)
+              | _ -> None) ]
+        OnError   = None }
+      let app0 = TestHarness.init 20 5 prog
+      let app1 = TestHarness.scrollAt 0 0 LeftButton app0
+      app1.Model |> Expect.equal "no scroll fire" 0
+    }
+
+  ]
+
+let sprint66SelectMouseTests =
+  testList "Select.handleMouse" [
+
+    test "ScrollDown moves selection down" {
+      let m = Select.create ["a"; "b"; "c"]
+      let ev = { Button = ScrollDown; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      let m2 = Select.handleMouse 0 ev m
+      m2.Selected |> Expect.equal "moved to 1" 1
+    }
+
+    test "ScrollUp moves selection up" {
+      let m = { Select.create ["a"; "b"; "c"] with Selected = 2 }
+      let ev = { Button = ScrollUp; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      let m2 = Select.handleMouse 0 ev m
+      m2.Selected |> Expect.equal "moved to 1" 1
+    }
+
+    test "ScrollDown clamps at last option" {
+      let m = { Select.create ["a"; "b"; "c"] with Selected = 2 }
+      let ev = { Button = ScrollDown; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      let m2 = Select.handleMouse 0 ev m
+      m2.Selected |> Expect.equal "clamped at 2" 2
+    }
+
+    test "ScrollUp clamps at 0" {
+      let m = Select.create ["a"; "b"; "c"]
+      let ev = { Button = ScrollUp; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      let m2 = Select.handleMouse 0 ev m
+      m2.Selected |> Expect.equal "clamped at 0" 0
+    }
+
+    test "LeftButton when closed opens the dropdown" {
+      let m = Select.create ["a"; "b"; "c"]
+      let ev = { Button = LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      let m2 = Select.handleMouse 0 ev m
+      m2.IsOpen |> Expect.isTrue "should be open"
+    }
+
+    test "LeftButton when open selects relativeY row and closes" {
+      let m = { Select.create ["a"; "b"; "c"] with IsOpen = true }
+      let ev = { Button = LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      let m2 = Select.handleMouse 2 ev m
+      m2.IsOpen |> Expect.isFalse "should be closed"
+      m2.Selected |> Expect.equal "row 2 selected" 2
+    }
+
+    test "LeftButton when open with relativeY 0 selects row 0" {
+      let m = { Select.create ["a"; "b"; "c"] with IsOpen = true; Selected = 2 }
+      let ev = { Button = LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      let m2 = Select.handleMouse 0 ev m
+      m2.Selected |> Expect.equal "row 0" 0
+      m2.IsOpen |> Expect.isFalse "closed"
+    }
+
+    test "Released phase is ignored" {
+      let m = Select.create ["a"; "b"; "c"]
+      let ev = { Button = LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Released }
+      let m2 = Select.handleMouse 0 ev m
+      m2 |> Expect.equal "no change on release" m
+    }
+
+    test "MiddleButton is ignored" {
+      let m = { Select.create ["a"; "b"; "c"] with Selected = 1 }
+      let ev = { Button = MiddleButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      let m2 = Select.handleMouse 0 ev m
+      m2 |> Expect.equal "no change for middle" m
+    }
+
+  ]
+
+[<Tests>]
+let sprint66Tests =
+  testList "Sprint 66" [
+    sprint66ClickToggleTests
+    sprint66TextInputClickTests
+    sprint66TestHarnessScrollTests
+    sprint66SelectMouseTests
+  ]
