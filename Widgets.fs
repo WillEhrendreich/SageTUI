@@ -2381,9 +2381,10 @@ module Chart =
         Mode = Braille
         Fallback = Some HalfBlock
         Draw = fun termW termH ->
-          // termH = pixelH when using Braille (each terminal row = 4 pixel rows)
+          // CanvasRender calls Draw(area.Width * 2, area.Height * 4) for Braille,
+          // so termW/termH are already pixel dimensions — do NOT multiply again.
           let pixelH = termH
-          let pixelW = termW * 2  // Braille: 2 pixel cols per terminal col
+          let pixelW = termW
           let pixels = Array.create (pixelW * pixelH) Color.Default
           let inline setPixel x y col =
             match x >= 0 && x < pixelW && y >= 0 && y < pixelH with
@@ -2432,7 +2433,9 @@ module Chart =
           Mode = HalfBlock
           Fallback = None
           Draw = fun termW termH ->
-            let pixelH = termH * 2  // HalfBlock: 2 pixel rows per terminal row
+            // CanvasRender calls Draw(area.Width, area.Height * 2) for HalfBlock,
+            // so termH is already pixel height — do NOT multiply again.
+            let pixelH = termH
             let pixelW = termW
             let pixels = Array.create (pixelW * pixelH) Color.Default
             let colCount = min pixelW data.Length

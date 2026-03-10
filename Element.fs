@@ -228,6 +228,26 @@ module El =
   let clickRegion (key: string) (elem: Element) : Element =
     Keyed(key, Fade 0<ms>, Fade 0<ms>, elem)
 
+  /// Semantic alias for `El.clickRegion`. Names a region of the UI so click events
+  /// on it report `key` to `Sub.clicks` handlers. Prefer this name when the intent
+  /// is purely routing — "zone" communicates named area, "clickRegion" communicates action.
+  ///
+  /// <code>
+  /// El.zone "sidebar" sidebarContent
+  /// El.zone "toolbar" toolbarRow
+  /// </code>
+  let zone (key: string) (elem: Element) : Element =
+    Keyed(key, Fade 0<ms>, Fade 0<ms>, elem)
+
+  /// Like `El.clickRegion` but also attaches enter/exit transitions.
+  /// Use when you want both click routing AND animated transitions on the same element.
+  ///
+  /// <code>
+  /// El.clickRegionWith "panel" (Fade 150&lt;ms&gt;) (Fade 100&lt;ms&gt;) panelContent
+  /// </code>
+  let clickRegionWith (key: string) (enter: Transition) (exit: Transition) (elem: Element) : Element =
+    Keyed(key, enter, exit, elem)
+
   let onEnter t elem =
     match elem with
     | Keyed(k, _, exit, child) -> Keyed(k, t, exit, child)
@@ -398,13 +418,13 @@ module El =
     let parse (input: string) : (string * Style) list =
       let tokens = tokenize input
       let mutable stack: StyleChange list = []
-      let mutable results: (string * Style) list = []
+      let results = ResizeArray<string * Style>()
       for (lit, tagOpt) in tokens do
         match lit with
         | "" -> ()
         | s ->
           let style = stackToStyle stack
-          results <- results @ [(s, style)]
+          results.Add((s, style))
         match tagOpt with
         | None -> ()
         | Some tag ->
@@ -416,7 +436,7 @@ module El =
             | [] -> ()
             | _ :: rest -> stack <- rest
           | Some change -> stack <- change :: stack
-      results
+      results |> Seq.toList
 
   /// Parse inline markup into a `Row` of styled `Text` nodes.
   ///

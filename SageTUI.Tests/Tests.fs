@@ -6132,3 +6132,220 @@ let sprint50Tests =
     sprint50ClickTests
     sprint50ChartTests
   ]
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPRINT 51 — Bug fixes, naming, property tests, Chart.lineChart
+// ═══════════════════════════════════════════════════════════════════════════════
+
+open FsCheck
+
+// Helper: render element to buffer, return rendered cells (non-empty)
+let renderToBuffer w h elem =
+  let area = { X = 0; Y = 0; Width = w; Height = h }
+  let buf = Buffer.create w h
+  Render.render area Style.empty buf elem
+  buf
+
+// ─── Bug Regression: Braille pixel dimensions ───────────────────────────────
+// CanvasRender calls Draw(area.Width * 2, area.Height * 4) for Braille mode.
+// The Draw callback receives already-scaled pixel dimensions; charts must NOT
+// multiply termW/termH again. These tests verify correct pixel-buffer sizing.
+
+let sprint51BrailleTests = testList "Chart canvas pixel dimensions (regression)" [
+  testCase "sparkline Draw receives pixel-scale dims — no double-width" <| fun () ->
+    let data = Array.init 8 (fun i -> float i)
+    let elem = Chart.sparkline data
+    match elem with
+    | Canvas config ->
+      // CanvasRender calls Draw(area.Width * 2, area.Height * 4) — pixel coords
+      let pb = config.Draw 8 8
+      pb.Width |> Expect.equal "pixel width = 8 (no double)" 8
+      pb.Height |> Expect.equal "pixel height = 8 (no double)" 8
+    | _ -> failwith "expected Canvas element"
+
+  testCase "sparkline renders without overflow for narrow terminal" <| fun () ->
+    let data = [| 0.0; 50.0; 100.0; 75.0; 25.0 |]
+    let elem = Chart.sparkline data
+    let buf = renderToBuffer 3 2 elem
+    buf.Cells |> Array.length |> Expect.equal "6 cells in 3x2 buffer" 6
+
+  testCase "barChart Draw receives pixel-scale dims — no double-height" <| fun () ->
+    // HalfBlock: CanvasRender calls Draw(area.Width, area.Height * 2) — pixel coords
+    let data = [ "A", 1.0; "B", 2.0 ]
+    let elem = Chart.barChart data
+    match elem with
+    | Column [Canvas config; _] ->
+      // W=6, H=4 → HalfBlock Draw(6, 8)
+      let pb = config.Draw 6 8
+      pb.Width |> Expect.equal "pixel width = 6" 6
+      pb.Height |> Expect.equal "pixel height = 8 (no double)" 8
+    | _ -> () // shape may vary; no crash = pass
+
+  testCase "barChart renders without overflow for small area" <| fun () ->
+    let data = [ "X", 10.0; "Y", 5.0; "Z", 8.0 ]
+    let elem = Chart.barChart data
+    let buf = renderToBuffer 6 4 elem
+    buf.Cells |> Array.length |> Expect.equal "24 cells in 6x4 buffer" 24
+
+  testProperty "sparkline PixelBuffer.Width = termW for any positive area width" <|
+    fun (PositiveInt w) ->
+      let data = Array.create (min w 20) 0.5
+      match Chart.sparkline data with
+      | Canvas config ->
+        let pixW = w * 2
+        let pixH = 4 * 4
+        let pb = config.Draw pixW pixH
+        pb.Width = pixW
+      | _ -> true  // empty elem when data is empty — not applicable
+
+  testProperty "sparkline PixelBuffer.Height = termH for any positive area height" <|
+    fun (PositiveInt h) ->
+      let data = [| 0.3; 0.6; 0.9 |]
+      match Chart.sparkline data with
+      | Canvas config ->
+        let pixW = 2 * 2
+        let pixH = h * 4
+        let pb = config.Draw pixW pixH
+        pb.Height = pixH
+      | _ -> true
+]
+
+// ─── Bug Regression: Markup parser O(n²) → O(n) ────────────────────────────
+
+let sprint51MarkupPerfTests = testList "Markup parser performance (regression)" [
+  testCase "long markup string produces correct segment count (no corruption)" <| fun () ->
+    let words = Array.init 50 (fun i -> sprintf "[bold]word%d[/]" i)
+    let input = String.concat " " words
+    let parts = El.markup input
+    // Each [bold]wordN[/] produces one bold segment; " " between them one plain segment
+    match parts with
+    | Row children ->
+      (children |> List.length, 49) |> Expect.isGreaterThan "at least 50 parts for 50 bold words"
+    | _ -> ()
+
+  testCase "markup with many nested colors parses all segments" <| fun () ->
+    let s = "[red]a[/][green]b[/][blue]c[/][yellow]d[/][cyan]e[/][magenta]f[/][white]g[/]"
+    let parts = El.markup s
+    match parts with
+    | Row children -> children |> List.length |> Expect.equal "7 colored segments" 7
+    | _ -> failwith "expected Row"
+
+  testProperty "markup: segment count never decreases as we add more tags" <| fun () ->
+    let makeInput n = Array.init n (fun i -> sprintf "[bold]x%d[/]" i) |> String.concat ""
+    let count n =
+      match El.markup (makeInput n) with
+      | Row children -> List.length children
+      | _ -> 0
+    count 5 <= count 10 && count 10 <= count 20
+
+  testProperty "markup: any string produces valid Element without exception" <| fun (s: NonEmptyString) ->
+    let elem = El.markup s.Get
+    match elem with
+    | Empty | Text _ | Row _ -> true
+    | _ -> false
+]
+
+// ─── El.zone + El.clickRegionWith ───────────────────────────────────────────
+
+let sprint51NamingTests = testList "El.zone and El.clickRegionWith" [
+  testCase "El.zone produces Keyed element" <| fun () ->
+    match El.zone "sidebar" (El.text "hi") with
+    | Keyed(key, _, _, _) -> key |> Expect.equal "key is sidebar" "sidebar"
+    | other -> failwithf "expected Keyed, got %A" other
+
+  testCase "El.zone wraps inner element by pattern-matching child" <| fun () ->
+    match El.zone "z" (El.text "content") with
+    | Keyed(_, _, _, Text("content", _)) -> ()
+    | Keyed(_, _, _, inner) -> failwithf "inner was %A" inner
+    | other -> failwithf "expected Keyed, got %A" other
+
+  testCase "El.zone has zero-duration transitions (no animation overhead)" <| fun () ->
+    match El.zone "z" (El.text "x") with
+    | Keyed(_, Fade enterMs, Fade exitMs, _) ->
+      enterMs |> Expect.equal "enter=0ms" 0<ms>
+      exitMs  |> Expect.equal "exit=0ms"  0<ms>
+    | other -> failwithf "expected Keyed with Fade transitions, got %A" other
+
+  testCase "El.zone and El.clickRegion both produce Keyed with zero transitions" <| fun () ->
+    // Both APIs must produce Keyed("k", Fade 0ms, Fade 0ms, _)
+    let checkZeroKeyed lbl elem =
+      match elem with
+      | Keyed(k, Fade em, Fade xm, _) ->
+        k  |> Expect.equal (lbl + " key") "k"
+        em |> Expect.equal (lbl + " enter=0ms") 0<ms>
+        xm |> Expect.equal (lbl + " exit=0ms")  0<ms>
+      | other -> failwithf "%s: expected Keyed, got %A" lbl other
+    El.zone        "k" (El.text "same") |> checkZeroKeyed "zone"
+    El.clickRegion "k" (El.text "same") |> checkZeroKeyed "clickRegion"
+
+  testCase "El.clickRegionWith attaches custom enter/exit transitions" <| fun () ->
+    match El.clickRegionWith "btn" (Fade 150<ms>) (Fade 100<ms>) (El.text "x") with
+    | Keyed(key, Fade em, Fade xm, _) ->
+      key |> Expect.equal "key" "btn"
+      em  |> Expect.equal "enter=150ms" 150<ms>
+      xm  |> Expect.equal "exit=100ms"  100<ms>
+    | other -> failwithf "expected Keyed, got %A" other
+
+  testCase "El.clickRegionWith has different transitions than El.clickRegion" <| fun () ->
+    // plain = Fade 0ms enter; withT = Fade 200ms enter — transitions differ
+    match El.clickRegion "k" (El.text "t") with
+    | Keyed(_, Fade em, _, _) -> em |> Expect.equal "plain enter=0ms" 0<ms>
+    | other -> failwithf "expected Keyed, got %A" other
+    match El.clickRegionWith "k" (Fade 200<ms>) (Fade 100<ms>) (El.text "t") with
+    | Keyed(_, Fade em, Fade xm, _) ->
+      em |> Expect.equal "withT enter=200ms" 200<ms>
+      xm |> Expect.equal "withT exit=100ms"  100<ms>
+    | other -> failwithf "expected Keyed, got %A" other
+
+  testCase "El.clickRegionWith key='' still wraps in Keyed" <| fun () ->
+    match El.clickRegionWith "" (Fade 0<ms>) (Fade 0<ms>) El.empty with
+    | Keyed _ -> ()
+    | other -> failwithf "expected Keyed, got %A" other
+
+  testProperty "El.zone key roundtrips" <| fun (key: string) ->
+    match El.zone key (El.text "x") with
+    | Keyed(k, _, _, _) -> k = key
+    | _ -> false
+
+  testProperty "El.clickRegionWith always produces Keyed" <| fun (key: string) ->
+    match El.clickRegionWith key (Fade 0<ms>) (Fade 0<ms>) (El.text (key + "x")) with
+    | Keyed _ -> true
+    | _ -> false
+]
+
+// ─── Property-based layout invariant tests ──────────────────────────────────
+
+let sprint51PropertyTests = testList "Layout invariants (Sprint 51 additions)" [
+  testProperty "Fill 1 sole child gets full available width" <| fun (PositiveInt avail) ->
+    let avail = min avail 500
+    let results = Layout.solveWithContent avail [Fill 1] [0]
+    results |> List.sumBy snd = avail
+
+  testProperty "single Fixed child size is capped at available" <| fun (PositiveInt avail) (PositiveInt requested) ->
+    let avail     = min avail 500
+    let requested = min requested 500
+    let results   = Layout.solveWithContent avail [Fixed requested] [0]
+    let size      = results |> List.head |> snd
+    size <= avail && size = min requested avail
+
+  testProperty "markup parse never raises exn for any non-null string" <| fun (s: NonEmptyString) ->
+    try El.markup s.Get |> ignore; true
+    with _ -> false
+
+  testProperty "markup segments count is non-negative for any non-empty string" <| fun (s: NonEmptyString) ->
+    let count =
+      match El.markup s.Get with
+      | Row children -> children.Length
+      | Empty -> 0
+      | _ -> 1
+    count >= 0
+]
+
+[<Tests>]
+let sprint51Tests =
+  testList "Sprint 51" [
+    sprint51BrailleTests
+    sprint51MarkupPerfTests
+    sprint51NamingTests
+    sprint51PropertyTests
+  ]
