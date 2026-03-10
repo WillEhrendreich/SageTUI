@@ -27,6 +27,7 @@
     <Compile Include="ProcessHelpers.fs" />
     <Compile Include="Hex1bE2ETests.fs" />
     <Compile Include="TemplateSmokeTests.fs" />
+    <Compile Include="ComponentTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

@@ -404,6 +404,21 @@ type Program<'model, 'msg> = {
   Subscribe: 'model -> Sub<'msg> list
 }
 
+/// A pair of get/set functions forming a lawful lens from 'outer to 'inner.
+/// Laws: (1) get (set i o) = i  (2) set (get o) o = o  (3) set i (set j o) = set i o
+type Lens<'outer, 'inner> = {
+  Get: 'outer -> 'inner
+  Set: 'inner -> 'outer -> 'outer
+}
+
+/// A partial lens (prism) from 'outer to an optional 'inner.
+/// Used for optional sub-components such as modals or conditional panels.
+/// Laws: TryGet o = Some i ⟹ Set i o returns an 'outer where TryGet yields Some i.
+type Prism<'outer, 'inner> = {
+  TryGet: 'outer -> 'inner option
+  Set: 'inner -> 'outer -> 'outer
+}
+
 /// Represents a child component's program lifted into a parent program's type space.
 /// Produced by `Program.map`. Having a named type (rather than an anonymous record) enables
 /// nominal type checking and allows callers to write helper functions against this type.
@@ -442,6 +457,56 @@ module Program =
       Subscribe = fun parentModel ->
         child.Subscribe (toModel parentModel)
         |> List.map (Sub.map toMsg) }
+
+  /// Embed a child program into a parent program via a `Lens`.
+  /// `liftMsg` wraps child messages into the parent message DU case.
+  /// The lens supplies the child-model extraction and update functions.
+  ///
+  /// Example:
+  /// ```fsharp
+  /// let counterLens = { Get = fun m -> m.Counter; Set = fun c m -> { m with Counter = c } }
+  /// let embedded = Program.embed counterLens ParentMsg.Counter counterProgram
+  /// // In parent Update:  | ParentMsg.Counter msg -> embedded.Update msg model
+  /// // In parent View:    El.column [ embedded.View model; ... ]
+  /// // In parent Subscribe: embedded.Subscribe model @ [ otherSubs ]
+  /// ```
+  let embed
+    (lens: Lens<'parentModel, 'childModel>)
+    (liftMsg: 'childMsg -> 'parentMsg)
+    (child: Program<'childModel, 'childMsg>)
+    : MappedProgram<'parentModel, 'parentMsg, 'childMsg> =
+    map liftMsg lens.Get lens.Set child
+
+  /// Embed an optional child program into a parent program via a `Prism`.
+  /// When the prism yields `None`, `View` returns `El.empty` and `Update`/`Subscribe`
+  /// are no-ops — making illegal states (message arrives for absent component) safe.
+  ///
+  /// Example:
+  /// ```fsharp
+  /// let modalPrism = { TryGet = fun m -> m.Modal; Set = fun md m -> { m with Modal = Some md } }
+  /// let embedded = Program.embedOptional modalPrism ParentMsg.Modal modalProgram
+  /// ```
+  let embedOptional
+    (prism: Prism<'parentModel, 'childModel>)
+    (liftMsg: 'childMsg -> 'parentMsg)
+    (child: Program<'childModel, 'childMsg>)
+    : MappedProgram<'parentModel, 'parentMsg, 'childMsg> =
+    { Init = fun parentModel -> parentModel, NoCmd
+      Update = fun childMsg parentModel ->
+        match prism.TryGet parentModel with
+        | None -> parentModel, NoCmd
+        | Some childModel ->
+          let newChildModel, childCmd = child.Update childMsg childModel
+          prism.Set newChildModel parentModel, Cmd.map liftMsg childCmd
+      View = fun parentModel ->
+        match prism.TryGet parentModel with
+        | None -> Empty
+        | Some childModel -> child.View childModel
+      Subscribe = fun parentModel ->
+        match prism.TryGet parentModel with
+        | None -> []
+        | Some childModel ->
+          child.Subscribe childModel |> List.map (Sub.map liftMsg) }
 
   /// Run a list of messages through a program's Update function and return all
   /// intermediate (model, cmd) states. The initial model comes from Init.
