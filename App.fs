@@ -324,8 +324,8 @@ module App =
           for (key, oldElem) in exiting do
             match oldElem with
             | Keyed(_, _, exitTransition, _) ->
-              let snapshot = Array.copy frontBuf.Cells
               let area = prevKeyAreas |> Map.tryFind key |> Option.defaultValue (fullScreenArea ())
+              let snapshot = TransitionFx.extractArea area frontBuf
               activeTransitions <-
                 { Key = key
                   Transition = exitTransition
@@ -381,7 +381,7 @@ module App =
                   StartMs = nowMs
                   DurationMs = TransitionDuration.get enterTransition
                   Easing = Ease.cubicInOut
-                  SnapshotBefore = Array.create (width * height) PackedCell.empty
+                  SnapshotBefore = Array.create (transArea.Width * transArea.Height) PackedCell.empty
                   Area = transArea
                   Payload = computePayload key enterTransition transArea
                   PhaseCaptures = Map.empty }
@@ -391,25 +391,26 @@ module App =
           // Apply active transitions via a recursive dispatcher so Sequence can recurse.
           // Each Transition case is explicit — compiler warns when a new case is added.
           let rec applyTransition (t: float) (transition: Transition) (at: ActiveTransition) =
+            let currentSlice = TransitionFx.extractArea at.Area backBuf
             match transition with
             | Fade _ ->
-              TransitionFx.applyFade t backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+              TransitionFx.applyFade t currentSlice at.Area backBuf
             | ColorMorph _ ->
-              TransitionFx.applyColorMorph t at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+              TransitionFx.applyColorMorph t at.SnapshotBefore currentSlice at.Area backBuf
             | Wipe(dir, _) ->
-              TransitionFx.applyWipe t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+              TransitionFx.applyWipe t dir at.SnapshotBefore currentSlice at.Area backBuf
             | Dissolve _ ->
               // DissolvePayload pre-computed at transition start (via computePayload).
               // Also covers Dissolve nested inside Sequence — computePayload recurses via hasDissolve.
               match at.Payload with
               | DissolvePayload order ->
-                TransitionFx.applyDissolve t order at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+                TransitionFx.applyDissolve t order at.SnapshotBefore currentSlice at.Area backBuf
               | NoPayload ->
                 failwithf "Dissolve transition '%s' has NoPayload — shuffle order must be pre-computed at transition start" at.Key
             | SlideIn(dir, _) ->
-              TransitionFx.applySlideIn t dir at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+              TransitionFx.applySlideIn t dir at.SnapshotBefore currentSlice at.Area backBuf
             | Grow _ ->
-              TransitionFx.applyGrow t at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+              TransitionFx.applyGrow t at.SnapshotBefore currentSlice at.Area backBuf
             | Sequence ts ->
               // Play sub-transitions sequentially. Each phase starts from a snapshot of the
               // buffer at the END of the previous phase, enabling true visual chaining
@@ -430,13 +431,13 @@ module App =
                     match at.PhaseCaptures |> Map.tryFind subIdx with
                     | Some snap -> { at with SnapshotBefore = snap }
                     | None ->
-                      // First frame of this phase — capture the current backBuf state
-                      let snap = Array.copy backBuf.Cells
+                      // First frame of this phase — capture the current area state (area-sliced)
+                      let snap = TransitionFx.extractArea at.Area backBuf
                       at.PhaseCaptures <- at.PhaseCaptures |> Map.add subIdx snap
                       { at with SnapshotBefore = snap }
                 applyTransition localT sub phaseAt
             | Custom(_, f) ->
-              TransitionFx.applyCustom t f at.SnapshotBefore backBuf.Cells at.Area.Y at.Area.Width at.Area.Height backBuf
+              TransitionFx.applyCustom t f at.SnapshotBefore currentSlice at.Area backBuf
   
           activeTransitions |> List.iter (fun at ->
             let t = ActiveTransition.progress nowMs at

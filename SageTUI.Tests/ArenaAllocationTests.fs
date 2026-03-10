@@ -268,7 +268,7 @@ let arenaAllocationTests =
                 let t = ActiveTransition.progress 150L at
                 match at.Payload with
                 | DissolvePayload o ->
-                    TransitionFx.applyDissolve t o at.SnapshotBefore buf.Cells at.Area.Y at.Area.Width at.Area.Height buf
+                    TransitionFx.applyDissolve t o at.SnapshotBefore buf.Cells at.Area buf
                 | NoPayload -> ()
 
             let totalAllocated = measureAllocBytes 100 1000 frame

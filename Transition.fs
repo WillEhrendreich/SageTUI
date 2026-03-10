@@ -62,44 +62,62 @@ module TransitionFx =
       Attrs = (match t >= 0.5 with true -> new'.Attrs | false -> old.Attrs)
       _pad = 0us }
 
-  let applyColorMorph (t: float) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
-    for row in 0 .. height - 1 do
-      for col in 0 .. width - 1 do
-        let idx = row * width + col
+  /// Extract cells from the given area of buf into an area-sized array (row-major, area-relative indices).
+  /// Used to pre-slice both snapshot and current before calling TransitionFx functions so all
+  /// reads use simple area-relative indexing (row * area.Width + col).
+  let extractArea (area: Area) (buf: Buffer) : PackedCell array =
+    let cells = Array.zeroCreate (area.Width * area.Height)
+    for row in 0 .. area.Height - 1 do
+      let srcRow = area.Y + row
+      match srcRow < buf.Height with
+      | false -> ()
+      | true ->
+        for col in 0 .. area.Width - 1 do
+          let srcCol = area.X + col
+          match srcCol < buf.Width with
+          | false -> ()
+          | true ->
+            cells.[row * area.Width + col] <- buf.Cells.[srcRow * buf.Width + srcCol]
+    cells
+
+  let applyColorMorph (t: float) (snapshot: PackedCell array) (current: PackedCell array) (area: Area) (buf: Buffer) =
+    for row in 0 .. area.Height - 1 do
+      for col in 0 .. area.Width - 1 do
+        let idx = row * area.Width + col
         match idx < snapshot.Length && idx < current.Length with
         | true ->
           let cell = lerpCell t snapshot.[idx] current.[idx]
-          buf.Cells.[(offset + row) * buf.Width + col] <- cell
+          buf.Cells.[(area.Y + row) * buf.Width + (area.X + col)] <- cell
         | false -> ()
 
-  let applyFade (t: float) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
+  let applyFade (t: float) (current: PackedCell array) (area: Area) (buf: Buffer) =
     let defaultFg = PackedColor.pack Default
-    for row in 0 .. height - 1 do
-      for col in 0 .. width - 1 do
-        let idx = row * width + col
+    for row in 0 .. area.Height - 1 do
+      for col in 0 .. area.Width - 1 do
+        let idx = row * area.Width + col
         match idx < current.Length with
         | true ->
           let cell = current.[idx]
           let faded = { cell with
                           Fg = lerpPackedColor t defaultFg cell.Fg
                           Bg = lerpPackedColor t 0 cell.Bg }
-          buf.Cells.[(offset + row) * buf.Width + col] <- faded
+          buf.Cells.[(area.Y + row) * buf.Width + (area.X + col)] <- faded
         | false -> ()
 
-  let applyWipe (t: float) (dir: Direction) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
-    for row in 0 .. height - 1 do
-      for col in 0 .. width - 1 do
-        let idx = row * width + col
+  let applyWipe (t: float) (dir: Direction) (snapshot: PackedCell array) (current: PackedCell array) (area: Area) (buf: Buffer) =
+    for row in 0 .. area.Height - 1 do
+      for col in 0 .. area.Width - 1 do
+        let idx = row * area.Width + col
         let revealed =
           match dir with
-          | Direction.Right -> float (col + 1) / float (max 1 width) <= t
-          | Direction.Left -> float (width - col) / float (max 1 width) <= t
-          | Direction.Down -> float (row + 1) / float (max 1 height) <= t
-          | Direction.Up -> float (height - row) / float (max 1 height) <= t
+          | Direction.Right -> float (col + 1) / float (max 1 area.Width) <= t
+          | Direction.Left -> float (area.Width - col) / float (max 1 area.Width) <= t
+          | Direction.Down -> float (row + 1) / float (max 1 area.Height) <= t
+          | Direction.Up -> float (area.Height - row) / float (max 1 area.Height) <= t
         match idx < snapshot.Length && idx < current.Length with
         | true ->
           let cell = match revealed with true -> current.[idx] | false -> snapshot.[idx]
-          buf.Cells.[(offset + row) * buf.Width + col] <- cell
+          buf.Cells.[(area.Y + row) * buf.Width + (area.X + col)] <- cell
         | false -> ()
 
   let fisherYatesShuffle (seed: int) (n: int) =
@@ -112,88 +130,88 @@ module TransitionFx =
       arr.[j] <- tmp
     arr
 
-  let applyDissolve (t: float) (shuffleOrder: int array) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
+  let applyDissolve (t: float) (shuffleOrder: int array) (snapshot: PackedCell array) (current: PackedCell array) (area: Area) (buf: Buffer) =
     let revealCount = int (float shuffleOrder.Length * t)
-    for row in 0 .. height - 1 do
-      for col in 0 .. width - 1 do
-        let idx = row * width + col
+    for row in 0 .. area.Height - 1 do
+      for col in 0 .. area.Width - 1 do
+        let idx = row * area.Width + col
         match idx < snapshot.Length && idx < current.Length && idx < shuffleOrder.Length with
         | true ->
           let revealed = shuffleOrder.[idx] < revealCount
           let cell = match revealed with true -> current.[idx] | false -> snapshot.[idx]
-          buf.Cells.[(offset + row) * buf.Width + col] <- cell
+          buf.Cells.[(area.Y + row) * buf.Width + (area.X + col)] <- cell
         | false -> ()
 
   /// SlideIn: new content enters from the given direction, sliding to its final position.
   /// The new content is shifted and clips into the area as t advances from 0 to 1.
   /// At t=0 the area shows the snapshot; at t=1 it shows the new content fully in place.
-  let applySlideIn (t: float) (dir: Direction) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
-    for row in 0 .. height - 1 do
-      for col in 0 .. width - 1 do
-        let idx = row * width + col
+  let applySlideIn (t: float) (dir: Direction) (snapshot: PackedCell array) (current: PackedCell array) (area: Area) (buf: Buffer) =
+    for row in 0 .. area.Height - 1 do
+      for col in 0 .. area.Width - 1 do
+        let idx = row * area.Width + col
         match idx < snapshot.Length && idx < current.Length with
         | true ->
           let cell =
             match dir with
             | Direction.Right ->
               // Content enters from the right; at t, the left portion (shift cols) still shows snapshot.
-              let shift = int (float width * (1.0 - t))
+              let shift = int (float area.Width * (1.0 - t))
               match col < shift with
               | true  -> snapshot.[idx]
               | false ->
-                let srcIdx = row * width + (col - shift)
+                let srcIdx = row * area.Width + (col - shift)
                 match srcIdx < current.Length with
                 | true  -> current.[srcIdx]
                 | false -> snapshot.[idx]
             | Direction.Left ->
               // Content enters from the left; at t, right portion shows snapshot.
-              let visible = int (float width * t)
-              let shift   = width - visible
+              let visible = int (float area.Width * t)
+              let shift   = area.Width - visible
               match col >= visible with
               | true  -> snapshot.[idx]
               | false ->
-                let srcIdx = row * width + (col + shift)
+                let srcIdx = row * area.Width + (col + shift)
                 match srcIdx < current.Length with
                 | true  -> current.[srcIdx]
                 | false -> snapshot.[idx]
             | Direction.Down ->
               // Content enters from below; top rows still show snapshot.
-              let shift = int (float height * (1.0 - t))
+              let shift = int (float area.Height * (1.0 - t))
               match row < shift with
               | true  -> snapshot.[idx]
               | false ->
-                let srcIdx = (row - shift) * width + col
+                let srcIdx = (row - shift) * area.Width + col
                 match srcIdx < current.Length with
                 | true  -> current.[srcIdx]
                 | false -> snapshot.[idx]
             | Direction.Up ->
               // Content enters from above; bottom rows still show snapshot.
-              let visible = int (float height * t)
-              let shift   = height - visible
+              let visible = int (float area.Height * t)
+              let shift   = area.Height - visible
               match row >= visible with
               | true  -> snapshot.[idx]
               | false ->
-                let srcIdx = (row + shift) * width + col
+                let srcIdx = (row + shift) * area.Width + col
                 match srcIdx < current.Length with
                 | true  -> current.[srcIdx]
                 | false -> snapshot.[idx]
-          buf.Cells.[(offset + row) * buf.Width + col] <- cell
+          buf.Cells.[(area.Y + row) * buf.Width + (area.X + col)] <- cell
         | false -> ()
 
   /// Grow: new content expands outward from the center using Chebyshev distance.
   /// At t=0 only the center is visible; at t=1 the full area is revealed.
   /// For even-dimensioned areas no cell is at distance 0, so at t=0 the whole area shows snapshot.
   /// For odd-dimensioned areas the single center cell has distance 0 and IS revealed at t=0.
-  let applyGrow (t: float) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
-    let cx = float width  * 0.5
-    let cy = float height * 0.5
+  let applyGrow (t: float) (snapshot: PackedCell array) (current: PackedCell array) (area: Area) (buf: Buffer) =
+    let cx = float area.Width  * 0.5
+    let cy = float area.Height * 0.5
     // maxR = max(cx,cy) + 0.5: guarantees the farthest corner is covered at t=1.
     // The farthest corner's Chebyshev dist from the float center = max(cx-0.5, cy-0.5) < max(cx,cy)+0.5.
     let maxR = max cx cy + 0.5
     let r = maxR * t
-    for row in 0 .. height - 1 do
-      for col in 0 .. width - 1 do
-        let idx = row * width + col
+    for row in 0 .. area.Height - 1 do
+      for col in 0 .. area.Width - 1 do
+        let idx = row * area.Width + col
         match idx < snapshot.Length && idx < current.Length with
         | true ->
           // Chebyshev distance from cell centre to area centre
@@ -203,18 +221,19 @@ module TransitionFx =
             match max dx dy <= r with
             | true  -> current.[idx]
             | false -> snapshot.[idx]
-          buf.Cells.[(offset + row) * buf.Width + col] <- cell
+          buf.Cells.[(area.Y + row) * buf.Width + (area.X + col)] <- cell
         | false -> ()
 
   /// Applies a user-supplied cell-level transition function.
   /// The function receives (t, col, row, beforeCell, afterCell) and returns the blended cell.
-  let applyCustom (t: float) (f: float -> int -> int -> PackedCell -> PackedCell -> PackedCell) (snapshot: PackedCell array) (current: PackedCell array) (offset: int) (width: int) (height: int) (buf: Buffer) =
-    for row in 0 .. height - 1 do
-      for col in 0 .. width - 1 do
-        let idx = row * width + col
+  /// col and row are area-relative (0-indexed from the keyed element's top-left corner).
+  let applyCustom (t: float) (f: float -> int -> int -> PackedCell -> PackedCell -> PackedCell) (snapshot: PackedCell array) (current: PackedCell array) (area: Area) (buf: Buffer) =
+    for row in 0 .. area.Height - 1 do
+      for col in 0 .. area.Width - 1 do
+        let idx = row * area.Width + col
         match idx < snapshot.Length && idx < current.Length with
         | true ->
-          buf.Cells.[(offset + row) * buf.Width + col] <- f t col row snapshot.[idx] current.[idx]
+          buf.Cells.[(area.Y + row) * buf.Width + (area.X + col)] <- f t col row snapshot.[idx] current.[idx]
         | false -> ()
 
 module TransitionDuration =
