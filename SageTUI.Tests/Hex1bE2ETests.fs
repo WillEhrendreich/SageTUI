@@ -16,7 +16,7 @@ let private ensureHex1bCaptureSupported () =
 
 let private counterSpec =
   { WorkingDirectory = Path.Combine(repoRoot, "examples", "Counter")
-    FileName = builtProjectExecutable @"examples\Counter" "Counter"
+    FileName = builtProjectExecutable (Path.Combine("examples", "Counter")) "Counter"
     Arguments = []
     Environment =
       Map.ofList
@@ -26,7 +26,7 @@ let private counterSpec =
 
 let private interactiveFormSpec =
   { WorkingDirectory = Path.Combine(repoRoot, "samples", "04-InteractiveForm")
-    FileName = builtProjectExecutable @"samples\04-InteractiveForm" "InteractiveForm"
+    FileName = builtProjectExecutable (Path.Combine("samples", "04-InteractiveForm")) "InteractiveForm"
     Arguments = []
     Environment =
       Map.ofList

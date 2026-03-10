@@ -33,5 +33,6 @@
   </Folder>
   <Project Path="SageTUI.Html/SageTUI.Html.fsproj" />
   <Project Path="SageTUI.Library.fsproj" />
+  <Project Path="SageTUI.Templates.fsproj" />
   <Project Path="SageTUI.Tests\SageTUI.Tests.fsproj" />
 </Solution>

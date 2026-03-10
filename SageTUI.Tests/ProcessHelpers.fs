@@ -169,13 +169,21 @@ let findSinglePackage (directory: string) (prefix: string) =
   |> Array.exactlyOne
 
 let builtProjectExecutable (relativeProjectDir: string) (assemblyName: string) =
-  let projectDir = Path.Combine(repoRoot, relativeProjectDir)
+  // Normalize path separators for cross-platform compatibility.
+  // Callers may use Windows backslash literals (@"examples\Counter") which fail on macOS/Linux.
+  let normalized =
+    relativeProjectDir.Replace('\\', Path.DirectorySeparatorChar)
+  let projectDir = Path.Combine(repoRoot, normalized)
   let binDir = Path.Combine(projectDir, "bin")
 
   let exePath =
     match Directory.Exists(binDir) with
     | true ->
-      Directory.GetFiles(binDir, $"{assemblyName}.exe", SearchOption.AllDirectories)
+      // .NET on Windows produces AppName.exe; on Linux/macOS produces AppName (no extension).
+      // Search both patterns so tests work cross-platform.
+      [| $"{assemblyName}.exe"; assemblyName |]
+      |> Array.collect (fun pattern ->
+        Directory.GetFiles(binDir, pattern, SearchOption.AllDirectories))
       |> Array.sortByDescending File.GetLastWriteTimeUtc
       |> Array.tryHead
     | false -> None
@@ -184,7 +192,7 @@ let builtProjectExecutable (relativeProjectDir: string) (assemblyName: string) =
   | Some path -> path
   | None ->
     failtestf
-      "Could not locate built executable %s.exe under %s. Ensure the project is referenced by the test project so it is built before test execution."
+      "Could not locate built executable %s(.exe) under %s. Ensure the project is referenced by the test project so it is built before test execution."
       assemblyName
       binDir
 
