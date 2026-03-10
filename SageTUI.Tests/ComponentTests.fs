@@ -18,9 +18,10 @@ let counterProgram : Program<int, CounterMsg> =
       | Inc -> count + 1, Cmd.none
       | Dec -> (max 0 (count - 1)), Cmd.none
     View = fun count -> El.text (string count)
-    Subscribe = fun _ -> [] }
+    Subscribe = fun _ -> []
+    OnError = None }
 
-type OuterModel = { Counter: int; Name: string }
+type OuterModel= { Counter: int; Name: string }
 
 let counterLens : Lens<OuterModel, int> =
   { Get = fun m -> m.Counter
@@ -35,9 +36,10 @@ let modalProgram : Program<ModalModel, CounterMsg> =
       | Inc -> { model with Count = model.Count + 1 }, Cmd.none
       | Dec -> { model with Count = max 0 (model.Count - 1) }, Cmd.none
     View = fun model -> El.text (sprintf "[%s:%d]" model.Title model.Count)
-    Subscribe = fun _ -> [] }
+    Subscribe = fun _ -> []
+    OnError = None }
 
-type ModalOuter = { Modal: ModalModel option; Status: string }
+type ModalOuter= { Modal: ModalModel option; Status: string }
 
 let modalPrism : Prism<ModalOuter, ModalModel> =
   { TryGet = fun m -> m.Modal

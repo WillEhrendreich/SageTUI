@@ -413,7 +413,8 @@ let program : Program<Model, Msg> =
   { Init = init
     Update = update
     View = view
-    Subscribe = fun _ -> [ keyBindings; TimerSub("tick", TimeSpan.FromMilliseconds(500.0), fun () -> Tick) ] }
+    Subscribe = fun _ -> [ keyBindings; TimerSub("tick", TimeSpan.FromMilliseconds(500.0), fun () -> Tick) ]
+    OnError = None }
 
 [<EntryPoint>]
 let main _ = App.run program; 0

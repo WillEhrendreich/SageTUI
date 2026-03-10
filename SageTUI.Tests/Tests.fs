@@ -1,5 +1,7 @@
 module SageTUI.Tests
 
+open System
+open System.Threading
 open System.Text
 open Expecto
 open Expecto.Flip
@@ -1858,6 +1860,7 @@ let programTests = testList "Program" [
         | QuitApp -> (model, Cmd.quit)
       View = fun model -> El.text (sprintf "Count: %d" model)
       Subscribe = fun _ -> []
+      OnError = None
     }
     let (initModel, initCmd) = counterProgram.Init()
     initModel |> Expect.equal "init" 0
@@ -1875,6 +1878,7 @@ let programTests = testList "Program" [
       Update = fun _ m -> (m, Cmd.none)
       View = fun model -> El.text model
       Subscribe = fun _ -> []
+      OnError = None
     }
     match prog.View "test" with
     | Text("test", _) -> ()
@@ -1889,6 +1893,7 @@ let programTests = testList "Program" [
         match active with
         | true -> [TimerSub("tick", System.TimeSpan.FromSeconds(1.0), fun () -> "tick")]
         | false -> []
+      OnError = None
     }
     prog.Subscribe false |> List.length |> Expect.equal "no subs" 0
     prog.Subscribe true |> List.length |> Expect.equal "one sub" 1
@@ -1903,6 +1908,7 @@ let programTests = testList "Program" [
         | QuitApp -> (model, Cmd.quit)
       View = fun m -> El.text (string m)
       Subscribe = fun _ -> []
+      OnError = None
     }
     let states = Program.simulate [Increment; Increment; Decrement] prog
     states |> List.length |> Expect.equal "3 states" 3
@@ -1915,6 +1921,7 @@ let programTests = testList "Program" [
       Update = fun _ m -> (m, Cmd.none)
       View = fun _ -> Empty
       Subscribe = fun _ -> []
+      OnError = None
     }
     Program.simulate [] prog |> Expect.isEmpty "empty states"
 
@@ -1927,6 +1934,7 @@ let programTests = testList "Program" [
         | _ -> (model, Cmd.none)
       View = fun _ -> Empty
       Subscribe = fun _ -> []
+      OnError = None
     }
     let states = Program.simulate [Increment; Increment; Increment] prog
     let models = states |> List.map fst
@@ -1941,6 +1949,7 @@ let programTests = testList "Program" [
         | _ -> (m, Cmd.none)
       View = fun m -> El.text (string m)
       Subscribe = fun _ -> []
+      OnError = None
     }
     // Parent model is (string * int) — wraps child int as second field
     let mapped: MappedProgram<string * int, CounterMsg, CounterMsg> =
@@ -2312,6 +2321,7 @@ let private counterProgram2 : Program<int, CounterMsg2> = {
       | KeyChar 'q' -> Some Quit2
       | _ -> None)
   ]
+  OnError = None
 }
 
 let appRunTests = testList "App.run" [
@@ -2379,6 +2389,7 @@ let cmdInterpretTests = testList "Cmd interpret" [
         | false -> (updated, Cmd.none)
       View = fun model -> El.text (sprintf "%d msgs" model.Length)
       Subscribe = fun _ -> []
+      OnError = None
     }
     let backend, _ = TestBackend.create 20 1 []
     App.runWithBackend backend prog
@@ -2392,12 +2403,13 @@ let cmdInterpretTests = testList "Cmd interpret" [
         | _ -> (model, Cmd.none)
       View = fun _ -> El.text "waiting"
       Subscribe = fun _ -> []
+      OnError = None
     }
     let backend, _ = TestBackend.create 20 1 []
     App.runWithBackend backend prog
 ]
 
-let cmdExtendedTests = testList "Cmd extended" [
+let cmdExtendedTests= testList "Cmd extended" [
   testCase "ofMsg dispatches immediately" <| fun () ->
     let prog: Program<string, string> = {
       Init = fun () -> ("init", Cmd.ofMsg "hello")
@@ -2407,6 +2419,7 @@ let cmdExtendedTests = testList "Cmd extended" [
         | _ -> ("unknown", Cmd.quit)
       View = fun model -> El.text model
       Subscribe = fun _ -> []
+      OnError = None
     }
     let backend, _ = TestBackend.create 20 1 []
     App.runWithBackend backend prog
@@ -2423,6 +2436,7 @@ let cmdExtendedTests = testList "Cmd extended" [
         | false -> ("unexpected", Cmd.quit)
       View = fun model -> El.text model
       Subscribe = fun _ -> []
+      OnError = None
     }
     let backend, _ = TestBackend.create 30 1 []
     App.runWithBackend backend prog
@@ -2440,6 +2454,7 @@ let cmdExtendedTests = testList "Cmd extended" [
         | false -> ("unexpected", Cmd.quit)
       View = fun model -> El.text model
       Subscribe = fun _ -> []
+      OnError = None
     }
     let backend, _ = TestBackend.create 30 1 []
     App.runWithBackend backend prog
@@ -2533,6 +2548,7 @@ let keysBindTests = testList "Keys.bind" [
       Subscribe = fun _ -> [
         Keys.bind [ Key.Char (System.Text.Rune 'j'), "inc" ]
       ]
+      OnError = None
     }
     let events = [
       TerminalEvent.KeyPressed(Key.Char (System.Text.Rune 'j'), Modifiers.None)
@@ -2550,6 +2566,7 @@ let programMapTests = testList "Program.map" [
       Update = fun _ m -> (m, Cmd.none)
       View = fun m -> El.text (sprintf "%d" m)
       Subscribe = fun _ -> []
+      OnError = None
     }
     let mapped =
       Program.map
@@ -2569,6 +2586,7 @@ let programMapTests = testList "Program.map" [
         | _ -> (m, Cmd.none)
       View = fun m -> El.text (sprintf "%d" m)
       Subscribe = fun _ -> []
+      OnError = None
     }
     let mapped =
       Program.map
@@ -2585,6 +2603,7 @@ let programMapTests = testList "Program.map" [
       Update = fun _ m -> (m, Cmd.none)
       View = fun m -> El.text (sprintf "child:%d" m)
       Subscribe = fun _ -> []
+      OnError = None
     }
     let mapped =
       Program.map
@@ -2605,6 +2624,7 @@ let programMapTests = testList "Program.map" [
       Subscribe = fun _ -> [
         Keys.bind [ Key.Char (System.Text.Rune 'j'), "inc" ]
       ]
+      OnError = None
     }
     let mapped =
       Program.map
@@ -2637,6 +2657,7 @@ let subscriptionTests2 = testList "Subscriptions" [
         match model < 3 with
         | true -> [TimerSub("ticker", System.TimeSpan.FromMilliseconds(10.0), fun () -> "tick")]
         | false -> []
+      OnError = None
     }
     let backend, _ = TestBackend.create 20 1 []
     App.runWithBackend backend prog
@@ -2657,6 +2678,7 @@ let eventDispatchTests = testList "Event dispatch" [
           | KeyChar 'q' -> Some "quit"
           | _ -> None)
       ]
+      OnError = None
     }
     let events = [
       KeyPressed(Key.Char (System.Text.Rune 'x'), Modifiers.None)
@@ -2681,6 +2703,7 @@ let eventDispatchTests = testList "Event dispatch" [
           | KeyChar 'q' -> Some "quit"
           | _ -> None)
       ]
+      OnError = None
     }
     let events = [
       Resized(120, 50)
@@ -3787,6 +3810,7 @@ let renderGuardTests = testList "Render guard" [
         incr viewCount
         El.text (string m)
       Subscribe = fun _ -> [ Keys.bind [Key.Escape, RGQuit] ]
+      OnError = None
     }
     App.runWithBackend backend prog
     (!viewCount, 0) |> Expect.isGreaterThan "View called at least once"
@@ -3815,6 +3839,7 @@ let renderGuardTests = testList "Render guard" [
           Key.Escape, RGQuit
         ]
       ]
+      OnError = None
     }
     App.runWithBackend backend prog
     (viewModels.Count, 0) |> Expect.isGreaterThan "model changed at least once"
@@ -3847,6 +3872,7 @@ let renderGuardTests = testList "Render guard" [
           Key.Escape, RGQuit
         ]
       ]
+      OnError = None
     }
     App.runWithBackend backend prog
     // View was called with model=0 (initial) and model=1 (after RGTick)
@@ -4374,6 +4400,7 @@ let allTests = testList "All" [
           Update = fun () m -> m, Cmd.none
           View = fun _ -> El.text "hello"
           Subscribe = fun _ -> []
+          OnError = None
         }
         let themed = Theme.forProgram Theme.dark prog
         match themed.View 0 with
@@ -4391,6 +4418,7 @@ let allTests = testList "All" [
           Update = fun msg m -> m + msg, Cmd.none
           View = fun m -> El.text (string m)
           Subscribe = fun _ -> []
+          OnError = None
         }
         let themed = Theme.forProgram Theme.nord prog
         let initModel, _ = themed.Init()
@@ -4404,6 +4432,7 @@ let allTests = testList "All" [
           Update = fun () m -> m, Cmd.none
           View = fun _ -> El.text "original"
           Subscribe = fun _ -> []
+          OnError = None
         }
         let mutable capturedTheme : Theme option = None
         let themedView (t: Theme) (m: int) =
@@ -4422,6 +4451,7 @@ let allTests = testList "All" [
           Update = fun () m -> m, Cmd.none
           View = fun _ -> El.text "x"
           Subscribe = fun m -> [ Keys.bind [Key.Escape, ()] ]
+          OnError = None
         }
         let prog2 = Theme.withThemedView Theme.catppuccin (fun _ m -> El.text (string m)) prog
         prog2.Subscribe 0 |> Expect.hasLength "subscribe preserved" 1
@@ -4577,10 +4607,11 @@ let sprint36RunInlineTests =
         { Init = fun () -> (), NoCmd
           Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View = fun () -> El.text "hello"
-          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ] }
+          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ]
+          OnError = None }
       App.runInlineWith AppConfig.defaults 3 true backend program
       let output = getOutput()
-      // alt-screen sequences NOT present (enterAltScreen = ESC[?1049h)
+      // alt-screen sequences NOT present(enterAltScreen = ESC[?1049h)
       output.Contains("\x1b[?1049h") |> Expect.isFalse "no altscreen enter sequence"
       // hello rendered into cells
       output |> Expect.stringContains "hello in output" "hello"
@@ -4593,10 +4624,11 @@ let sprint36RunInlineTests =
         { Init = fun () -> (), NoCmd
           Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View = fun () -> El.text "bye"
-          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ] }
+          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ]
+          OnError = None }
       App.runInlineWith AppConfig.defaults 3 true backend program
       let output = getOutput()
-      // clearToEol = ESC[K produced during clearInlineArea on exit
+      // clearToEol = ESC[Kproduced during clearInlineArea on exit
       output |> Expect.stringContains "clearToEol in exit path" "\x1b[K"
 
     testCase "model renders correctly in inline buffer" <| fun () ->
@@ -4614,7 +4646,8 @@ let sprint36RunInlineTests =
               El.text "line-one"
               El.text "line-two"
             ]
-          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ] }
+          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ]
+          OnError = None }
       App.runInlineWith AppConfig.defaults 5 false backend program
       let output = getOutput()
       output |> Expect.stringContains "line-one in output" "line-one"
@@ -4630,7 +4663,8 @@ let sprint36RunInlineTests =
           View = fun () -> El.text "resized"
           Subscribe = fun _ ->
             [ KeySub (fun (k,_) -> Some k)
-              ResizeSub (fun _ -> None) ] }
+              ResizeSub (fun _ -> None) ]
+          OnError = None }
       // Should not throw; resize is handled by clearing + re-rendering
       App.runInlineWith AppConfig.defaults 3 true backend program
       let output = getOutput()
@@ -4647,7 +4681,8 @@ let sprint36RunInlineTests =
         { Init = fun () -> (), NoCmd
           Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View = fun () -> El.text "ok"
-          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ] }
+          Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ]
+          OnError = None }
       App.runInlineWith AppConfig.defaults 2 true backend program
       let output = getOutput()
       output |> Expect.stringContains "ok in output" "ok"
@@ -4703,7 +4738,8 @@ let sprint37CmdSemanticTests =
           View = fun count ->
             rendered.Add(count)
             El.text (sprintf "count=%d" count)
-          Subscribe = fun _ -> [] }
+          Subscribe = fun _ -> []
+          OnError = None }
       App.runInlineWith AppConfig.defaults 3 true backend program
       // model should have been 42 when rendered (after DirectMsg was processed)
       rendered |> Seq.exists (fun v -> v = 42) |> Expect.isTrue "42 rendered"
@@ -4720,7 +4756,8 @@ let sprint37CmdSemanticTests =
           View = fun model ->
             msgs.Add(model |> String.concat "")
             El.text (model |> String.concat "")
-          Subscribe = fun _ -> [] }
+          Subscribe = fun _ -> []
+          OnError = None }
       App.runInlineWith AppConfig.defaults 2 true backend program
       // All three messages should have been processed
       msgs |> Seq.exists (fun s -> s = "abc") |> Expect.isTrue "abc rendered"
@@ -4742,7 +4779,8 @@ let sprint37ResizeFixTests =
           View = fun () -> El.text "after-resize"
           Subscribe = fun _ ->
             [ KeySub (fun (k,_) -> Some k)
-              ResizeSub (fun _ -> None) ] }
+              ResizeSub (fun _ -> None) ]
+          OnError = None }
       App.runInlineWith AppConfig.defaults 3 true backend program
       // Should complete without exception; after resize content should still render
       let output = getOutput()
@@ -4760,7 +4798,8 @@ let sprint37ResizeFixTests =
           View = fun () -> El.text "x"
           Subscribe = fun _ ->
             [ KeySub (fun (k,_) -> Some k)
-              ResizeSub (fun _ -> None) ] }
+              ResizeSub (fun _ -> None) ]
+          OnError = None }
       App.runInlineWith AppConfig.defaults 3 true backend program
       getOutput() |> Expect.stringContains "x in output" "x"
   ]
@@ -4777,7 +4816,8 @@ let sprint37InlineResultTests =
             | 99 -> 99, NoCmd
             | _ -> model, Quit 0
           View = fun m -> El.text (string m)
-          Subscribe = fun _ -> [] }
+          Subscribe = fun _ -> []
+          OnError = None }
       let result = App.runInlineResult 5 (fun m -> if m = 99 then Some m else None) program
       result |> Expect.equal "got 99" (Some 99)
 
@@ -4787,7 +4827,8 @@ let sprint37InlineResultTests =
         { Init = fun () -> (), Cmd.ofMsg Key.Escape
           Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View = fun () -> El.text "nothing"
-          Subscribe = fun _ -> [] }
+          Subscribe = fun _ -> []
+          OnError = None }
       let result : int option = App.runInlineResult 2 (fun () -> None) program
       result |> Expect.equal "none" None
   ]
@@ -4809,7 +4850,8 @@ let sprint39AppConfigTests =
             let n' = n + 1
             n', if n' < 10 then Cmd.ofMsg n' else Quit 0
           View = fun _ -> El.empty
-          Subscribe = fun _ -> [] }
+          Subscribe = fun _ -> []
+          OnError = None }
       let run () = App.runInlineWith config 3 false backend program |> ignore
       run |> Expect.throwsT<System.Exception> "guard fires before 10k"
 
@@ -4822,7 +4864,8 @@ let sprint39AppConfigTests =
             let n' = n + 1
             n', if n' < 5 then Cmd.ofMsg n' else Quit 0
           View = fun _ -> El.empty
-          Subscribe = fun _ -> [] }
+          Subscribe = fun _ -> []
+          OnError = None }
       App.runInlineWith config 3 false backend program |> ignore
       // If we get here without exception, the test passes
       ()
@@ -5395,6 +5438,7 @@ let sprint45MouseTrackingSubTests = testList "Sprint 45: mouse tracking sub auto
       View = fun () -> El.text "mouse test"
       // KeySub needed so Escape dispatches; MouseSub triggers enableMouseTracking
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); MouseSub (fun _ -> None) ]
+      OnError = None
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5412,6 +5456,7 @@ let sprint45MouseTrackingSubTests = testList "Sprint 45: mouse tracking sub auto
       View = fun () -> El.text "mouse test"
       // KeySub needed so Escape dispatches; MouseSub triggers enableMouseTracking
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); MouseSub (fun _ -> None) ]
+      OnError = None
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5426,6 +5471,7 @@ let sprint45MouseTrackingSubTests = testList "Sprint 45: mouse tracking sub auto
         match msg with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
       View = fun () -> El.text "no mouse"
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
+      OnError = None
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5569,6 +5615,7 @@ let sprint46AppWiringTests = testList "Sprint 46: App PasteSub wiring" [
         | _ -> (), NoCmd
       View = fun () -> El.text "paste test"
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); PasteSub (fun _ -> None) ]
+      OnError = None
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5585,6 +5632,7 @@ let sprint46AppWiringTests = testList "Sprint 46: App PasteSub wiring" [
         | _ -> (), NoCmd
       View = fun () -> El.text "paste test"
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); PasteSub (fun _ -> None) ]
+      OnError = None
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5599,6 +5647,7 @@ let sprint46AppWiringTests = testList "Sprint 46: App PasteSub wiring" [
         match msg with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
       View = fun () -> El.text "no paste"
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
+      OnError = None
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -8400,6 +8449,424 @@ let sprint61Tests =
   testList "Sprint 61" [
     sprint61CmdFunctorTests
     sprint61SubFunctorTests
+  ]
+
+// ─── Sprint 62: Complete Sub.map coverage ───────────────────────────────────
+let sprint62SubMapTests = testList "Sub.map functor laws (Sprint 62 — full coverage)" [
+  // MouseSub
+  test "MouseSub identity: map id preserves handler result" {
+    let ev : MouseEvent = { Button = LeftButton; X = 5; Y = 3; Modifiers = Modifiers.None; Phase = Pressed }
+    let baseSub : Sub<MouseEvent> = MouseSub(fun e -> Some e)
+    let mapped = Sub.map id baseSub
+    let result =
+      match mapped with
+      | MouseSub h -> h ev
+      | _ -> None
+    result |> Expect.equal "identity preserves MouseEvent" (Some ev)
+  }
+
+  test "MouseSub transform: map extracts x coordinate" {
+    let ev : MouseEvent = { Button = LeftButton; X = 42; Y = 3; Modifiers = Modifiers.None; Phase = Pressed }
+    let baseSub : Sub<MouseEvent> = MouseSub(fun e -> Some e)
+    let mapped = Sub.map (fun (e: MouseEvent) -> e.X) baseSub
+    let result =
+      match mapped with
+      | MouseSub h -> h ev
+      | _ -> None
+    result |> Expect.equal "x = 42" (Some 42)
+  }
+
+  test "MouseSub None propagation: map f over None result stays None" {
+    let ev : MouseEvent = { Button = LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Released }
+    let baseSub : Sub<int> = MouseSub(fun _ -> None)
+    let mapped = Sub.map (fun x -> x + 1) baseSub
+    let result =
+      match mapped with
+      | MouseSub h -> h ev
+      | _ -> Some 99
+    result |> Expect.equal "None stays None" None
+  }
+
+  // ClickSub
+  test "ClickSub identity: map id preserves handler result" {
+    let ev : MouseEvent = { Button = LeftButton; X = 10; Y = 5; Modifiers = Modifiers.None; Phase = Pressed }
+    let baseSub : Sub<string option> = ClickSub(fun (_, key) -> Some key)
+    let mapped = Sub.map id baseSub
+    let result =
+      match mapped with
+      | ClickSub h -> h (ev, Some "panel")
+      | _ -> None
+    result |> Expect.equal "identity preserves click key" (Some (Some "panel"))
+  }
+
+  test "ClickSub transform: extract key from click" {
+    let ev : MouseEvent = { Button = LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    let baseSub : Sub<string option> = ClickSub(fun (_, k) -> Some k)
+    let mapped = Sub.map (Option.defaultValue "none") baseSub
+    let result =
+      match mapped with
+      | ClickSub h -> h (ev, Some "btn")
+      | _ -> None
+    result |> Expect.equal "key = btn" (Some "btn")
+  }
+
+  // DragSub
+  test "DragSub identity: map id preserves MouseEvent" {
+    let ev : MouseEvent = { Button = LeftButton; X = 20; Y = 10; Modifiers = Modifiers.None; Phase = Motion }
+    let baseSub : Sub<MouseEvent> = DragSub(fun e -> Some e)
+    let mapped = Sub.map id baseSub
+    let result =
+      match mapped with
+      | DragSub h -> h ev
+      | _ -> None
+    result |> Expect.equal "drag identity" (Some ev)
+  }
+
+  test "DragSub transform: map extracts position tuple" {
+    let ev : MouseEvent = { Button = LeftButton; X = 7; Y = 13; Modifiers = Modifiers.None; Phase = Motion }
+    let baseSub : Sub<MouseEvent> = DragSub(fun e -> Some e)
+    let mapped = Sub.map (fun (e: MouseEvent) -> (e.X, e.Y)) baseSub
+    let result =
+      match mapped with
+      | DragSub h -> h ev
+      | _ -> None
+    result |> Expect.equal "position = (7,13)" (Some (7, 13))
+  }
+
+  // TerminalFocusSub
+  test "TerminalFocusSub identity: map id preserves bool result" {
+    let baseSub : Sub<bool> = TerminalFocusSub(fun gained -> Some gained)
+    let mapped = Sub.map id baseSub
+    let result =
+      match mapped with
+      | TerminalFocusSub h -> h true
+      | _ -> None
+    result |> Expect.equal "focused=true preserved" (Some true)
+  }
+
+  test "TerminalFocusSub transform: bool to string" {
+    let baseSub : Sub<bool> = TerminalFocusSub(fun g -> Some g)
+    let mapped = Sub.map (fun b -> if b then "focused" else "blurred") baseSub
+    let gained =
+      match mapped with
+      | TerminalFocusSub h -> h true
+      | _ -> None
+    let lost =
+      match mapped with
+      | TerminalFocusSub h -> h false
+      | _ -> None
+    gained |> Expect.equal "gain → focused" (Some "focused")
+    lost   |> Expect.equal "lose → blurred" (Some "blurred")
+  }
+
+  test "TerminalFocusSub None: filter focus-lost events" {
+    let baseSub : Sub<string> = TerminalFocusSub(fun gained -> if gained then Some "got focus" else None)
+    let mapped = Sub.map (fun s -> s + "!") baseSub
+    let gained = match mapped with | TerminalFocusSub h -> h true  | _ -> None
+    let lost   = match mapped with | TerminalFocusSub h -> h false | _ -> None
+    gained |> Expect.equal "gain → Some" (Some "got focus!")
+    lost   |> Expect.equal "lose → None" None
+  }
+
+  // PasteSub
+  test "PasteSub identity: map id preserves pasted text" {
+    let baseSub : Sub<string> = PasteSub(fun t -> Some t)
+    let mapped = Sub.map id baseSub
+    let result =
+      match mapped with
+      | PasteSub h -> h "hello world"
+      | _ -> None
+    result |> Expect.equal "paste identity" (Some "hello world")
+  }
+
+  test "PasteSub transform: map string to length" {
+    let baseSub : Sub<string> = PasteSub(fun t -> Some t)
+    let mapped = Sub.map (fun (s: string) -> s.Length) baseSub
+    let result =
+      match mapped with
+      | PasteSub h -> h "abc"
+      | _ -> None
+    result |> Expect.equal "length = 3" (Some 3)
+  }
+
+  // FocusSub
+  test "FocusSub identity: map id preserves FocusDirection" {
+    let baseSub : Sub<FocusDirection> = FocusSub(fun dir -> Some dir)
+    let mapped = Sub.map id baseSub
+    let next = match mapped with | FocusSub h -> h FocusNext | _ -> None
+    let prev = match mapped with | FocusSub h -> h FocusPrev | _ -> None
+    next |> Expect.equal "FocusNext preserved" (Some FocusNext)
+    prev |> Expect.equal "FocusPrev preserved" (Some FocusPrev)
+  }
+
+  test "FocusSub transform: map to bool (true=next)" {
+    let baseSub : Sub<FocusDirection> = FocusSub(fun d -> Some d)
+    let mapped = Sub.map (fun d -> d = FocusNext) baseSub
+    let next = match mapped with | FocusSub h -> h FocusNext | _ -> None
+    let prev = match mapped with | FocusSub h -> h FocusPrev | _ -> None
+    next |> Expect.equal "next → true"  (Some true)
+    prev |> Expect.equal "prev → false" (Some false)
+  }
+
+  // TimerSub — note: tick is unit -> 'msg, NOT option
+  test "TimerSub identity: map id wraps unit→msg handler, id preserved" {
+    let baseSub : Sub<int> = TimerSub("refresh", TimeSpan.FromMilliseconds(200.0), fun () -> 42)
+    let mapped = Sub.map id baseSub
+    let (id, interval, result) =
+      match mapped with
+      | TimerSub(id, iv, tick) -> id, iv, tick ()
+      | _ -> "", TimeSpan.Zero, -1
+    id       |> Expect.equal "id preserved" "refresh"
+    interval |> Expect.equal "interval preserved" (TimeSpan.FromMilliseconds(200.0))
+    result   |> Expect.equal "tick id" 42
+  }
+
+  test "TimerSub transform: map tick result" {
+    let baseSub : Sub<int> = TimerSub("poll", TimeSpan.FromSeconds(1.0), fun () -> 10)
+    let mapped = Sub.map (fun n -> n * 3) baseSub
+    let (id, result) =
+      match mapped with
+      | TimerSub(id, _, tick) -> id, tick ()
+      | _ -> "", -1
+    id     |> Expect.equal "id preserved" "poll"
+    result |> Expect.equal "10*3=30" 30
+  }
+
+  test "TimerSub composition: map (f >> g) = map f >> map g" {
+    let baseSub : Sub<int> = TimerSub("x", TimeSpan.FromMilliseconds(50.0), fun () -> 5)
+    let f (n: int) = n + 1
+    let g (n: int) = n * 2
+    let direct   = Sub.map (f >> g) baseSub
+    let composed = Sub.map g (Sub.map f baseSub)
+    let invoke sub = match sub with TimerSub(_, _, tick) -> tick () | _ -> -1
+    invoke direct |> Expect.equal "composition law" (invoke composed)
+  }
+
+  // FrameTimingsSub — note: toMsg is FrameTimings -> 'msg, NOT option
+  test "FrameTimingsSub identity: map id preserves timings record" {
+    let timings = { FrameTimings.empty with RenderMs = 1.5; DiffMs = 0.3; ChangedCells = 42 }
+    let baseSub : Sub<FrameTimings> = FrameTimingsSub(fun t -> t)
+    let mapped = Sub.map id baseSub
+    let result =
+      match mapped with
+      | FrameTimingsSub toMsg -> toMsg timings
+      | _ -> FrameTimings.empty
+    result |> Expect.equal "timings preserved" timings
+  }
+
+  test "FrameTimingsSub transform: extract total ms" {
+    let timings = { FrameTimings.empty with TotalMs = 16.7 }
+    let baseSub : Sub<FrameTimings> = FrameTimingsSub(fun t -> t)
+    let mapped = Sub.map (fun t -> t.TotalMs) baseSub
+    let result =
+      match mapped with
+      | FrameTimingsSub toMsg -> toMsg timings
+      | _ -> -1.0
+    result |> Expect.equal "totalMs = 16.7" 16.7
+  }
+
+  test "FrameTimingsSub composition: map (f >> g) = map f >> map g" {
+    let timings = { FrameTimings.empty with ChangedCells = 10 }
+    let baseSub : Sub<FrameTimings> = FrameTimingsSub(id)
+    let f (t: FrameTimings) = t.ChangedCells
+    let g (n: int) = $"cells:{n}"
+    let direct   = Sub.map (f >> g) baseSub
+    let composed = Sub.map g (Sub.map f baseSub)
+    let invoke sub = match sub with FrameTimingsSub toMsg -> toMsg timings | _ -> "err"
+    invoke direct |> Expect.equal "composition law" (invoke composed)
+  }
+
+  // CustomSub — dispatch-style, map wraps the dispatch function
+  test "CustomSub: map wraps dispatch transformer, id preserved" {
+    let mutable dispatched : int list = []
+    let baseSub : Sub<int> =
+      CustomSub("worker", fun dispatch _ct -> async {
+        dispatch 7
+      })
+    let mapped = Sub.map (fun n -> n * 10) baseSub
+    let (id, runner) =
+      match mapped with
+      | CustomSub(id, start) -> id, start
+      | _ -> "", fun _ _ -> async { () }
+    id |> Expect.equal "id preserved" "worker"
+    // Verify the dispatch wrapper applies f: invoke start with a capturing dispatch
+    runner (fun msg -> dispatched <- msg :: dispatched) CancellationToken.None
+    |> Async.RunSynchronously
+    dispatched |> Expect.equal "7 * 10 = 70 dispatched" [70]
+  }
+
+  // Composition laws for option-returning variants (property-based)
+  testProperty "MouseSub composition: map (f>>g) = map f >> map g" <| fun (x: int) ->
+    let ev : MouseEvent = { Button = LeftButton; X = x % 100; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    let baseSub : Sub<int> = MouseSub(fun e -> Some (abs e.X))
+    let f (n: int) = n + 1
+    let g (n: int) = n * 2
+    let direct   = Sub.map (f >> g) baseSub
+    let composed = Sub.map g (Sub.map f baseSub)
+    let invoke sub = match sub with MouseSub h -> h ev | _ -> None
+    invoke direct = invoke composed
+
+  testProperty "PasteSub composition: map (f>>g) = map f >> map g" <| fun (s: string) ->
+    let input = if isNull s then "" else s
+    let baseSub : Sub<string> = PasteSub(fun t -> Some t)
+    let f (t: string) = t.Length
+    let g (n: int) = n > 0
+    let direct   = Sub.map (f >> g) baseSub
+    let composed = Sub.map g (Sub.map f baseSub)
+    let invoke sub = match sub with PasteSub h -> h input | _ -> None
+    invoke direct = invoke composed
+]
+
+// ─── Sprint 62: Program.onError ─────────────────────────────────────────────
+let sprint62ProgramOnErrorTests = testList "Program.onError (Sprint 62)" [
+  test "Program record includes OnError field defaulting to None" {
+    let prog : Program<int, string> = {
+      Init      = fun () -> (0, NoCmd)
+      Update    = fun _ m -> (m, NoCmd)
+      View      = fun _ -> El.text ""
+      Subscribe = fun _ -> []
+      OnError   = None
+    }
+    prog.OnError |> Expect.isNone "default None"
+  }
+
+  test "Program.withOnError sets handler on record" {
+    let handler (ex: exn) = Some $"error: {ex.Message}"
+    let prog : Program<int, string> = {
+      Init      = fun () -> (0, NoCmd)
+      Update    = fun _ m -> (m, NoCmd)
+      View      = fun _ -> El.text ""
+      Subscribe = fun _ -> []
+      OnError   = None
+    }
+    let prog2 = Program.withOnError handler prog
+    prog2.OnError |> Expect.isSome "handler installed"
+  }
+
+  test "Program.withOnError: installed handler invoked with exception" {
+    let mutable captured : exn option = None
+    let handler (ex: exn) =
+      captured <- Some ex
+      None
+    let prog : Program<int, string> = {
+      Init      = fun () -> (0, NoCmd)
+      Update    = fun _ m -> (m, NoCmd)
+      View      = fun _ -> El.text ""
+      Subscribe = fun _ -> []
+      OnError   = None
+    }
+    let prog2 = Program.withOnError handler prog
+    let ex = System.Exception("boom")
+    prog2.OnError |> Option.iter (fun h -> h ex |> ignore)
+    captured |> Option.map (fun e -> e.Message) |> Expect.equal "exception captured" (Some "boom")
+  }
+
+  test "Program.withOnError handler can return a recovery message" {
+    let handler (ex: exn) : string option = Some $"Recovered from: {ex.Message}"
+    let prog : Program<int, string> = {
+      Init      = fun () -> (0, NoCmd)
+      Update    = fun _ m -> (m, NoCmd)
+      View      = fun _ -> El.text ""
+      Subscribe = fun _ -> []
+      OnError   = None
+    }
+    let prog2 = Program.withOnError handler prog
+    let result =
+      prog2.OnError
+      |> Option.bind (fun h -> h (System.Exception("oops")))
+    result |> Expect.equal "recovery msg" (Some "Recovered from: oops")
+  }
+
+  test "Program.withOnError handler returning None signals crash intent" {
+    let handler (_: exn) : string option = None
+    let prog : Program<int, string> = {
+      Init      = fun () -> (0, NoCmd)
+      Update    = fun _ m -> m, NoCmd
+      View      = fun _ -> El.text ""
+      Subscribe = fun _ -> []
+      OnError   = None
+    }
+    let prog2 = Program.withOnError handler prog
+    let result = prog2.OnError |> Option.bind (fun h -> h (System.Exception()))
+    result |> Expect.equal "None = crash" None
+  }
+
+  test "Two withOnError calls: last one wins (not chained)" {
+    let h1 (_: exn) : string option = Some "h1"
+    let h2 (_: exn) : string option = Some "h2"
+    let prog : Program<int, string> = {
+      Init      = fun () -> (0, NoCmd)
+      Update    = fun _ m -> m, NoCmd
+      View      = fun _ -> El.text ""
+      Subscribe = fun _ -> []
+      OnError   = None
+    }
+    let result =
+      prog
+      |> Program.withOnError h1
+      |> Program.withOnError h2
+    result.OnError
+    |> Option.bind (fun h -> h (System.Exception()))
+    |> Expect.equal "last handler wins" (Some "h2")
+  }
+]
+
+// ─── Sprint 62: Cmd.debounce ─────────────────────────────────────────────────
+let sprint62CmdDebounceTests = testList "Cmd.debounce (Sprint 62)" [
+  test "Cmd.debounce wraps msg in OfCancellableAsync" {
+    let debounced = Cmd.debounce "search" 300 99
+    match debounced with
+    | OfCancellableAsync(id, _) -> id |> Expect.equal "id = search" "search"
+    | _ -> failtest "Expected OfCancellableAsync"
+  }
+
+  test "Cmd.debounce: zero delay wraps with correct id" {
+    let debounced = Cmd.debounce "noop" 0 "x"
+    match debounced with
+    | OfCancellableAsync(id, _) -> id |> Expect.equal "id = noop" "noop"
+    | _ -> failtest "Expected OfCancellableAsync"
+  }
+
+  test "Cmd.debounce: distinct ids produce distinct cancellable subs" {
+    let d1 = Cmd.debounce "a" 50 1
+    let d2 = Cmd.debounce "b" 50 2
+    let id1 = match d1 with OfCancellableAsync(id,_) -> id | _ -> ""
+    let id2 = match d2 with OfCancellableAsync(id,_) -> id | _ -> ""
+    (id1 = id2) |> Expect.equal "distinct ids" false
+  }
+
+  testAsync "Cmd.debounce: dispatches message after delay (not cancelled)" {
+    let mutable msgs : int list = []
+    let dispatch (msg: int) = msgs <- msg :: msgs
+    let debounced = Cmd.debounce "test" 10 42
+    match debounced with
+    | OfCancellableAsync(_, run) ->
+      do! run CancellationToken.None dispatch
+      msgs |> Expect.equal "message dispatched" [42]
+    | _ -> failtest "Expected OfCancellableAsync"
+  }
+
+  testAsync "Cmd.debounce: cancellation token cancels before dispatch" {
+    let mutable msgs : int list = []
+    let dispatch (msg: int) = msgs <- msg :: msgs
+    use cts = new CancellationTokenSource()
+    let debounced = Cmd.debounce "cancel-test" 500 99
+    match debounced with
+    | OfCancellableAsync(_, run) ->
+      cts.CancelAfter(10)
+      try do! run cts.Token dispatch
+      with :? OperationCanceledException -> ()
+      msgs |> Expect.equal "cancelled = no dispatch" []
+    | _ -> failtest "Expected OfCancellableAsync"
+  }
+]
+
+[<Tests>]
+let sprint62Tests =
+  testList "Sprint 62" [
+    sprint62SubMapTests
+    sprint62ProgramOnErrorTests
+    sprint62CmdDebounceTests
   ]
 
 [<Tests>]

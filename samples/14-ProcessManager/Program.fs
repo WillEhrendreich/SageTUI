@@ -306,6 +306,7 @@ let main _ =
     { Init      = init
       Update    = update
       View      = view
-      Subscribe = subscribe }
+      Subscribe = subscribe
+      OnError = None }
   App.run program
   0

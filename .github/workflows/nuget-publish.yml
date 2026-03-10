@@ -1,10 +1,15 @@
 name: NuGet Publish
 
-# Publishes the SageTUI NuGet package when a version tag is pushed.
-# Tag format: v0.1.0, v1.0.0-beta.1, etc.
+# Publishes the SageTUI NuGet packages when a version tag is pushed.
+# Tag format: v0.9.0, v1.0.0-beta.1, etc.
 #
 # Prerequisites:
 #   - Set NUGET_API_KEY as a GitHub Actions secret in the repository settings.
+#
+# Packages published:
+#   - SageTUI          (core library, zero external deps)
+#   - SageTUI.Templates (dotnet new templates)
+#   - SageTUI.Html     (optional HTML/CSS add-on, preview)
 #
 # Security model:
 #   - Uses id-token: write + contents: read only.
@@ -31,6 +36,7 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
 
       - name: Extract version from tag
         id: version
@@ -48,7 +54,7 @@ jobs:
       - name: Test
         run: dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -c Release
 
-      - name: Pack
+      - name: Pack — Library
         run: >
           dotnet pack SageTUI.Library.fsproj
           --no-build
@@ -56,14 +62,32 @@ jobs:
           -o ./artifacts
           /p:Version=${{ steps.version.outputs.VERSION }}
 
-      - name: Verify package was created
+      - name: Pack — Templates
+        run: >
+          dotnet pack SageTUI.Templates.fsproj
+          --no-build
+          -c Release
+          -o ./artifacts
+          /p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Pack — Html (preview)
+        run: >
+          dotnet pack SageTUI.Html/SageTUI.Html.fsproj
+          --no-build
+          -c Release
+          -o ./artifacts
+
+      - name: Verify packages were created
         run: |
-          PKG=$(ls ./artifacts/SageTUI.*.nupkg 2>/dev/null | head -1)
-          if [ -z "$PKG" ]; then
-            echo "ERROR: No .nupkg found in ./artifacts"
-            exit 1
-          fi
-          echo "Package: $PKG"
+          for pkg in SageTUI SageTUI.Templates SageTUI.Html; do
+            FOUND=$(ls ./artifacts/${pkg}.*.nupkg 2>/dev/null | head -1)
+            if [ -z "$FOUND" ]; then
+              echo "ERROR: No .nupkg found for $pkg in ./artifacts"
+              ls ./artifacts/ || true
+              exit 1
+            fi
+            echo "Found: $FOUND"
+          done
 
       - name: Push to NuGet.org
         run: >
@@ -72,9 +96,9 @@ jobs:
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 
-      - name: Upload package artifact
+      - name: Upload package artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nuget-package-${{ steps.version.outputs.VERSION }}
+          name: nuget-packages-${{ steps.version.outputs.VERSION }}
           path: ./artifacts/*.nupkg
           if-no-files-found: error

@@ -78,7 +78,8 @@ let program : Program<Model, Msg> =
   { Init = init
     Update = update
     View = view
-    Subscribe = fun _ -> [ keyBindings ] }
+    Subscribe = fun _ -> [ keyBindings ]
+    OnError = None }
 
 [<EntryPoint>]
 let main _ = App.run program; 0

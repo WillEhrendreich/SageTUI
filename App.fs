@@ -321,10 +321,18 @@ module App =
           drainCount <- drainCount + 1
           if drainCount > config.MaxDrainMessages then
             failwith (sprintf "[SageTUI] Message drain loop exceeded %d messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains." config.MaxDrainMessages)
-          let newModel, cmd = program.Update msg model
-          model <- newModel
-          modelChanged <- true
-          interpretCmd cmd
+          try
+            let newModel, cmd = program.Update msg model
+            model <- newModel
+            modelChanged <- true
+            interpretCmd cmd
+          with ex ->
+            match program.OnError with
+            | Some handler ->
+              match handler ex with
+              | Some recoveryMsg -> dispatch recoveryMsg
+              | None -> reraise()
+            | None -> reraise()
 
         match modelChanged with
         | true ->
@@ -634,7 +642,7 @@ module App =
     (update: 'msg -> 'model -> 'model * Cmd<'msg>)
     (view: 'model -> Element)
     : Program<'model, 'msg> =
-    { Init = init; Update = update; View = view; Subscribe = fun _ -> [] }
+    { Init = init; Update = update; View = view; Subscribe = (fun _ -> []); OnError = None }
 
   /// Display a static element. Press Escape to quit.
   let display (view: unit -> Element) =
@@ -643,7 +651,8 @@ module App =
         Update = fun msg () ->
           match msg with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
         View = fun () -> view ()
-        Subscribe = fun _ -> [KeySub (fun (k, _) -> Some k)] }
+        Subscribe = fun _ -> [KeySub (fun (k, _) -> Some k)]
+        OnError = None }
     run program
 
   /// Run a program inline below the current cursor position (no alt-screen).
@@ -843,10 +852,18 @@ module App =
           drainCount <- drainCount + 1
           if drainCount > config.MaxDrainMessages then
             failwith (sprintf "[SageTUI] Message drain loop exceeded %d messages in one frame. Possible Cmd.ofMsg cycle detected. Check your Update function for infinite message chains." config.MaxDrainMessages)
-          let newModel, cmd = program.Update msg model
-          model <- newModel
-          modelChanged <- true
-          interpretCmd cmd
+          try
+            let newModel, cmd = program.Update msg model
+            model <- newModel
+            modelChanged <- true
+            interpretCmd cmd
+          with ex ->
+            match program.OnError with
+            | Some handler ->
+              match handler ex with
+              | Some recoveryMsg -> dispatch recoveryMsg
+              | None -> reraise()
+            | None -> reraise()
 
         match modelChanged with
         | true ->

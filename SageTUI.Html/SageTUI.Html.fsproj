@@ -4,7 +4,25 @@
     <TargetFramework>net10.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>SageTUI.Html</PackageId>
+    <Version>0.1.0-preview</Version>
+    <Authors>Will Ehrendreich</Authors>
+    <Copyright>Copyright © 2025 Will Ehrendreich</Copyright>
+    <Description>HTML/CSS layout engine add-on for SageTUI. Parse HTML markup and render it as terminal UI elements using SageTUI's flexbox layout engine. Depends on AngleSharp and Falco.Markup.</Description>
+    <PackageTags>fsharp;tui;terminal;html;css;sagetui;elm-architecture;layout</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>0.1.0-preview: Initial preview. HTML/CSS layout parsing via AngleSharp, rendered into SageTUI Element trees. API is not yet stable.</PackageReleaseNotes>
+    <RepositoryUrl>https://github.com/WillEhrendreich/SageTUI</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/WillEhrendreich/SageTUI</PackageProjectUrl>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <Compile Include="CssTypes.fs" />

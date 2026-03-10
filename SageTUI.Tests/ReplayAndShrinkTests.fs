@@ -18,9 +18,10 @@ let counterProgram : Program<CounterModel, CounterMsg> =
       | Dec   -> { model with Count = model.Count - 1 }, Cmd.none
       | Reset -> { Count = 0 }, Cmd.none
     View    = fun model -> El.text (sprintf "Count: %d" model.Count)
-    Subscribe = fun _ -> [] }
+    Subscribe = fun _ -> []
+    OnError = None }
 
-// ── Testing.replaySession ────────────────────────────────────────────────────
+// ── Testing.replaySession────────────────────────────────────────────────────
 
 let replaySessionTests = testList "Testing.replaySession" [
   test "empty sequence leaves model at init state" {
@@ -161,7 +162,8 @@ let keyCounterProgram : Program<CounterModel, KeyCounterMsg> =
       | KeyReset -> { Count = 0 }, Cmd.none
       | KeyQuit  -> model, Cmd.quitWith 0
     View    = fun model -> El.text (sprintf "Count: %d" model.Count)
-    Subscribe = fun _ -> [ bindings ] }
+    Subscribe = fun _ -> [ bindings ]
+    OnError = None }
 
 let routeTerminalEventTests = testList "Testing.routeTerminalEvent" [
   test "KeyPressed routes to KeySub handler" {
@@ -287,7 +289,8 @@ let mouseProgram : Program<MouseModel, MouseMsg> =
         DragSub   (fun me         -> Some (Dragged   (me.X, me.Y)))
         MouseSub  (fun me -> match me.Phase with
                              | MousePhase.Released -> Some (MouseReleased (me.X, me.Y))
-                             | _ -> None) ] }
+                             | _ -> None) ]
+    OnError = None }
 
 let mousePipelineTests = testList "E2E: mouse pipeline (ClickSub / DragSub / MouseSub)" [
   test "clickAt fires ClickSub with correct coordinates" {

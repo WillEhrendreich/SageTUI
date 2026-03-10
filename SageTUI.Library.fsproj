@@ -8,12 +8,14 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>SageTUI</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>SageTUI Contributors</Authors>
-    <Description>Build beautiful terminal UIs in F# — Elm Architecture, flexbox layout, 17+ widgets, SIMD rendering, zero dependencies.</Description>
-    <PackageTags>fsharp;tui;terminal;elm-architecture;functional;simd;layout;cli</PackageTags>
+    <Version>0.9.0</Version>
+    <Authors>Will Ehrendreich</Authors>
+    <Copyright>Copyright © 2025 Will Ehrendreich</Copyright>
+    <Description>F# terminal UI library. Elm Architecture (TEA/MVU), flexbox layout engine, 17+ widgets, SIMD-accelerated rendering, zero runtime dependencies.</Description>
+    <PackageTags>fsharp;tui;terminal;elm-architecture;tea;mvu;functional;simd;layout;cli;widgets</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>0.9.0: Complete Elm Architecture (TEA/MVU) with 17+ widgets, SIMD-accelerated double-buffered rendering, flexbox layout engine, Program.OnError error boundaries, Sub.map coverage across all 11 subscription variants, VirtualList, FuzzyFinder, Viewport, Chart, Toast, theme system, template package, and 2,544 tests.</PackageReleaseNotes>
     <RepositoryUrl>https://github.com/WillEhrendreich/SageTUI</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/WillEhrendreich/SageTUI</PackageProjectUrl>

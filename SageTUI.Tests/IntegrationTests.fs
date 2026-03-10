@@ -39,7 +39,8 @@ let counterProgram : Program<int, CounterMsg> =
         Key.Char (System.Text.Rune 'k'), Dec
         Key.Char (System.Text.Rune 'q'), QuitCounter
         Key.Escape, QuitCounter
-      ] ] }
+      ] ]
+    OnError = None }
 
 // ============================================================
 // COUNTER INTEGRATION TESTS
@@ -550,7 +551,8 @@ let kanbanProgram : Program<KanbanModel, KanbanMsg> =
         Key.Down, KDown
         Key.Char (System.Text.Rune ' '), KGrab
         Key.Char (System.Text.Rune 'q'), KQuit
-      ] ] }
+      ] ]
+    OnError = None }
 
 let kanbanIntegrationTests =
   testList "Kanban" [
@@ -737,7 +739,8 @@ let formProgram : Program<FormModel, FormMsg> =
         | false -> El.empty
       ]
     Subscribe = fun _ ->
-      [ KeySub (fun (key, mods) -> Some (FormKey(key, mods))) ] }
+      [ KeySub (fun (key, mods) -> Some (FormKey(key, mods))) ]
+    OnError = None }
 
 let formIntegrationTests =
   testList "Form" [
@@ -839,9 +842,10 @@ let delayedProgram : Program<DelayedModel, DelayedMsg> =
       | Kick -> model, Cmd.delay 500 Triggered
       | Triggered -> Done, Cmd.none
     View = fun _ -> El.empty
-    Subscribe = fun _ -> [] }
+    Subscribe = fun _ -> []
+    OnError = None }
 
-type ChainMsg = StartChain | GotA | GotB
+type ChainMsg= StartChain | GotA | GotB
 type ChainModel = Idle | HaveA | HaveAB
 
 let chainProgram : Program<ChainModel, ChainMsg> =
@@ -852,9 +856,10 @@ let chainProgram : Program<ChainModel, ChainMsg> =
       | GotA -> HaveA, Cmd.delay 50 GotB
       | GotB -> HaveAB, Cmd.none
     View = fun _ -> El.empty
-    Subscribe = fun _ -> [] }
+    Subscribe = fun _ -> []
+    OnError = None }
 
-type TwinMsg = First | Second
+type TwinMsg= First | Second
 type TwinModel = { Fired: TwinMsg list }
 
 let twinDelayProgram : Program<TwinModel, TwinMsg> =
@@ -864,9 +869,10 @@ let twinDelayProgram : Program<TwinModel, TwinMsg> =
     Update = fun msg model ->
       { model with Fired = model.Fired @ [msg] }, Cmd.none
     View = fun _ -> El.empty
-    Subscribe = fun _ -> [] }
+    Subscribe = fun _ -> []
+    OnError = None }
 
-let pendingDelayTests =
+let pendingDelayTests=
   testList "PendingDelays" [
 
     test "Delay(500) from Update is NOT fired before advanceTime" {
@@ -900,7 +906,8 @@ let pendingDelayTests =
             | "done" -> model + 1, Cmd.none
             | _ -> model, Cmd.none
           View = fun _ -> El.empty
-          Subscribe = fun _ -> [] }
+          Subscribe = fun _ -> []
+          OnError = None }
       let app = TestHarness.init 40 10 immediateProgram |> TestHarness.sendMsg "kick"
       app.Model |> Expect.equal "fired synchronously" 1
       TestHarness.pendingDelayCount app |> Expect.equal "no pending delays" 0

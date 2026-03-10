@@ -513,12 +513,16 @@ module Undoable =
   let truncate (maxDepth: int) (m: UndoableModel<'model>) : UndoableModel<'model> =
     { m with Past = m.Past |> List.truncate maxDepth }
 
-/// The Elm Architecture program definition. Init/Update/View/Subscribe.
+/// The Elm Architecture program definition. Init/Update/View/Subscribe/OnError.
 type Program<'model, 'msg> = {
   Init: unit -> 'model * Cmd<'msg>
   Update: 'msg -> 'model -> 'model * Cmd<'msg>
   View: 'model -> Element
   Subscribe: 'model -> Sub<'msg> list
+  /// Optional error boundary. When set, exceptions thrown by Update are passed to this
+  /// handler. Return `Some msg` to dispatch a recovery message; return `None` to crash
+  /// (the default behaviour when this field is `None`).
+  OnError: (exn -> 'msg option) option
 }
 
 /// A pair of get/set functions forming a lawful lens from 'outer to 'inner.
@@ -646,6 +650,17 @@ module Program =
     msgs
     |> List.scan (fun (m, _) msg -> program.Update msg m) (initModel, initCmd)
     |> List.tail
+
+  /// Install an error boundary on a program. When the `Update` function throws,
+  /// `handler` is called with the exception. Return `Some msg` to dispatch a recovery
+  /// message and keep the app running; return `None` to re-throw and crash.
+  ///
+  /// The last call to `withOnError` wins — each call replaces the previous handler.
+  ///
+  /// Example:
+  ///   let program = { ... } |> Program.withOnError (fun ex -> Some (ErrorOccurred ex.Message))
+  let withOnError (handler: exn -> 'msg option) (program: Program<'model, 'msg>) : Program<'model, 'msg> =
+    { program with OnError = Some handler }
 
 /// A vocabulary type for asynchronous data loading states.
 /// The most commonly reinvented type in F# async applications — provided here so
