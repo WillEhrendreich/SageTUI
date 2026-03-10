@@ -7862,3 +7862,349 @@ let sprint57Tests =
     sprint57VirtualTableFilterTests
     sprint57ModalStackTests
   ]
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sprint 58 Tests — VirtualTable.createModel, ModalStack head=top fix,
+//                   ModalStack.routeSubs, FocusModel.focusId/removeId,
+//                   SplitPane float precision, TextInput widget
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let sprint58VirtualTableCreateModelTests =
+  testList "Sprint 58 - VirtualTable.createModel" [
+    testCase "VirtualTable.createModel with no filter returns all items" <| fun () ->
+      let cfg   = VirtualTable.create []
+      let items = [| "a"; "b"; "c" |]
+      let model = VirtualTable.createModel cfg items
+      model.Items |> Array.length |> Expect.equal "all items in model" 3
+
+    testCase "VirtualTable.createModel with filter returns only matching" <| fun () ->
+      let cfg =
+        (VirtualTable.create [] : VirtualTableConfig<string>)
+        |> VirtualTable.setFilter (fun (s: string) -> s.Length > 3)
+      let items = [| "hi"; "hello"; "world"; "ok" |]
+      let model = VirtualTable.createModel cfg items
+      model.Items |> Array.length |> Expect.equal "only long items" 2
+
+    testCase "VirtualTable.createModel applies sort after filter" <| fun () ->
+      let cols =
+        [ { Header = "Name"; Width = 10; Fill = false
+            Render  = El.text
+            SortKey = Some (fun (s: string) -> s :> System.IComparable) } ]
+      let cfg =
+        { VirtualTable.create cols with Sort = Some { Column = 0; Direction = Ascending } }
+        |> VirtualTable.setFilter (fun (s: string) -> s <> "banana")
+      let items = [| "cherry"; "apple"; "banana"; "avocado" |]
+      let model = VirtualTable.createModel cfg items
+      model.Items.[0] |> Expect.equal "first is apple (ascending, banana excluded)" "apple"
+      model.Items.[1] |> Expect.equal "second is avocado" "avocado"
+      model.Items.[2] |> Expect.equal "third is cherry" "cherry"
+
+    testCase "VirtualTable.createModel with empty filter result returns empty model" <| fun () ->
+      let cfg =
+        (VirtualTable.create [] : VirtualTableConfig<string>)
+        |> VirtualTable.setFilter (fun _ -> false)
+      let items = [| "a"; "b"; "c" |]
+      let model = VirtualTable.createModel cfg items
+      model.Items |> Array.length |> Expect.equal "no items match" 0
+
+    testCase "VirtualTable.createModel is canonical path — clearFilter restores all" <| fun () ->
+      let cfg =
+        (VirtualTable.create [] : VirtualTableConfig<string>)
+        |> VirtualTable.setFilter (fun (s: string) -> s = "x")
+        |> VirtualTable.clearFilter
+      let items = [| "a"; "b"; "c" |]
+      let model = VirtualTable.createModel cfg items
+      model.Items |> Array.length |> Expect.equal "all items after clearFilter" 3
+  ]
+
+let sprint58ModalStackHeadTopTests =
+  testList "Sprint 58 - ModalStack head=top convention" [
+    testCase "ModalStack.push: head of Layers is topmost (last pushed)" <| fun () ->
+      let stack =
+        ModalStack.empty
+        |> ModalStack.push (El.text "first")
+        |> ModalStack.push (El.text "second")
+      // head = top = "second"
+      match stack.Layers with
+      | [] -> failtest "should have layers"
+      | top :: _ ->
+        match top.Content with
+        | Text ("second", _) -> ()
+        | _ -> failtest "head should be the last-pushed element (top of stack)"
+
+    testCase "ModalStack.pop removes head (topmost)" <| fun () ->
+      let stack =
+        ModalStack.empty
+        |> ModalStack.push (El.text "first")
+        |> ModalStack.push (El.text "second")
+        |> ModalStack.pop
+      stack.Layers |> List.length |> Expect.equal "one layer remains" 1
+      match stack.Layers with
+      | [ layer ] ->
+        match layer.Content with
+        | Text ("first", _) -> ()
+        | _ -> failtest "remaining layer should be 'first'"
+      | _ -> failtest "unexpected"
+
+    testCase "ModalStack.top returns last-pushed element" <| fun () ->
+      let stack =
+        ModalStack.empty
+        |> ModalStack.push (El.text "a")
+        |> ModalStack.push (El.text "b")
+        |> ModalStack.push (El.text "c")
+      match ModalStack.top stack with
+      | Some (Text ("c", _)) -> ()
+      | _ -> failtest "top should be 'c'"
+
+    testCase "ModalStack.view renders base then layers bottom-to-top" <| fun () ->
+      let base' = El.text "base"
+      let stack =
+        ModalStack.empty
+        |> ModalStack.push (El.text "m1")
+        |> ModalStack.push (El.text "m2")
+      let el = ModalStack.view base' stack
+      match el with
+      | Overlay (b :: layers) ->
+        layers |> List.length |> Expect.equal "2 modal layers" 2
+        // Overlay order: base first, then bottom→top (m1, m2)
+        match layers.[0] with
+        | Text ("m1", _) -> ()
+        | _ -> failtest "first modal layer should be m1 (bottom)"
+        match layers.[1] with
+        | Text ("m2", _) -> ()
+        | _ -> failtest "second modal layer should be m2 (top)"
+      | _ -> failtest "should be Overlay"
+  ]
+
+let sprint58ModalRoutingTests =
+  testList "Sprint 58 - ModalStack.routeSubs event routing" [
+    testCase "ModalStack.routeSubs passes subs through when stack is empty" <| fun () ->
+      let fakeSub = KeySub(fun _ -> None)
+      let result = ModalStack.routeSubs ModalStack.empty [ fakeSub ]
+      result |> List.length |> Expect.equal "subs pass through when no modals" 1
+
+    testCase "ModalStack.routeSubs blocks subs when stack is non-empty" <| fun () ->
+      let fakeSub = KeySub(fun _ -> None)
+      let stack = ModalStack.empty |> ModalStack.push (El.text "modal")
+      let result = ModalStack.routeSubs stack [ fakeSub; fakeSub ]
+      result |> List.length |> Expect.equal "subs blocked when modal open" 0
+
+    testCase "ModalStack.routeSubs returns empty list for empty input" <| fun () ->
+      let result = ModalStack.routeSubs ModalStack.empty []
+      result |> List.length |> Expect.equal "empty subs → empty result" 0
+  ]
+
+let sprint58FocusModelCompleteTests =
+  testList "Sprint 58 - FocusModel.focusId + removeId" [
+    testCase "FocusModel.focusId sets focus to a valid id" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      let m2 = FocusModel.focusId "c" m
+      m2.Focused |> Expect.equal "should focus c" "c"
+
+    testCase "FocusModel.focusId is no-op for an id not in the list" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      let m2 = FocusModel.focusId "z" m
+      m2.Focused |> Expect.equal "focus unchanged for unknown id" "a"
+
+    testCase "FocusModel.focusId preserves Ids list" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      let m2 = FocusModel.focusId "b" m
+      m2.Ids |> Expect.equal "Ids unchanged" [ "a"; "b"; "c" ]
+
+    testCase "FocusModel.removeId returns None when removing last id" <| fun () ->
+      let m  = FocusModel.create [ "only" ]
+      FocusModel.removeId "only" m |> Expect.isNone "should return None"
+
+    testCase "FocusModel.removeId returns Some with id removed" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      let r  = FocusModel.removeId "b" m
+      r |> Expect.isSome "should return Some"
+      r.Value.Ids |> Expect.equal "b removed from ids" [ "a"; "c" ]
+
+    testCase "FocusModel.removeId auto-advances focus when focused id is removed" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      // focus is "a" (first), remove it → should advance to "b"
+      let r  = FocusModel.removeId "a" m
+      r.Value.Focused |> Expect.equal "focus advances to b" "b"
+
+    testCase "FocusModel.removeId preserves focus when a non-focused id is removed" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      // focus is "a", remove "c" → focus stays "a"
+      let r  = FocusModel.removeId "c" m
+      r.Value.Focused |> Expect.equal "focus stays a" "a"
+
+    testCase "FocusModel.removeId when last item removed and focused clamps to end" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      // focus on "c" (last), remove "c" → clamp to "b" (new last)
+      let m2 = FocusModel.focusId "c" m
+      let r  = FocusModel.removeId "c" m2
+      r.Value.Focused |> Expect.equal "focus clamps to b" "b"
+
+    testCase "FocusModel.removeId unknown id returns Some unchanged" <| fun () ->
+      let m = FocusModel.create [ "a"; "b" ]
+      let r = FocusModel.removeId "z" m
+      r |> Expect.isSome "should return Some (unknown id)"
+      r.Value.Ids |> Expect.equal "ids unchanged" [ "a"; "b" ]
+  ]
+
+let sprint58SplitPanePrecisionTests =
+  testList "Sprint 58 - SplitPane float precision" [
+    testCase "handleDragInBounds uses float math for narrow panes" <| fun () ->
+      // pane 10 wide, drag to position 3: should give 30%
+      let me = { Button = LeftButton; X = 3; Y = 5; Phase = Motion; Modifiers = Modifiers.None }
+      let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let m2 = SplitPane.handleDragInBounds 0 0 10 20 me m
+      m2.SplitPercent |> Expect.equal "30% for position 3 of 10" 30
+
+    testCase "handleDragInBounds position 1 of 10 gives 10%" <| fun () ->
+      let me = { Button = LeftButton; X = 1; Y = 0; Phase = Motion; Modifiers = Modifiers.None }
+      let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let m2 = SplitPane.handleDragInBounds 0 0 10 20 me m
+      m2.SplitPercent |> Expect.equal "10% for position 1 of 10" 10
+
+    testCase "handleDragInBounds position 5 of 10 gives 50%" <| fun () ->
+      let me = { Button = LeftButton; X = 5; Y = 0; Phase = Motion; Modifiers = Modifiers.None }
+      let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let m2 = SplitPane.handleDragInBounds 0 0 10 20 me m
+      m2.SplitPercent |> Expect.equal "50% for position 5 of 10" 50
+
+    testCase "handleDrag uses float math for large terminal" <| fun () ->
+      // drag to x=7 in a 100-wide terminal → should be 7%
+      let me = { Button = LeftButton; X = 7; Y = 0; Phase = Motion; Modifiers = Modifiers.None }
+      let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let m2 = SplitPane.handleDrag 100 50 me m
+      m2.SplitPercent |> Expect.equal "7% at x=7 of 100" 7
+  ]
+
+let sprint58TextInputTests =
+  testList "Sprint 58 - TextInput widget" [
+    testCase "TextInput.create produces empty model" <| fun () ->
+      let m = TextInput.create ()
+      m.Text            |> Expect.equal "empty text"  ""
+      m.Cursor          |> Expect.equal "cursor at 0"  0
+      m.SelectionAnchor |> Expect.isNone               "no selection"
+
+    testCase "TextInput.insert adds char at cursor" <| fun () ->
+      let m  = TextInput.create ()
+      let m2 = m |> TextInput.insert 'H'
+      let m3 = m2 |> TextInput.insert 'i'
+      m3.Text   |> Expect.equal "text is Hi"   "Hi"
+      m3.Cursor |> Expect.equal "cursor at end" 2
+
+    testCase "TextInput.insert mid-buffer inserts at cursor position" <| fun () ->
+      let m  = { TextInput.create () with Text = "hllo"; Cursor = 1 }
+      let m2 = m |> TextInput.insert 'e'
+      m2.Text   |> Expect.equal "hello" "hello"
+      m2.Cursor |> Expect.equal "cursor advances past inserted char" 2
+
+    testCase "TextInput.deleteBackward removes char before cursor" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello"; Cursor = 3 }
+      let m2 = m |> TextInput.deleteBackward
+      m2.Text   |> Expect.equal "helo" "helo"
+      m2.Cursor |> Expect.equal "cursor moves back" 2
+
+    testCase "TextInput.deleteBackward at start of buffer is no-op" <| fun () ->
+      let m  = { TextInput.create () with Text = "hi"; Cursor = 0 }
+      let m2 = m |> TextInput.deleteBackward
+      m2.Text   |> Expect.equal "unchanged" "hi"
+      m2.Cursor |> Expect.equal "cursor stays 0" 0
+
+    testCase "TextInput.deleteForward removes char after cursor" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello"; Cursor = 2 }
+      let m2 = m |> TextInput.deleteForward
+      m2.Text   |> Expect.equal "helo" "helo"
+      m2.Cursor |> Expect.equal "cursor stays 2" 2
+
+    testCase "TextInput.deleteForward at end of buffer is no-op" <| fun () ->
+      let m  = { TextInput.create () with Text = "hi"; Cursor = 2 }
+      let m2 = m |> TextInput.deleteForward
+      m2.Text   |> Expect.equal "unchanged" "hi"
+
+    testCase "TextInput.moveCursorLeft decrements cursor" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello"; Cursor = 3 }
+      let m2 = m |> TextInput.moveCursorLeft
+      m2.Cursor |> Expect.equal "cursor at 2" 2
+
+    testCase "TextInput.moveCursorLeft at 0 is no-op" <| fun () ->
+      let m  = { TextInput.create () with Text = "hi"; Cursor = 0 }
+      let m2 = m |> TextInput.moveCursorLeft
+      m2.Cursor |> Expect.equal "stays 0" 0
+
+    testCase "TextInput.moveCursorRight increments cursor" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello"; Cursor = 1 }
+      let m2 = m |> TextInput.moveCursorRight
+      m2.Cursor |> Expect.equal "cursor at 2" 2
+
+    testCase "TextInput.moveCursorRight at end is no-op" <| fun () ->
+      let m  = { TextInput.create () with Text = "hi"; Cursor = 2 }
+      let m2 = m |> TextInput.moveCursorRight
+      m2.Cursor |> Expect.equal "stays at end" 2
+
+    testCase "TextInput.moveToStart sets cursor to 0" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello"; Cursor = 4 }
+      let m2 = m |> TextInput.moveToStart
+      m2.Cursor |> Expect.equal "cursor at 0" 0
+
+    testCase "TextInput.moveToEnd sets cursor to text length" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello"; Cursor = 1 }
+      let m2 = m |> TextInput.moveToEnd
+      m2.Cursor |> Expect.equal "cursor at 5" 5
+
+    testCase "TextInput.selectAll sets selection to full text" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello"; Cursor = 2 }
+      let m2 = m |> TextInput.selectAll
+      TextInput.selectionRange m2 |> Expect.equal "selection is (0,5)" (Some (0, 5))
+      m2.Cursor |> Expect.equal "cursor at end" 5
+
+    testCase "TextInput.selectAll on empty text clears selection" <| fun () ->
+      let m  = TextInput.create ()
+      let m2 = m |> TextInput.selectAll
+      // Empty text: anchor=0, cursor=0 → selectionRange returns None (lo = hi)
+      TextInput.selectionRange m2 |> Expect.isNone "empty selection is None"
+
+    testCase "TextInput.clearSelection removes selection, cursor stays" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello"; Cursor = 5; SelectionAnchor = Some 0 }
+      let m2 = m |> TextInput.clearSelection
+      TextInput.selectionRange m2 |> Expect.isNone "selection cleared"
+      m2.Cursor |> Expect.equal "cursor preserved" 5
+
+    testCase "TextInput.getSelected returns selected substring" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello world"; Cursor = 5; SelectionAnchor = Some 0 }
+      m |> TextInput.getSelected |> Expect.equal "selected text" "hello"
+
+    testCase "TextInput.getSelected with None returns empty string" <| fun () ->
+      let m = { TextInput.create () with Text = "hello"; Cursor = 2 }
+      m |> TextInput.getSelected |> Expect.equal "no selection = empty" ""
+
+    testCase "TextInput.deleteBackward with selection deletes selected range" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello world"; Cursor = 5; SelectionAnchor = Some 0 }
+      let m2 = m |> TextInput.deleteBackward
+      m2.Text              |> Expect.equal "world remains" " world"
+      m2.Cursor            |> Expect.equal "cursor at lo"  0
+      m2.SelectionAnchor   |> Expect.isNone                "selection cleared"
+
+    testCase "TextInput.insert with selection replaces selection" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello"; Cursor = 5; SelectionAnchor = Some 0 }
+      let m2 = m |> TextInput.insert 'X'
+      m2.Text            |> Expect.equal "replaced with X" "X"
+      m2.Cursor          |> Expect.equal "cursor after X"  1
+      m2.SelectionAnchor |> Expect.isNone                  "selection cleared"
+
+    testCase "TextInput.view renders the text as an Element" <| fun () ->
+      let m  = { TextInput.create () with Text = "hello" }
+      let el = TextInput.view false m
+      match el with
+      | Empty -> failtest "view should not return Empty for non-empty text"
+      | _     -> ()
+  ]
+
+[<Tests>]
+let sprint58Tests =
+  testList "Sprint 58" [
+    sprint58VirtualTableCreateModelTests
+    sprint58ModalStackHeadTopTests
+    sprint58ModalRoutingTests
+    sprint58FocusModelCompleteTests
+    sprint58SplitPanePrecisionTests
+    sprint58TextInputTests
+  ]

@@ -1,4 +1,4 @@
-namespace SageTUI
+﻿namespace SageTUI
 
 open InputHelpers
 
@@ -519,6 +519,42 @@ module TextInput =
     | false ->
       viewThemed theme focused model
 
+  // ── Ergonomic API (Sprint 58) ──────────────────────────────────────────────
+
+  /// Create an empty TextInput. Alias for `empty`.
+  let create () = empty
+
+  /// Insert a single character at the cursor. If a selection is active, it is replaced first.
+  let insert (c: char) (m: TextInputModel) =
+    handleKeyWithSelection (Key.Char (System.Text.Rune c)) m
+
+  /// Delete the character before the cursor (Backspace). If a selection is active, deletes it.
+  let deleteBackward (m: TextInputModel) = handleKeyWithSelection Key.Backspace m
+
+  /// Delete the character after the cursor (Delete). If a selection is active, deletes it.
+  let deleteForward (m: TextInputModel) = handleKeyWithSelection Key.Delete m
+
+  /// Move the cursor one character to the left. Clears any active selection.
+  let moveCursorLeft  (m: TextInputModel) = handleKey Key.Left  m
+
+  /// Move the cursor one character to the right. Clears any active selection.
+  let moveCursorRight (m: TextInputModel) = handleKey Key.Right m
+
+  /// Move the cursor to the beginning of the text. Clears any active selection.
+  let moveToStart (m: TextInputModel) = handleKey Key.Home m
+
+  /// Move the cursor to the end of the text. Clears any active selection.
+  let moveToEnd (m: TextInputModel) = handleKey Key.End m
+
+  /// Clear the active selection without moving the cursor or changing the text.
+  let clearSelection (m: TextInputModel) = { m with SelectionAnchor = None }
+
+  /// Return the currently selected text, or an empty string when no selection is active.
+  let getSelected (m: TextInputModel) : string =
+    match selectionRange m with
+    | None          -> ""
+    | Some (lo, hi) -> m.Text.[lo..hi - 1]
+
 /// Tracks which item in a list currently has keyboard focus, with wrap-around navigation.
 type FocusRing<'a> = {
   Items: 'a list
@@ -616,6 +652,31 @@ module FocusModel =
   /// Create a FocusSub that dispatches an updated FocusModel on Tab/Shift+Tab.
   let focusSub (toMsg: FocusModel<'id> -> 'msg) (m: FocusModel<'id>) : Sub<'msg> =
     FocusSub (fun dir -> Some (toMsg (route dir m)))
+
+  /// Focus the given id directly. If the id is not in the model, returns the model unchanged.
+  let focusId (id: 'id) (m: FocusModel<'id>) : FocusModel<'id> =
+    match m.Ids |> List.contains id with
+    | true  -> { m with Focused = id }
+    | false -> m
+
+  /// Remove an id from the model.
+  /// Returns None if it was the last id.
+  /// If the removed id was focused, advances focus to the next id (clamped to end).
+  /// Otherwise returns Some with focus unchanged.
+  let removeId (id: 'id) (m: FocusModel<'id>) : FocusModel<'id> option =
+    match m.Ids |> List.contains id with
+    | false -> Some m
+    | true  ->
+      let remaining = m.Ids |> List.filter (fun x -> x <> id)
+      match remaining with
+      | [] -> None
+      | _  ->
+        match m.Focused = id with
+        | false -> Some { m with Ids = remaining }
+        | true  ->
+          let oldIdx = m.Ids |> List.findIndex (fun x -> x = id)
+          let newIdx = min oldIdx (remaining.Length - 1)
+          Some { Ids = remaining; Focused = remaining.[newIdx] }
 
 /// Dropdown selector widget with open/closed state and keyboard navigation.
 type SelectModel<'a> = {
@@ -1232,6 +1293,13 @@ module VirtualTable =
       | None   -> items
       | Some f -> items |> Array.filter f
     sortItems cfg.Columns cfg.Sort filtered
+
+  /// Create a VirtualListModel from a config and raw items array.
+  /// Applies filter and sort from the config, then wraps in a VirtualList.
+  /// This is the safe canonical constructor — filter + sort are always applied together.
+  /// Uses a default viewport height of 10; call `VirtualList.setViewport` to adjust.
+  let createModel (cfg: VirtualTableConfig<'a>) (items: 'a array) : VirtualListModel<'a> =
+    VirtualList.ofArray 10 (displayItems cfg items)
 
   let private sortIndicator(cfg: VirtualTableConfig<'a>) (colIdx: int) : string =
     match cfg.Sort with
@@ -2636,8 +2704,8 @@ module SplitPane =
     | Motion ->
       let pct =
         match m.Orientation with
-        | SplitHorizontal -> me.X * 100 / (max 1 termWidth)
-        | SplitVertical   -> me.Y * 100 / (max 1 termHeight)
+        | SplitHorizontal -> int (float me.X * 100.0 / float (max 1 termWidth))
+        | SplitVertical   -> int (float me.Y * 100.0 / float (max 1 termHeight))
       resize pct m
     | _ -> m
 
@@ -2658,8 +2726,8 @@ module SplitPane =
     | Motion ->
       let pct =
         match m.Orientation with
-        | SplitHorizontal -> (me.X - paneX) * 100 / (max 1 paneW)
-        | SplitVertical   -> (me.Y - paneY) * 100 / (max 1 paneH)
+        | SplitHorizontal -> int (float (me.X - paneX) * 100.0 / float (max 1 paneW))
+        | SplitVertical   -> int (float (me.Y - paneY) * 100.0 / float (max 1 paneH))
       resize pct m
     | _ -> m
 
@@ -3375,15 +3443,15 @@ module ModalStack =
   /// An empty stack with no layers.
   let empty : ModalStack = { Layers = [] }
 
-  /// Push a new modal layer on top of the stack (appended to end for LIFO access via `top`).
+  /// Push a new modal layer on top of the stack. Head is always the topmost layer (O(1)).
   let push (content: Element) (stack: ModalStack) : ModalStack =
-    { stack with Layers = stack.Layers @ [{ Content = content }] }
+    { stack with Layers = { Content = content } :: stack.Layers }
 
   /// Remove the topmost modal layer. If the stack is empty, returns the empty stack.
   let pop (stack: ModalStack) : ModalStack =
     match stack.Layers with
-    | [] -> stack
-    | ls -> { stack with Layers = ls |> List.rev |> List.tail |> List.rev }
+    | []     -> stack
+    | _ :: rest -> { stack with Layers = rest }
 
   /// Return true if the stack has no modal layers.
   let isEmpty (stack: ModalStack) : bool =
@@ -3391,12 +3459,21 @@ module ModalStack =
 
   /// Return the content element of the topmost modal, or None if the stack is empty.
   let top (stack: ModalStack) : Element option =
-    stack.Layers |> List.tryLast |> Option.map _.Content
+    stack.Layers |> List.tryHead |> Option.map _.Content
 
   /// Render the base element under all modal layers.
   /// With no layers, returns `baseEl` directly.
-  /// With one or more layers, returns `Overlay (baseEl :: [each layer content])`.
+  /// With one or more layers, renders layers in push order (bottom to top):
+  /// `Overlay (baseEl :: [oldest … newest])`.
   let view (baseEl: Element) (stack: ModalStack) : Element =
     match stack.Layers with
     | [] -> baseEl
-    | layers -> Overlay (baseEl :: (layers |> List.map _.Content))
+    | layers -> Overlay (baseEl :: (layers |> List.rev |> List.map _.Content))
+
+  /// Gate subscriptions based on whether any modal is open.
+  /// Returns `subs` unchanged when the stack is empty (no modal open).
+  /// Returns an empty list when any modal layer is present, blocking base-view subscriptions.
+  let routeSubs (stack: ModalStack) (subs: Sub<'msg> list) : Sub<'msg> list =
+    match stack.Layers with
+    | [] -> subs
+    | _  -> []
