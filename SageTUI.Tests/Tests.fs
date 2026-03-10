@@ -7270,3 +7270,218 @@ let sprint55Tests =
     sprint55ViewportEnhancedTests
     sprint55LineChartEnhancedTests
   ]
+
+// ── Sprint 56 — SplitPane drag, StatusBar, HelpOverlay, VirtualList multi-select ─────────────────
+
+let sprint56SplitPaneDragTests = testList "SplitPane drag" [
+  testCase "handleDrag Horizontal: X=50 in 100-wide terminal → SplitPercent=50" <| fun () ->
+    let m  = SplitPane.init SplitHorizontal 30 El.empty El.empty
+    let me : MouseEvent = { Button = LeftButton; X = 50; Y = 0; Modifiers = Modifiers.None; Phase = Motion }
+    SplitPane.handleDrag 100 50 me m
+    |> fun r -> r.SplitPercent |> Expect.equal "should be 50" 50
+
+  testCase "handleDrag Horizontal clamps X=0 to SplitPercent=1" <| fun () ->
+    let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+    let me : MouseEvent = { Button = LeftButton; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Motion }
+    SplitPane.handleDrag 100 50 me m
+    |> fun r -> r.SplitPercent |> Expect.equal "should clamp to 1" 1
+
+  testCase "handleDrag Horizontal clamps X≥termWidth to SplitPercent=99" <| fun () ->
+    let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+    let me : MouseEvent = { Button = LeftButton; X = 100; Y = 0; Modifiers = Modifiers.None; Phase = Motion }
+    SplitPane.handleDrag 100 50 me m
+    |> fun r -> r.SplitPercent |> Expect.equal "should clamp to 99" 99
+
+  testCase "handleDrag Vertical: Y=30 in 100-high terminal → SplitPercent=30" <| fun () ->
+    let m  = SplitPane.init SplitVertical 50 El.empty El.empty
+    let me : MouseEvent = { Button = LeftButton; X = 0; Y = 30; Modifiers = Modifiers.None; Phase = Motion }
+    SplitPane.handleDrag 100 100 me m
+    |> fun r -> r.SplitPercent |> Expect.equal "should be 30" 30
+
+  testCase "handleDrag ignores non-Motion phase (Pressed)" <| fun () ->
+    let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+    let me : MouseEvent = { Button = LeftButton; X = 20; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    SplitPane.handleDrag 100 50 me m
+    |> fun r -> r.SplitPercent |> Expect.equal "should be unchanged" 50
+
+  testCase "handleDrag ignores non-Motion phase (Released)" <| fun () ->
+    let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+    let me : MouseEvent = { Button = LeftButton; X = 20; Y = 0; Modifiers = Modifiers.None; Phase = Released }
+    SplitPane.handleDrag 100 50 me m
+    |> fun r -> r.SplitPercent |> Expect.equal "should be unchanged" 50
+
+  testCase "dragSub returns a DragSub" <| fun () ->
+    let m   = SplitPane.init SplitHorizontal 50 El.empty El.empty
+    let sub = SplitPane.dragSub 100 50 id m
+    match sub with
+    | DragSub _ -> ()
+    | _         -> failtest "expected DragSub"
+
+  testCase "dragSub fires on Motion event and updates SplitPercent" <| fun () ->
+    let m   = SplitPane.init SplitHorizontal 50 El.empty El.empty
+    let sub = SplitPane.dragSub 100 50 id m
+    let me : MouseEvent = { Button = LeftButton; X = 70; Y = 0; Modifiers = Modifiers.None; Phase = Motion }
+    match sub with
+    | DragSub handler ->
+      let result = handler me
+      result |> Expect.isSome "should fire message on Motion"
+      result.Value.SplitPercent |> Expect.equal "should update to 70" 70
+    | _ -> failtest "expected DragSub"
+
+  testCase "dragSub does not fire on Pressed event" <| fun () ->
+    let m   = SplitPane.init SplitHorizontal 50 El.empty El.empty
+    let sub = SplitPane.dragSub 100 50 id m
+    let me : MouseEvent = { Button = LeftButton; X = 70; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    match sub with
+    | DragSub handler -> handler me |> Expect.isNone "should not fire on Pressed"
+    | _               -> failtest "expected DragSub"
+
+  testCase "dragSub does not fire on Released event" <| fun () ->
+    let m   = SplitPane.init SplitHorizontal 50 El.empty El.empty
+    let sub = SplitPane.dragSub 100 50 id m
+    let me : MouseEvent = { Button = LeftButton; X = 70; Y = 0; Modifiers = Modifiers.None; Phase = Released }
+    match sub with
+    | DragSub handler -> handler me |> Expect.isNone "should not fire on Released"
+    | _               -> failtest "expected DragSub"
+]
+
+let sprint56StatusBarTests = testList "StatusBar" [
+  testCase "StatusBar.view empty list returns El.empty" <| fun () ->
+    match StatusBar.view [] with
+    | Empty -> ()
+    | _     -> failtest "expected Empty"
+
+  testCase "StatusBar.view SBLeft item renders Row" <| fun () ->
+    let el = StatusBar.view [ SBLeft (El.text "hello") ]
+    match el with
+    | Row _ -> ()
+    | _     -> failtest "expected Row"
+
+  testCase "StatusBar.view SBRight item renders Row" <| fun () ->
+    let el = StatusBar.view [ SBRight (El.text "world") ]
+    match el with
+    | Row _ -> ()
+    | _     -> failtest "expected Row"
+
+  testCase "StatusBar.view SBCenter item renders Row" <| fun () ->
+    let el = StatusBar.view [ SBCenter (El.text "mid") ]
+    match el with
+    | Row _ -> ()
+    | _     -> failtest "expected Row"
+
+  testCase "StatusBar.view all three sections renders Row" <| fun () ->
+    let el = StatusBar.view [ SBLeft (El.text "L"); SBCenter (El.text "C"); SBRight (El.text "R") ]
+    match el with
+    | Row _ -> ()
+    | _     -> failtest "expected Row"
+
+  testCase "StatusBar.view SBSep item renders Row" <| fun () ->
+    let el = StatusBar.view [ SBLeft (El.text "A"); SBSep; SBRight (El.text "B") ]
+    match el with
+    | Row _ -> ()
+    | _     -> failtest "expected Row"
+]
+
+let sprint56HelpOverlayTests = testList "HelpOverlay" [
+  testCase "HelpOverlay.fromBindings empty list returns El.empty" <| fun () ->
+    match HelpOverlay.fromBindings [] with
+    | Empty -> ()
+    | _     -> failtest "expected Empty"
+
+  testCase "HelpOverlay.fromBindings non-empty returns Bordered element" <| fun () ->
+    let el = HelpOverlay.fromBindings [ ("q", "Quit"); ("h", "Help") ]
+    match el with
+    | Bordered _ -> ()
+    | _          -> failtest "should return Bordered element"
+
+  testCase "HelpOverlay.fromBindings single binding does not throw" <| fun () ->
+    HelpOverlay.fromBindings [ ("ctrl+q", "Quit application") ] |> ignore
+
+  testCase "HelpOverlay.fromGroups empty groups returns El.empty" <| fun () ->
+    match HelpOverlay.fromGroups "Keys" [] with
+    | Empty -> ()
+    | _     -> failtest "expected Empty"
+
+  testCase "HelpOverlay.fromGroups non-empty returns Bordered element" <| fun () ->
+    let groups = [
+      { GroupName = "Navigation"; Bindings = [ { Keys = "j/k"; Description = "up/down" } ] }
+    ]
+    let el = HelpOverlay.fromGroups "Keybindings" groups
+    match el with
+    | Bordered _ -> ()
+    | _          -> failtest "should return Bordered element"
+
+  testCase "HelpOverlay.fromGroups preserves multiple groups" <| fun () ->
+    let groups = [
+      { GroupName = "Nav";    Bindings = [ { Keys = "j"; Description = "down" } ] }
+      { GroupName = "Action"; Bindings = [ { Keys = "enter"; Description = "select" } ] }
+    ]
+    HelpOverlay.fromGroups "Help" groups |> ignore
+]
+
+let sprint56VirtualListMultiSelectTests = testList "VirtualList multi-select" [
+  testCase "ofArray initializes Selected to empty set" <| fun () ->
+    let m = VirtualList.ofArray 5 [| "a"; "b"; "c" |]
+    m.Selected |> Expect.equal "should be empty Set" Set.empty
+
+  testCase "toggleSelect adds cursor index to Selected" <| fun () ->
+    let m  = VirtualList.ofArray 5 [| "a"; "b"; "c" |]  // SelectedIndex = Some 0
+    let m2 = VirtualList.toggleSelect m
+    m2.Selected |> Set.contains 0 |> Expect.isTrue "should contain index 0"
+
+  testCase "toggleSelect removes already-selected index from Selected" <| fun () ->
+    let m  = { VirtualList.ofArray 5 [| "a"; "b"; "c" |] with Selected = Set.ofList [0; 1] }
+    let m2 = VirtualList.toggleSelect m  // SelectedIndex = Some 0, already in Selected
+    m2.Selected |> Set.contains 0 |> Expect.isFalse "should remove index 0"
+    m2.Selected |> Set.contains 1 |> Expect.isTrue  "should keep index 1"
+
+  testCase "toggleSelect on empty list is a no-op" <| fun () ->
+    let m  = VirtualList.ofArray 5 [||]  // SelectedIndex = None
+    let m2 = VirtualList.toggleSelect m
+    m2.Selected |> Expect.equal "should still be empty" Set.empty
+
+  testCase "selectAll selects every index" <| fun () ->
+    let m  = VirtualList.ofArray 5 [| "a"; "b"; "c" |]
+    let m2 = VirtualList.selectAll m
+    m2.Selected |> Set.count |> Expect.equal "should have 3 selected" 3
+    m2.Selected |> Set.contains 0 |> Expect.isTrue "contains 0"
+    m2.Selected |> Set.contains 2 |> Expect.isTrue "contains 2"
+
+  testCase "selectAll on empty array yields empty Selected" <| fun () ->
+    let m  = VirtualList.ofArray 5 [||]
+    let m2 = VirtualList.selectAll m
+    m2.Selected |> Expect.equal "should be empty" Set.empty
+
+  testCase "clearSelection empties Selected set" <| fun () ->
+    let m  = { VirtualList.ofArray 5 [| "a"; "b"; "c" |] with Selected = Set.ofList [0; 1; 2] }
+    let m2 = VirtualList.clearSelection m
+    m2.Selected |> Expect.equal "should be empty" Set.empty
+
+  testCase "selectedItems returns rows for all selected indices" <| fun () ->
+    let items = [| "a"; "b"; "c"; "d" |]
+    let m     = { VirtualList.ofArray 5 items with Selected = Set.ofList [0; 2] }
+    let sel   = VirtualList.selectedItems m
+    sel |> Array.length   |> Expect.equal  "should have 2 items" 2
+    sel |> Array.contains "a" |> Expect.isTrue "should contain a"
+    sel |> Array.contains "c" |> Expect.isTrue "should contain c"
+
+  testCase "selectedItems on empty Selected returns empty array" <| fun () ->
+    let m  = VirtualList.ofArray 5 [| "a"; "b" |]
+    let sel = VirtualList.selectedItems m
+    sel |> Array.length |> Expect.equal "should be empty" 0
+
+  testCase "isChecked returns true for index in Selected" <| fun () ->
+    let m = { VirtualList.ofArray 5 [| "a"; "b"; "c" |] with Selected = Set.ofList [1] }
+    VirtualList.isChecked 1 m |> Expect.isTrue  "index 1 is checked"
+    VirtualList.isChecked 0 m |> Expect.isFalse "index 0 is not checked"
+    VirtualList.isChecked 2 m |> Expect.isFalse "index 2 is not checked"
+]
+
+[<Tests>]
+let sprint56Tests =
+  testList "Sprint 56" [
+    sprint56SplitPaneDragTests
+    sprint56StatusBarTests
+    sprint56HelpOverlayTests
+    sprint56VirtualListMultiSelectTests
+  ]

@@ -896,6 +896,8 @@ type VirtualListModel<'row> = {
   ScrollOffset: int
   /// Number of rows visible at once. Stored here so navigation is self-contained.
   ViewportHeight: int
+  /// Set of explicitly checked/multi-selected indices. Independent of SelectedIndex cursor.
+  Selected: Set<int>
 }
 
 /// Configuration for rendering a VirtualList.
@@ -924,7 +926,7 @@ module VirtualList =
   /// Create a VirtualList model from an array of items, with nothing selected.
   let ofArray (viewportHeight: int) (items: 'row array) : VirtualListModel<'row> =
     let sel = match items.Length with 0 -> None | _ -> Some 0
-    { Items = items; SelectedIndex = sel; ScrollOffset = 0; ViewportHeight = max 1 viewportHeight }
+    { Items = items; SelectedIndex = sel; ScrollOffset = 0; ViewportHeight = max 1 viewportHeight; Selected = Set.empty }
 
   /// Create a VirtualList model from a list of items.
   let ofList (viewportHeight: int) (items: 'row list) : VirtualListModel<'row> =
@@ -1062,6 +1064,42 @@ module VirtualList =
     | MouseInput { Button = ScrollUp }   -> selectPrev m
     | MouseInput { Button = ScrollDown } -> selectNext m
     | _ -> m
+
+  // ── Multi-select ─────────────────────────────────────────────────────────────
+
+  /// Toggle the cursor's current `SelectedIndex` in the multi-select `Selected` set.
+  /// If `SelectedIndex` is `None` (empty list), this is a no-op.
+  let toggleSelect (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+    match m.SelectedIndex with
+    | None   -> m
+    | Some i ->
+      let updated =
+        match Set.contains i m.Selected with
+        | true  -> Set.remove i m.Selected
+        | false -> Set.add    i m.Selected
+      { m with Selected = updated }
+
+  /// Add every item index to the `Selected` set.
+  let selectAll (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+    match m.Items.Length with
+    | 0 -> m
+    | n -> { m with Selected = Set.ofSeq { 0 .. n - 1 } }
+
+  /// Remove all indices from the `Selected` set.
+  let clearSelection (m: VirtualListModel<'row>) : VirtualListModel<'row> =
+    { m with Selected = Set.empty }
+
+  /// Return the items corresponding to all indices in the `Selected` set.
+  /// Out-of-bounds indices (from stale sets after items change) are silently skipped.
+  let selectedItems (m: VirtualListModel<'row>) : 'row array =
+    m.Selected
+    |> Seq.filter (fun i -> i >= 0 && i < m.Items.Length)
+    |> Seq.map    (fun i -> m.Items.[i])
+    |> Seq.toArray
+
+  /// Returns `true` if the given index is in the `Selected` set.
+  let isChecked (i: int) (m: VirtualListModel<'row>) : bool =
+    Set.contains i m.Selected
 
 // ── VirtualTable ─────────────────────────────────────────────────────────────
 // Combines the column-header/separator structure of Table with VirtualList's
@@ -2495,6 +2533,28 @@ module SplitPane =
   let setSecond (elem: Element) (m: SplitPaneModel) : SplitPaneModel =
     { m with Second = elem }
 
+  /// Update `SplitPercent` based on the current mouse position when dragging.
+  /// Only acts on `Motion` phase events; all other phases return the model unchanged.
+  /// `termWidth` and `termHeight` are the terminal dimensions used to convert pixel
+  /// coordinates to a percentage (must be > 0 to avoid division by zero).
+  let handleDrag (termWidth: int) (termHeight: int) (me: MouseEvent) (m: SplitPaneModel) : SplitPaneModel =
+    match me.Phase with
+    | Motion ->
+      let pct =
+        match m.Orientation with
+        | SplitHorizontal -> me.X * 100 / (max 1 termWidth)
+        | SplitVertical   -> me.Y * 100 / (max 1 termHeight)
+      resize pct m
+    | _ -> m
+
+  /// Return a `DragSub` that calls `handleDrag` on every `Motion` event and dispatches
+  /// the updated model via `toMsg`.  `Pressed` / `Released` events are discarded.
+  let dragSub (termWidth: int) (termHeight: int) (toMsg: SplitPaneModel -> 'msg) (m: SplitPaneModel) : Sub<'msg> =
+    DragSub(fun me ->
+      match me.Phase with
+      | Motion -> Some (toMsg (handleDrag termWidth termHeight me m))
+      | _      -> None)
+
   /// Render the SplitPane as a Row (horizontal) or Column (vertical).
   /// Each child is wrapped in a Ratio constraint so layout splits proportionally.
   let view (m: SplitPaneModel) : Element =
@@ -3083,4 +3143,94 @@ module LineChart =
         | LegendRight  -> El.row [el; legendRow config]
       canvas |> withXLabel |> withLegend
 
+// ── StatusBar ─────────────────────────────────────────────────────────────────
+// Composable status-bar builder. Items are placed in three gravity zones (left,
+// center, right), with an optional separator token between sections.
 
+/// An item in a status bar.
+/// `SBLeft`, `SBCenter`, and `SBRight` carry an `Element` to display in each zone.
+/// `SBSep` inserts a thin separator glyph between adjacent items in the same zone.
+type StatusBarItem =
+  | SBLeft   of Element
+  | SBCenter of Element
+  | SBRight  of Element
+  | SBSep
+
+module StatusBar =
+  /// Build a single-row status bar from a list of `StatusBarItem` values.
+  /// Items tagged `SBLeft` are left-aligned, `SBCenter` is centred (with flex
+  /// fill on both sides), and `SBRight` is right-aligned.  `SBSep` inserts a
+  /// thin separator element (│) between adjacent items in the same zone.
+  /// Returns `El.empty` when the list is empty.
+  let view (items: StatusBarItem list) : Element =
+    match items with
+    | [] -> El.empty
+    | _ ->
+      let lefts   = items |> List.choose (function SBLeft   e -> Some e | _ -> None)
+      let centers = items |> List.choose (function SBCenter e -> Some e | _ -> None)
+      let rights  = items |> List.choose (function SBRight  e -> Some e | _ -> None)
+      let sep     = El.text " │ "
+      let interleave (es: Element list) : Element list =
+        match es with
+        | []     -> []
+        | [x]    -> [x]
+        | x :: rest -> rest |> List.fold (fun acc e -> acc @ [sep; e]) [x]
+      let leftEl   = match lefts   with [] -> El.empty | es -> El.row (interleave es)
+      let centerEl = match centers with [] -> El.empty | es -> El.row (interleave es)
+      let rightEl  = match rights  with [] -> El.empty | es -> El.row (interleave es)
+      El.row [ leftEl; El.fill centerEl; rightEl ]
+
+// ── HelpOverlay ───────────────────────────────────────────────────────────────
+// Declarative keyboard-shortcut overlay widget.  Renders a bordered panel of
+// key → description rows, optionally grouped under labelled headings.
+
+/// A single key-binding row for display in a `HelpOverlay`.
+type HelpBinding = {
+  /// Key name or chord, e.g. "ctrl+q", "j/k", "F1".
+  Keys: string
+  /// Human-readable description of what the key does.
+  Description: string
+}
+
+/// A named group of `HelpBinding` rows for display in a grouped help overlay.
+type HelpGroup = {
+  /// Group heading text, e.g. "Navigation", "Actions".
+  GroupName: string
+  Bindings: HelpBinding list
+}
+
+module HelpOverlay =
+  /// Pad a key string to a fixed column width for alignment.
+  let private keyWidth = 14
+
+  /// Render a single `HelpBinding` as a row: padded key | description.
+  let private bindingRow (b: HelpBinding) : Element =
+    El.row [
+      El.bold (El.text (b.Keys.PadRight keyWidth))
+      El.text b.Description
+    ]
+
+  /// Build a simple flat help panel from a list of `(key, description)` pairs.
+  /// Returns `El.empty` when the list is empty.
+  let fromBindings (bindings: (string * string) list) : Element =
+    match bindings with
+    | [] -> El.empty
+    | _  ->
+      let rows = bindings |> List.map (fun (k, d) -> bindingRow { Keys = k; Description = d })
+      El.bordered Rounded (El.column rows)
+
+  /// Build a grouped help panel with a title and multiple named groups.
+  /// Each group renders its name as a bold heading followed by its bindings.
+  /// Returns `El.empty` when the groups list is empty.
+  let fromGroups (title: string) (groups: HelpGroup list) : Element =
+    match groups with
+    | [] -> El.empty
+    | _  ->
+      let titleEl = El.bold (El.text title)
+      let groupEls =
+        groups
+        |> List.collect (fun g ->
+          let heading  = El.bold (El.text (sprintf "── %s" g.GroupName))
+          let bindings = g.Bindings |> List.map bindingRow
+          heading :: bindings)
+      El.bordered Rounded (El.column (titleEl :: groupEls))
