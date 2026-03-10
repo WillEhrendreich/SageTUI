@@ -29,7 +29,7 @@ module Measure =
     | Constrained(Min n, child) -> max n (measureWidth child)
     | Constrained(Max n, child) -> min n (measureWidth child)
     | Constrained(_, child) -> measureWidth child
-    | Bordered(_, child) -> measureWidth child + 2
+    | Bordered(_, _, child) -> measureWidth child + 2
     | Padded(p, child) -> measureWidth child + p.Left + p.Right
     | Keyed(_, _, _, child) -> measureWidth child
     | Canvas _ -> 0
@@ -62,7 +62,7 @@ module Measure =
       | _ -> children |> List.map measureHeight |> List.max
     | Styled(_, child) -> measureHeight child
     | Constrained(_, child) -> measureHeight child
-    | Bordered(_, child) -> measureHeight child + 2
+    | Bordered(_, _, child) -> measureHeight child + 2
     | Padded(p, child) -> measureHeight child + p.Top + p.Bottom
     | Keyed(_, _, _, child) -> measureHeight child
     | Canvas _ -> 0

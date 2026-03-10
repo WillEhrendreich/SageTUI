@@ -221,7 +221,7 @@ module HtmlParse =
       // Apply border wrapper
       let withBorder =
         match tryParseBorder pairs with
-        | Some bs -> Bordered (bs, withPadding)
+        | Some bs -> Bordered (bs, None, withPadding)
         | None -> withPadding
 
       // Apply style from non-layout CSS (only for div elements that aren't flex containers)

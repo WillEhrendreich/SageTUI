@@ -17,7 +17,7 @@ let rec countLeaves (el: Element) =
   | Element.Row cs | Element.Column cs | Element.Overlay cs ->
     cs |> List.sumBy countLeaves
   | Element.Styled (_, c) | Element.Constrained (_, c)
-  | Element.Bordered (_, c) | Element.Padded (_, c)
+  | Element.Bordered (_, _, c) | Element.Padded (_, c)
   | Element.Keyed (_, _, _, c)
   | Element.Aligned (_, _, c) | Element.Gapped (_, c) -> countLeaves c
   | Element.Canvas _ -> 1

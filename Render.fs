@@ -62,8 +62,8 @@ module Render =
         let constrained = Layout.applyConstraint c area
         render constrained inheritedStyle buf child
 
-      | Bordered(borderStyle, child) ->
-        BorderRender.renderBorder borderStyle inheritedStyle area buf
+      | Bordered(borderStyle, title, child) ->
+        BorderRender.renderBorder borderStyle title inheritedStyle area buf
         let inner = Layout.shrinkForBorder area
         render inner inheritedStyle buf child
 

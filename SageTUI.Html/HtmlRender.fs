@@ -96,7 +96,7 @@ module HtmlRender =
       | css -> Elem.div [ Attr.style css ] [ render child ]
     | Constrained (con, child) ->
       Elem.div [ Attr.style (constraintToCss con) ] [ render child ]
-    | Bordered (bs, child) ->
+    | Bordered (bs, _, child) ->
       Elem.div [ Attr.style (borderStyleToCss bs) ] [ render child ]
     | Padded (p, child) ->
       Elem.div [ Attr.style (paddingToCss p) ] [ render child ]

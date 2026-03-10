@@ -1071,7 +1071,7 @@ let themeTests = testList "Theme" [
   test "panel produces bordered column" {
     let elem = Theme.panel Theme.dark "Panel" (El.text "content")
     match elem with
-    | Padded(_, Bordered(_, Column _)) -> ()
+    | Padded(_, Bordered(_, _, Column _)) -> ()
     | _ -> failtest "expected Padded(Bordered(Column))"
   }
 

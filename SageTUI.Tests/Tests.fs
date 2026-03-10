@@ -264,7 +264,7 @@ let elementTests = testList "Element" [
     | _ -> failwith "expected Styled"
   testCase "border" <| fun () ->
     match El.text "x" |> El.border with
-    | Bordered(Light, Text("x",_)) -> ()
+    | Bordered(Light, _, Text("x",_)) -> ()
     | _ -> failwith "expected Bordered"
   testCase "pad" <| fun () ->
     match El.text "x" |> El.padAll 2 with
@@ -288,7 +288,7 @@ let elementTests = testList "Element" [
       |> El.bold
       |> El.border
     match elem with
-    | Bordered(Light, Styled(s2, Styled(s1, Text("x",_)))) ->
+    | Bordered(Light, _, Styled(s2, Styled(s1, Text("x",_)))) ->
       TextAttrs.has TextAttrs.bold s2.Attrs |> Expect.isTrue ""
       s1.Fg |> Expect.equal "" (Some(Named(Red,Normal)))
     | _ -> failwith "expected chain"
@@ -962,7 +962,7 @@ let arenaLowerTests = testList "Arena.lower" [
 
   testCase "lower Bordered Rounded" <| fun () ->
     let a = FrameArena.create 10 100 50
-    let h = Arena.lower a (Bordered(Rounded, Empty))
+    let h = Arena.lower a (Bordered(Rounded, None, Empty))
     let n = FrameArena.getNode h a
     n.Kind |> Expect.equal "kind" 7uy
     n.ConstraintKind |> Expect.equal "border" 3uy
@@ -1008,7 +1008,7 @@ let arenaLowerTests = testList "Arena.lower" [
 
   testCase "deeply nested structure" <| fun () ->
     let a = FrameArena.create 100 1000 500
-    let tree = Styled(Style.empty, Bordered(Light, Padded(Padding.zero, Text("deep", Style.empty))))
+    let tree = Styled(Style.empty, Bordered(Light, None, Padded(Padding.zero, Text("deep", Style.empty))))
     let h = Arena.lower a tree
     let root = FrameArena.getNode h a
     root.Kind |> Expect.equal "styled" 5uy
@@ -1546,7 +1546,7 @@ let renderConstrainedTests = testList "Render Constrained" [
 let renderBorderTests = testList "Render Border" [
   testCase "Light border corners" <| fun () ->
     let buf = Buffer.create 5 3
-    Render.render (area4 5 3) Style.empty buf (Bordered(Light, Empty))
+    Render.render (area4 5 3) Style.empty buf (Bordered(Light, None, Empty))
     let tl = Buffer.get 0 0 buf
     tl.Rune |> Expect.equal "top-left" (int (System.Text.Rune '\u250C').Value)
     let tr = Buffer.get 4 0 buf
@@ -1558,25 +1558,25 @@ let renderBorderTests = testList "Render Border" [
 
   testCase "Light border horizontal bars" <| fun () ->
     let buf = Buffer.create 5 3
-    Render.render (area4 5 3) Style.empty buf (Bordered(Light, Empty))
+    Render.render (area4 5 3) Style.empty buf (Bordered(Light, None, Empty))
     let top = Buffer.get 2 0 buf
     top.Rune |> Expect.equal "h bar" (int (System.Text.Rune '\u2500').Value)
 
   testCase "Light border vertical bars" <| fun () ->
     let buf = Buffer.create 5 3
-    Render.render (area4 5 3) Style.empty buf (Bordered(Light, Empty))
+    Render.render (area4 5 3) Style.empty buf (Bordered(Light, None, Empty))
     let left = Buffer.get 0 1 buf
     left.Rune |> Expect.equal "v bar" (int (System.Text.Rune '\u2502').Value)
 
   testCase "Bordered child renders inside" <| fun () ->
     let buf = Buffer.create 5 3
-    Render.render (area4 5 3) Style.empty buf (Bordered(Light, El.text "X"))
+    Render.render (area4 5 3) Style.empty buf (Bordered(Light, None, El.text "X"))
     let inner = Buffer.get 1 1 buf
     inner.Rune |> Expect.equal "X inside" (int (System.Text.Rune 'X').Value)
 
   testCase "Ascii border" <| fun () ->
     let buf = Buffer.create 5 3
-    Render.render (area4 5 3) Style.empty buf (Bordered(Ascii, Empty))
+    Render.render (area4 5 3) Style.empty buf (Bordered(Ascii, None, Empty))
     let tl = Buffer.get 0 0 buf
     tl.Rune |> Expect.equal "+" (int (System.Text.Rune '+').Value)
     let h = Buffer.get 2 0 buf
@@ -1584,19 +1584,19 @@ let renderBorderTests = testList "Render Border" [
 
   testCase "Heavy border corners" <| fun () ->
     let buf = Buffer.create 5 3
-    Render.render (area4 5 3) Style.empty buf (Bordered(Heavy, Empty))
+    Render.render (area4 5 3) Style.empty buf (Bordered(Heavy, None, Empty))
     let tl = Buffer.get 0 0 buf
     tl.Rune |> Expect.equal "heavy tl" (int (System.Text.Rune '\u250F').Value)
 
   testCase "Rounded border corners" <| fun () ->
     let buf = Buffer.create 5 3
-    Render.render (area4 5 3) Style.empty buf (Bordered(Rounded, Empty))
+    Render.render (area4 5 3) Style.empty buf (Bordered(Rounded, None, Empty))
     let tl = Buffer.get 0 0 buf
     tl.Rune |> Expect.equal "rounded tl" (int (System.Text.Rune '\u256D').Value)
 
   testCase "Double border corners" <| fun () ->
     let buf = Buffer.create 5 3
-    Render.render (area4 5 3) Style.empty buf (Bordered(Double, Empty))
+    Render.render (area4 5 3) Style.empty buf (Bordered(Double, None, Empty))
     let tl = Buffer.get 0 0 buf
     tl.Rune |> Expect.equal "double tl" (int (System.Text.Rune '\u2554').Value)
 ]
@@ -4109,7 +4109,7 @@ let allTests = testList "All" [
         let elem = El.text "Hello"
         let debug = El.debugLayout elem
         match debug with
-        | Styled(_, Bordered(Light, Column [Text(label, _); Text("Hello", _)])) ->
+        | Styled(_, Bordered(Light, _, Column [Text(label, _); Text("Hello", _)])) ->
           label |> Expect.stringContains "has T prefix" "T"
         | other -> failwithf "unexpected: %A" other
 
@@ -4117,7 +4117,7 @@ let allTests = testList "All" [
         let elem = El.row [ El.text "A"; El.text "B" ]
         let debug = El.debugLayout elem
         match debug with
-        | Styled(_, Bordered(Light, Column [Text(label, _); Row children])) ->
+        | Styled(_, Bordered(Light, _, Column [Text(label, _); Row children])) ->
           label |> Expect.equal "row label" "Row"
           children |> Expect.hasLength "two children" 2
         | other -> failwithf "unexpected: %A" other
@@ -4126,7 +4126,7 @@ let allTests = testList "All" [
         let elem = El.text "X" |> El.fill
         let debug = El.debugLayout elem
         match debug with
-        | Styled(_, Bordered(Light, Column [Text(label, _); _])) ->
+        | Styled(_, Bordered(Light, _, Column [Text(label, _); _])) ->
           label |> Expect.equal "fill label" "Fill"
         | other -> failwithf "unexpected: %A" other
 
@@ -4134,7 +4134,7 @@ let allTests = testList "All" [
         let elem = El.column [ El.row [ El.text "deep" ] ]
         let debug = El.debugLayout elem
         match debug with
-        | Styled(outerStyle, Bordered(_, Column [_; Column [Styled(innerStyle, _)]])) ->
+        | Styled(outerStyle, Bordered(_, _, Column [_; Column [Styled(innerStyle, _)]])) ->
           (outerStyle.Fg <> innerStyle.Fg) |> Expect.isTrue "different colors at different depths"
         | other -> failwithf "unexpected: %A" other
 
@@ -4972,10 +4972,150 @@ let sprint40MouseTrackingTests = testList "Sprint 40: mouse motion auto-enable" 
     |> Expect.isTrue "DragSub detected in mixed list"
 ]
 
+let sprint41BorderedTitleTests = testList "Sprint 41 BorderedWithTitle" [
+  testCase "El.bordered backward compat — no title: col2 is H bar" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.bordered Light Empty)
+    Buffer.get 2 0 buf
+    |> fun c -> c.Rune |> Expect.equal "no title: col2 is H" (int (System.Text.Rune '\u2500').Value)
+
+  testCase "El.bordered creates Bordered with None title" <| fun () ->
+    match El.bordered Light Empty with
+    | Bordered(Light, None, Empty) -> ()
+    | _ -> failtest "expected Bordered(Light, None, Empty)"
+
+  testCase "El.borderedWithTitle creates Bordered with Some title" <| fun () ->
+    match El.borderedWithTitle "X" Light Empty with
+    | Bordered(Light, Some "X", Empty) -> ()
+    | _ -> failtest "expected Bordered(Light, Some 'X', Empty)"
+
+  testCase "borderedWithTitle: title chars render in top row" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.borderedWithTitle "Hi" Light Empty)
+    Buffer.get 1 0 buf |> fun c -> c.Rune |> Expect.equal "mandatory H at col1" (int (System.Text.Rune '\u2500').Value)
+    Buffer.get 2 0 buf |> fun c -> c.Rune |> Expect.equal "space before title" (int (System.Text.Rune ' ').Value)
+    Buffer.get 3 0 buf |> fun c -> c.Rune |> Expect.equal "H char" (int (System.Text.Rune 'H').Value)
+    Buffer.get 4 0 buf |> fun c -> c.Rune |> Expect.equal "i char" (int (System.Text.Rune 'i').Value)
+    Buffer.get 5 0 buf |> fun c -> c.Rune |> Expect.equal "space after title" (int (System.Text.Rune ' ').Value)
+
+  testCase "borderedWithTitle: trailing H bars fill remainder" <| fun () ->
+    let buf = Buffer.create 12 3
+    Render.render (area4 12 3) Style.empty buf (El.borderedWithTitle "Hi" Light Empty)
+    Buffer.get 7 0 buf |> fun c -> c.Rune |> Expect.equal "trailing H bar" (int (System.Text.Rune '\u2500').Value)
+
+  testCase "borderedWithTitle: corners still present" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.borderedWithTitle "Hi" Light Empty)
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "TL" (int (System.Text.Rune '\u250C').Value)
+    Buffer.get 9 0 buf |> fun c -> c.Rune |> Expect.equal "TR" (int (System.Text.Rune '\u2510').Value)
+    Buffer.get 0 2 buf |> fun c -> c.Rune |> Expect.equal "BL" (int (System.Text.Rune '\u2514').Value)
+    Buffer.get 9 2 buf |> fun c -> c.Rune |> Expect.equal "BR" (int (System.Text.Rune '\u2518').Value)
+
+  testCase "borderedWithTitle: title does not appear in bottom border" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.borderedWithTitle "Hi" Light Empty)
+    Buffer.get 2 2 buf |> fun c -> c.Rune |> Expect.equal "bottom H" (int (System.Text.Rune '\u2500').Value)
+
+  testCase "borderedWithTitle: inner child renders inside border" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.borderedWithTitle "Hi" Light (El.text "X"))
+    Buffer.get 1 1 buf |> fun c -> c.Rune |> Expect.equal "X inside" (int (System.Text.Rune 'X').Value)
+
+  testCase "borderedWithTitle: title truncated with ellipsis when too long" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.borderedWithTitle "Hello World" Light Empty)
+    // maxTitleDw=5, "Hello World" → "Hell…" (4+1=5 cells at cols 3..7)
+    Buffer.get 3 0 buf |> fun c -> c.Rune |> Expect.equal "H" (int (System.Text.Rune 'H').Value)
+    Buffer.get 4 0 buf |> fun c -> c.Rune |> Expect.equal "e" (int (System.Text.Rune 'e').Value)
+    Buffer.get 7 0 buf |> fun c -> c.Rune |> Expect.equal "ellipsis" (int (System.Text.Rune '…').Value)
+
+  testCase "borderedWithTitle: empty title = plain border (H bar at col2)" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.borderedWithTitle "" Light Empty)
+    Buffer.get 2 0 buf |> fun c -> c.Rune |> Expect.equal "empty title: H" (int (System.Text.Rune '\u2500').Value)
+
+  testCase "borderedWithTitle: box too narrow (W=5) falls back to plain border" <| fun () ->
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (El.borderedWithTitle "Hi" Light Empty)
+    Buffer.get 2 0 buf |> fun c -> c.Rune |> Expect.equal "narrow: H at col2" (int (System.Text.Rune '\u2500').Value)
+
+  testCase "borderedWithTitle: minimal W=6 shows 1-char title" <| fun () ->
+    let buf = Buffer.create 6 3
+    Render.render (area4 6 3) Style.empty buf (El.borderedWithTitle "X" Light Empty)
+    // W=6: maxTitleDw=1. H(col1)+sp(col2)+X(col3)+sp(col4)+TR(col5)
+    Buffer.get 2 0 buf |> fun c -> c.Rune |> Expect.equal "space before" (int (System.Text.Rune ' ').Value)
+    Buffer.get 3 0 buf |> fun c -> c.Rune |> Expect.equal "single char" (int (System.Text.Rune 'X').Value)
+    Buffer.get 4 0 buf |> fun c -> c.Rune |> Expect.equal "space after" (int (System.Text.Rune ' ').Value)
+    Buffer.get 5 0 buf |> fun c -> c.Rune |> Expect.equal "TR" (int (System.Text.Rune '\u2510').Value)
+
+  testCase "borderedWithTitle: title exactly at max width — no truncation" <| fun () ->
+    let buf = Buffer.create 12 3
+    Render.render (area4 12 3) Style.empty buf (El.borderedWithTitle "AAAAAAA" Light Empty)
+    // W=12: maxTitleDw=7. "AAAAAAA"=7 fits exactly. H(1)+sp(2)+A×7(3..9)+sp(10)+TR(11)
+    Buffer.get 3 0 buf |> fun c -> c.Rune |> Expect.equal "first A" (int (System.Text.Rune 'A').Value)
+    Buffer.get 9 0 buf |> fun c -> c.Rune |> Expect.equal "last A" (int (System.Text.Rune 'A').Value)
+    Buffer.get 10 0 buf |> fun c -> c.Rune |> Expect.equal "space after title" (int (System.Text.Rune ' ').Value)
+    Buffer.get 11 0 buf |> fun c -> c.Rune |> Expect.equal "TR" (int (System.Text.Rune '\u2510').Value)
+
+  testCase "borderedWithTitle: wide CJK char counted as 2 cells" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.borderedWithTitle "中" Light Empty)
+    Buffer.get 3 0 buf |> fun c -> c.Rune |> Expect.equal "CJK char" (int (System.Text.Rune '中').Value)
+    Buffer.get 4 0 buf |> fun c -> c.Rune |> Expect.equal "wide continuation" 0
+
+  testCase "borderedWithTitle: Rounded style works with title" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.borderedWithTitle "Hi" Rounded Empty)
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "rounded TL" (int (System.Text.Rune '\u256D').Value)
+    Buffer.get 3 0 buf |> fun c -> c.Rune |> Expect.equal "H char" (int (System.Text.Rune 'H').Value)
+
+  testCase "borderedWithTitle: Ascii style works with title" <| fun () ->
+    let buf = Buffer.create 10 3
+    Render.render (area4 10 3) Style.empty buf (El.borderedWithTitle "Hi" Ascii Empty)
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "ASCII TL" (int (System.Text.Rune '+').Value)
+    Buffer.get 1 0 buf |> fun c -> c.Rune |> Expect.equal "ASCII H" (int (System.Text.Rune '-').Value)
+    Buffer.get 3 0 buf |> fun c -> c.Rune |> Expect.equal "H char" (int (System.Text.Rune 'H').Value)
+
+  testCase "borderedWithTitle: Measure.measureWidth unchanged vs bordered" <| fun () ->
+    El.borderedWithTitle "LongTitle" Light (El.text "Hello")
+    |> Measure.measureWidth
+    |> Expect.equal "same as bordered" 7
+
+  testCase "borderedWithTitle: Measure.measureHeight unchanged vs bordered" <| fun () ->
+    El.borderedWithTitle "Title" Light (El.text "Hi")
+    |> Measure.measureHeight
+    |> Expect.equal "height = 1 + 2" 3
+
+  testCase "borderedWithTitle: Arena parity with Render path" <| fun () ->
+    let elem = El.borderedWithTitle "Hello" Light (El.text "X")
+    let refBuf = Buffer.create 15 3
+    Render.render (area4 15 3) Style.empty refBuf elem
+    let arena = FrameArena.create 100 1000 100
+    let root = Arena.lower arena elem
+    let arenaBuf = Buffer.create 15 3
+    ArenaRender.renderRoot arena root { X = 0; Y = 0; Width = 15; Height = 3 } arenaBuf
+    Buffer.get 3 0 arenaBuf |> fun c -> c.Rune |> Expect.equal "Arena H" (Buffer.get 3 0 refBuf).Rune
+    Buffer.get 4 0 arenaBuf |> fun c -> c.Rune |> Expect.equal "Arena e" (Buffer.get 4 0 refBuf).Rune
+    Buffer.get 7 0 arenaBuf |> fun c -> c.Rune |> Expect.equal "Arena o" (Buffer.get 7 0 refBuf).Rune
+
+  testCase "borderedWithTitle: vertical bars unaffected by title" <| fun () ->
+    let buf = Buffer.create 10 4
+    Render.render (area4 10 4) Style.empty buf (El.borderedWithTitle "Hi" Light Empty)
+    Buffer.get 0 1 buf |> fun c -> c.Rune |> Expect.equal "left V bar row1" (int (System.Text.Rune '\u2502').Value)
+    Buffer.get 9 1 buf |> fun c -> c.Rune |> Expect.equal "right V bar row1" (int (System.Text.Rune '\u2502').Value)
+    Buffer.get 0 2 buf |> fun c -> c.Rune |> Expect.equal "left V bar row2" (int (System.Text.Rune '\u2502').Value)
+]
+
 [<Tests>]
 let sprint40Tests =
   testList "Sprint 40" [
     sprint40WideCharContinuationTests
     sprint40SequencePhaseTests
     sprint40MouseTrackingTests
+  ]
+
+[<Tests>]
+let sprint41Tests =
+  testList "Sprint 41" [
+    sprint41BorderedTitleTests
   ]

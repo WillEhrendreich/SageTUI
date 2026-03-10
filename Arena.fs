@@ -186,11 +186,15 @@ module Arena =
       let (ck, cv) = packConstraint c
       arena.Nodes.[idx] <- mkNode 6uy 0UL 0us ck cv ci -1 0 0
       h
-    | Bordered(bs, child) ->
+    | Bordered(bs, title, child) ->
       let h = FrameArena.allocNode arena
       let (NodeHandle idx) = h
       let (NodeHandle ci) = lower arena child
-      arena.Nodes.[idx] <- mkNode 7uy 0UL 0us (packBorderStyle bs) 0s ci -1 0 0
+      let (ds, dl) =
+        match title with
+        | None | Some "" -> (0, 0)
+        | Some t -> FrameArena.allocText t arena
+      arena.Nodes.[idx] <- mkNode 7uy 0UL 0us (packBorderStyle bs) 0s ci -1 ds dl
       h
     | Padded(pad, child) ->
       let h = FrameArena.allocNode arena

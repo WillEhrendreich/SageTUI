@@ -366,7 +366,11 @@ module ArenaRender =
 
       | 7uy -> // Bordered
         let bs = unpackBorderStyle node.ConstraintKind
-        BorderRender.renderBorder bs Style.empty area buf
+        let title =
+          if node.DataLen > 0
+          then Some (System.String(arena.TextBuf, node.DataStart, node.DataLen))
+          else None
+        BorderRender.renderBorder bs title Style.empty area buf
         let inner = Layout.shrinkForBorder area
         render arena node.FirstChild inner inheritedFg inheritedBg inheritedAttrs buf
 

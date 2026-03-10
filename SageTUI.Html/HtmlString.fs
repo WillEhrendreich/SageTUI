@@ -321,7 +321,7 @@ module HtmlString =
 
     let withBorder =
       match tryParseBorder pairs with
-      | Some bs -> Bordered (bs, withPadding)
+      | Some bs -> Bordered (bs, None, withPadding)
       | None ->
         match tag with
         | "div" when isFlexRow || isFlexCol || isOverlay -> withPadding
@@ -329,7 +329,7 @@ module HtmlString =
           let hasBorderRadius =
             pairs |> List.exists (fun (k, _) -> k = "border-radius")
           match hasBorderRadius with
-          | true -> Bordered (Rounded, withPadding)
+          | true -> Bordered (Rounded, None, withPadding)
           | false -> withPadding
 
     // Apply style (only for non-layout containers to avoid double-wrapping)

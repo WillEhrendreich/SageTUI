@@ -270,7 +270,7 @@ module Reconcile =
         walk (Map.add key e acc) child
       | Row children | Column children ->
         children |> List.fold walk acc
-      | Styled(_, child) | Padded(_, child) | Bordered(_, child)
+      | Styled(_, child) | Padded(_, child) | Bordered(_, _, child)
       | Constrained(_, child) ->
         walk acc child
       | Overlay layers ->

@@ -60,7 +60,7 @@ type Element =
   | Overlay of Element list
   | Styled of Style * Element
   | Constrained of Constraint * Element
-  | Bordered of BorderStyle * Element
+  | Bordered of BorderStyle * string option * Element
   | Padded of Padding * Element
   | Keyed of key: string * enter: Transition * exit: Transition * Element
   | Canvas of CanvasConfig
@@ -163,9 +163,11 @@ module El =
   /// Size as a ratio (num/den) of available space.
   let ratio num den elem = Constrained(Ratio(num, den), elem)
   /// Wrap in a border with the given style.
-  let bordered style elem = Bordered(style, elem)
+  let bordered style elem = Bordered(style, None, elem)
+  /// Wrap in a border with the given style and a title in the top edge.
+  let borderedWithTitle title style elem = Bordered(style, Some title, elem)
   /// Wrap in a light border.
-  let border elem = Bordered(Light, elem)
+  let border elem = Bordered(Light, None, elem)
   /// Add padding around an element.
   let padded p elem = Padded(p, elem)
 
@@ -375,7 +377,7 @@ module El =
     let rec dbg depth elem =
       let color = colors[depth % colors.Length]
       let label tag inner =
-        Bordered(Light,
+        Bordered(Light, None,
           Column [
             Text(tag, { Fg = Some color; Bg = None; Attrs = TextAttrs.bold })
             inner
@@ -402,8 +404,8 @@ module El =
           | Max n -> sprintf "≤%d" n
           | Ratio(n, d) -> sprintf "%d/%d" n d
         label cStr (dbg (depth + 1) child)
-      | Bordered(bs, child) ->
-        label (sprintf "Brd:%A" bs) (Bordered(bs, dbg (depth + 1) child))
+      | Bordered(bs, _, child) ->
+        label (sprintf "Brd:%A" bs) (Bordered(bs, None, dbg (depth + 1) child))
       | Padded(p, child) ->
         label (sprintf "Pad%d,%d,%d,%d" p.Top p.Right p.Bottom p.Left) (Padded(p, dbg (depth + 1) child))
       | Keyed(k, ent, ext, child) ->

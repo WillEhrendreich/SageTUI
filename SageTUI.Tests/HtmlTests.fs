@@ -195,7 +195,7 @@ let htmlParseWrapperTests = testList "HtmlParse.Wrappers" [
                 [ Elem.span [] [ Text.raw "box" ] ]
     let el = HtmlParse.parse node
     match el with
-    | Bordered (Light, _) -> ()
+    | Bordered (Light, _, _) -> ()
     | other -> failwithf "expected Bordered Light, got %A" other
 
   testCase "padding → Padded" <| fun () ->
@@ -256,7 +256,7 @@ let htmlRoundtripTests = testList "Html.Roundtrip" [
     let original = El.bordered Light (El.text "box")
     let roundtripped = original |> HtmlRender.render |> HtmlParse.parse
     match roundtripped with
-    | Bordered (Light, _) -> ()
+    | Bordered (Light, _, _) -> ()
     | other -> failwithf "expected Bordered Light, got %A" other
 ]
 
@@ -390,7 +390,7 @@ let htmlStringCssTests = testList "HtmlString.CSS" [
   testCase "border" <| fun () ->
     let el = HtmlString.parseFragment """<div style="border:1px solid"><span>box</span></div>"""
     match el with
-    | Bordered (Light, _) -> ()
+    | Bordered (Light, _, _) -> ()
     | other -> failwithf "expected Bordered Light, got %A" other
 
   testCase "padding" <| fun () ->
@@ -411,7 +411,7 @@ let htmlStringComplexTests = testList "HtmlString.Complex" [
       </div>"""
     let el = HtmlString.parseFragment html
     match el with
-    | Row [ Bordered(Light, _); Text("world", _) ] -> ()
+    | Row [ Bordered(Light, _, _); Text("world", _) ] -> ()
     | Row children ->
       children |> List.length |> Expect.equal "2 children in row" 2
     | other -> failwithf "expected Row with bordered + text, got %A" other
