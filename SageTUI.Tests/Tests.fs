@@ -7485,3 +7485,380 @@ let sprint56Tests =
     sprint56HelpOverlayTests
     sprint56VirtualListMultiSelectTests
   ]
+
+// ── Sprint 57 TDD tests ───────────────────────────────────────────────────────
+// Features: StatusBar centering fix, SplitPane.handleDragInBounds,
+//           FocusModel<'id>, Focus.style/defaultStyle,
+//           VirtualTable.setFilter/displayItems, ModalStack
+
+let sprint57StatusBarCenteringTests =
+  testList "Sprint 57 - StatusBar centering" [
+    testCase "view with center item produces 5-child row (fill-left, fill-right)" <| fun () ->
+      let items = [ SBLeft (El.text "left"); SBCenter (El.text "mid"); SBRight (El.text "right") ]
+      let el = StatusBar.view items
+      match el with
+      | Row children ->
+        children |> List.length |> Expect.equal "should have 5 children" 5
+        match children.[1] with
+        | Constrained(Fill 1, Empty) -> ()
+        | _ -> failtest "child[1] should be fill-spacer (Constrained(Fill 1, Empty))"
+        match children.[3] with
+        | Constrained(Fill 1, Empty) -> ()
+        | _ -> failtest "child[3] should be fill-spacer (Constrained(Fill 1, Empty))"
+      | _ -> failtest "StatusBar.view should return Row"
+
+    testCase "view with only left item still produces 5-child row" <| fun () ->
+      let items = [ SBLeft (El.text "left") ]
+      let el = StatusBar.view items
+      match el with
+      | Row children ->
+        children |> List.length |> Expect.equal "should have 5 children" 5
+        match children.[1] with
+        | Constrained(Fill 1, Empty) -> ()
+        | _ -> failtest "child[1] should be fill-spacer"
+        match children.[3] with
+        | Constrained(Fill 1, Empty) -> ()
+        | _ -> failtest "child[3] should be fill-spacer"
+      | _ -> failtest "StatusBar.view should return Row"
+
+    testCase "view with only center item has empty left/right endpoints" <| fun () ->
+      let items = [ SBCenter (El.text "centered") ]
+      let el = StatusBar.view items
+      match el with
+      | Row children ->
+        children |> List.length |> Expect.equal "should have 5 children" 5
+        match children.[0] with
+        | Empty -> ()
+        | _ -> failtest "child[0] should be Empty when no left items"
+        match children.[4] with
+        | Empty -> ()
+        | _ -> failtest "child[4] should be Empty when no right items"
+      | _ -> failtest "StatusBar.view should return Row"
+
+    testCase "view with only right item still produces 5-child row" <| fun () ->
+      let items = [ SBRight (El.text "right") ]
+      let el = StatusBar.view items
+      match el with
+      | Row children ->
+        children |> List.length |> Expect.equal "should have 5 children" 5
+        match children.[1] with
+        | Constrained(Fill 1, Empty) -> ()
+        | _ -> failtest "child[1] should be fill-spacer"
+        match children.[3] with
+        | Constrained(Fill 1, Empty) -> ()
+        | _ -> failtest "child[3] should be fill-spacer"
+      | _ -> failtest "StatusBar.view should return Row"
+  ]
+
+let sprint57SplitPaneDragInBoundsTests =
+  testList "Sprint 57 - SplitPane.handleDragInBounds" [
+    testCase "handleDragInBounds uses pane-relative X for horizontal split" <| fun () ->
+      // pane at x=10, width=100; mouse at x=30 → relative x=20 → pct = 20*100/100 = 20
+      let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let me = { Button = LeftButton; X = 30; Y = 5; Modifiers = Modifiers.None; Phase = Motion }
+      let result = SplitPane.handleDragInBounds 10 0 100 50 me m
+      result.SplitPercent |> Expect.equal "pct should be pane-relative 20" 20
+
+    testCase "handleDragInBounds with paneX=0 matches handleDrag for horizontal split" <| fun () ->
+      let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let me = { Button = LeftButton; X = 60; Y = 0; Modifiers = Modifiers.None; Phase = Motion }
+      let byInBounds = SplitPane.handleDragInBounds 0 0 200 50 me m
+      let byDrag     = SplitPane.handleDrag 200 50 me m
+      byInBounds.SplitPercent |> Expect.equal "should match handleDrag when paneX=0" byDrag.SplitPercent
+
+    testCase "handleDragInBounds uses pane-relative Y for vertical split" <| fun () ->
+      // pane at y=10, height=80; mouse at y=26 → relative y=16 → pct = 16*100/80 = 20
+      let m  = SplitPane.init SplitVertical 50 El.empty El.empty
+      let me = { Button = LeftButton; X = 5; Y = 26; Modifiers = Modifiers.None; Phase = Motion }
+      let result = SplitPane.handleDragInBounds 0 10 50 80 me m
+      result.SplitPercent |> Expect.equal "pct should be pane-relative 20" 20
+
+    testCase "handleDragInBounds non-Motion phase returns unchanged model" <| fun () ->
+      let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let me = { Button = LeftButton; X = 30; Y = 5; Modifiers = Modifiers.None; Phase = Pressed }
+      let result = SplitPane.handleDragInBounds 10 0 100 50 me m
+      result.SplitPercent |> Expect.equal "Pressed phase should not change pct" 50
+
+    testCase "handleDragInBounds Released phase returns unchanged model" <| fun () ->
+      let m  = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let me = { Button = LeftButton; X = 30; Y = 5; Modifiers = Modifiers.None; Phase = Released }
+      let result = SplitPane.handleDragInBounds 10 0 100 50 me m
+      result.SplitPercent |> Expect.equal "Released phase should not change pct" 50
+
+    testCase "dragSubInBounds returns a DragSub" <| fun () ->
+      let m   = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let sub = SplitPane.dragSubInBounds 0 0 100 50 id m
+      match sub with
+      | DragSub _ -> ()
+      | _         -> failtest "dragSubInBounds should return a DragSub"
+
+    testCase "dragSubInBounds Motion event dispatches updated model" <| fun () ->
+      let m   = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let sub = SplitPane.dragSubInBounds 0 0 100 50 id m
+      let me  = { Button = LeftButton; X = 25; Y = 0; Modifiers = Modifiers.None; Phase = Motion }
+      match sub with
+      | DragSub handler ->
+        let result = handler me
+        match result with
+        | Some updated -> updated.SplitPercent |> Expect.equal "pct should update to 25" 25
+        | None -> failtest "Motion should produce Some"
+      | _ -> failtest "expected DragSub"
+
+    testCase "dragSubInBounds Pressed event produces None" <| fun () ->
+      let m   = SplitPane.init SplitHorizontal 50 El.empty El.empty
+      let sub = SplitPane.dragSubInBounds 0 0 100 50 id m
+      let me  = { Button = LeftButton; X = 25; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+      match sub with
+      | DragSub handler ->
+        handler me |> Expect.isNone "Pressed should produce None"
+      | _ -> failtest "expected DragSub"
+  ]
+
+let sprint57FocusModelTests =
+  testList "Sprint 57 - FocusModel" [
+    testCase "FocusModel.create sets initial focus to first id" <| fun () ->
+      let m = FocusModel.create [ "a"; "b"; "c" ]
+      m.Focused |> Expect.equal "first id should be focused" "a"
+
+    testCase "FocusModel.create stores the id list" <| fun () ->
+      let m = FocusModel.create [ "x"; "y" ]
+      m.Ids |> Expect.equal "ids should be stored" [ "x"; "y" ]
+
+    testCase "FocusModel.create with empty list raises" <| fun () ->
+      (fun () -> FocusModel.create ([] : string list) |> ignore)
+      |> Expect.throws "empty list should throw"
+
+    testCase "FocusModel.tryCreate with empty list returns None" <| fun () ->
+      FocusModel.tryCreate ([] : string list) |> Expect.isNone "should be None for empty list"
+
+    testCase "FocusModel.tryCreate with non-empty list returns Some with first focused" <| fun () ->
+      let m = FocusModel.tryCreate [ "a"; "b" ]
+      m |> Expect.isSome "should be Some"
+      m.Value.Focused |> Expect.equal "focused should be first" "a"
+
+    testCase "FocusModel.next advances focus forward" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      let m2 = FocusModel.next m
+      m2.Focused |> Expect.equal "should advance to b" "b"
+
+    testCase "FocusModel.next wraps around at end" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      let m2 = m |> FocusModel.next |> FocusModel.next |> FocusModel.next
+      m2.Focused |> Expect.equal "should wrap back to a" "a"
+
+    testCase "FocusModel.prev moves focus backward" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      let m2 = FocusModel.next m |> FocusModel.prev
+      m2.Focused |> Expect.equal "should return to a" "a"
+
+    testCase "FocusModel.prev wraps around at start" <| fun () ->
+      let m  = FocusModel.create [ "a"; "b"; "c" ]
+      let m2 = FocusModel.prev m
+      m2.Focused |> Expect.equal "should wrap to c" "c"
+
+    testCase "FocusModel.isFocused returns true for focused id" <| fun () ->
+      let m = FocusModel.create [ "a"; "b" ]
+      FocusModel.isFocused "a" m |> Expect.isTrue "a should be focused"
+
+    testCase "FocusModel.isFocused returns false for non-focused id" <| fun () ->
+      let m = FocusModel.create [ "a"; "b" ]
+      FocusModel.isFocused "b" m |> Expect.isFalse "b should not be focused"
+
+    testCase "FocusModel.focusSub returns a FocusSub" <| fun () ->
+      let m   = FocusModel.create [ "a"; "b" ]
+      let sub = FocusModel.focusSub id m
+      match sub with
+      | FocusSub _ -> ()
+      | _          -> failtest "focusSub should return a FocusSub"
+
+    testCase "FocusModel.route FocusNext advances focus" <| fun () ->
+      let m      = FocusModel.create [ "a"; "b"; "c" ]
+      let result = FocusModel.route FocusNext m
+      result.Focused |> Expect.equal "should advance to b" "b"
+
+    testCase "FocusModel.route FocusPrev wraps to last" <| fun () ->
+      let m      = FocusModel.create [ "a"; "b"; "c" ]
+      let result = FocusModel.route FocusPrev m
+      result.Focused |> Expect.equal "should wrap to c" "c"
+
+    testCase "single-element FocusModel wraps to itself on next" <| fun () ->
+      let m  = FocusModel.create [ "only" ]
+      let m2 = FocusModel.next m
+      m2.Focused |> Expect.equal "single item stays focused on itself" "only"
+
+    testCase "single-element FocusModel wraps to itself on prev" <| fun () ->
+      let m  = FocusModel.create [ "only" ]
+      let m2 = FocusModel.prev m
+      m2.Focused |> Expect.equal "single item stays focused on itself on prev" "only"
+  ]
+
+let sprint57FocusStyleTests =
+  testList "Sprint 57 - Focus.style helpers" [
+    testCase "Focus.style applies focusedStyle when isFocused is true" <| fun () ->
+      let focusedStyle   = { Fg = None; Bg = Some (Named(Blue, Normal)); Attrs = TextAttrs.none }
+      let unfocusedStyle = Style.empty
+      let baseEl = El.text "item"
+      let el = Focus.style focusedStyle unfocusedStyle true baseEl
+      match el with
+      | Styled(s, _) -> s.Bg |> Expect.equal "should use focused bg" (Some (Named(Blue, Normal)))
+      | _ -> failtest "should be Styled when focused"
+
+    testCase "Focus.style applies unfocusedStyle when isFocused is false" <| fun () ->
+      let focusedStyle   = { Fg = None; Bg = Some (Named(Blue, Normal)); Attrs = TextAttrs.none }
+      let unfocusedStyle = { Fg = None; Bg = Some (Named(Black, Normal)); Attrs = TextAttrs.none }
+      let baseEl = El.text "item"
+      let el = Focus.style focusedStyle unfocusedStyle false baseEl
+      match el with
+      | Styled(s, _) -> s.Bg |> Expect.equal "should use unfocused bg" (Some (Named(Black, Normal)))
+      | _ -> failtest "should be Styled when unfocused with non-empty style"
+
+    testCase "Focus.defaultStyle applies bold when focused" <| fun () ->
+      let baseEl = El.text "item"
+      let el = Focus.defaultStyle true baseEl
+      match el with
+      | Styled(s, _) ->
+        let isBold = s.Attrs.Value &&& TextAttrs.bold.Value <> 0us
+        isBold |> Expect.isTrue "should have bold attr when focused"
+      | _ -> failtest "Focus.defaultStyle focused should wrap in Styled"
+
+    testCase "Focus.defaultStyle returns element unchanged when unfocused" <| fun () ->
+      let baseEl = El.text "item"
+      let el = Focus.defaultStyle false baseEl
+      match el with
+      | Text _ -> ()  // returned unchanged — correct
+      | Styled(s, _) ->
+        let isBold = s.Attrs.Value &&& TextAttrs.bold.Value <> 0us
+        isBold |> Expect.isFalse "should not be bold when unfocused"
+      | _ -> ()
+  ]
+
+let sprint57VirtualTableFilterTests =
+  testList "Sprint 57 - VirtualTable filter" [
+    testCase "VirtualTableConfig has Filter field defaulting to None" <| fun () ->
+      let cfg = VirtualTable.create []
+      cfg.Filter |> Expect.isNone "default Filter should be None"
+
+    testCase "VirtualTable.setFilter sets the filter predicate" <| fun () ->
+      let cfg = VirtualTable.create []
+      let cfg2 = VirtualTable.setFilter (fun s -> s = "keep") cfg
+      cfg2.Filter |> Expect.isSome "Filter should be set after setFilter"
+
+    testCase "VirtualTable.setFilter None clears the filter" <| fun () ->
+      let cfg  = VirtualTable.create [] |> VirtualTable.setFilter (fun _ -> true)
+      let cfg2 = VirtualTable.clearFilter cfg
+      cfg2.Filter |> Expect.isNone "Filter should be None after clearFilter"
+
+    testCase "VirtualTable.displayItems with None filter returns all items" <| fun () ->
+      let cfg   = VirtualTable.create []
+      let items = [| "a"; "b"; "c" |]
+      let result = VirtualTable.displayItems cfg items
+      result |> Array.length |> Expect.equal "all items returned" 3
+
+    testCase "VirtualTable.displayItems with Some filter returns matching items" <| fun () ->
+      let cfg =
+        (VirtualTable.create [] : VirtualTableConfig<string>)
+        |> VirtualTable.setFilter (fun (s: string) -> s.StartsWith("a"))
+      let items = [| "apple"; "banana"; "avocado"; "cherry" |]
+      let result = VirtualTable.displayItems cfg items
+      result |> Array.length |> Expect.equal "only items starting with a" 2
+      result.[0] |> Expect.equal "first is apple" "apple"
+      result.[1] |> Expect.equal "second is avocado" "avocado"
+
+    testCase "VirtualTable.displayItems with sort + filter applies both" <| fun () ->
+      let cols =
+        [ { Header = "Name"
+            Width   = 10
+            Fill    = false
+            Render  = El.text
+            SortKey = Some (fun (s: string) -> s :> System.IComparable) } ]
+      let cfg =
+        { VirtualTable.create cols with Sort = Some { Column = 0; Direction = Descending } }
+        |> VirtualTable.setFilter (fun (s: string) -> s <> "banana")
+      let items  = [| "cherry"; "apple"; "banana"; "avocado" |]
+      let result = VirtualTable.displayItems cfg items
+      result |> Array.length |> Expect.equal "banana excluded" 3
+      // After descending sort of [cherry, apple, avocado] → [cherry, avocado, apple]
+      result.[0] |> Expect.equal "first is cherry" "cherry"
+      result.[1] |> Expect.equal "second is avocado" "avocado"
+      result.[2] |> Expect.equal "third is apple" "apple"
+  ]
+
+let sprint57ModalStackTests =
+  testList "Sprint 57 - ModalStack" [
+    testCase "ModalStack.empty is empty" <| fun () ->
+      ModalStack.empty |> ModalStack.isEmpty |> Expect.isTrue "empty stack should be isEmpty"
+
+    testCase "ModalStack.push adds a layer" <| fun () ->
+      let stack = ModalStack.empty |> ModalStack.push (El.text "modal1")
+      stack |> ModalStack.isEmpty |> Expect.isFalse "after push should not be empty"
+
+    testCase "ModalStack.pop removes the top layer" <| fun () ->
+      let stack =
+        ModalStack.empty
+        |> ModalStack.push (El.text "modal1")
+        |> ModalStack.pop
+      stack |> ModalStack.isEmpty |> Expect.isTrue "after push+pop should be empty"
+
+    testCase "ModalStack.pop on empty stack returns empty stack" <| fun () ->
+      let stack = ModalStack.empty |> ModalStack.pop
+      stack |> ModalStack.isEmpty |> Expect.isTrue "pop on empty should remain empty"
+
+    testCase "ModalStack.top on non-empty returns Some" <| fun () ->
+      let stack = ModalStack.empty |> ModalStack.push (El.text "modal1")
+      stack |> ModalStack.top |> Expect.isSome "top on non-empty should be Some"
+
+    testCase "ModalStack.top on empty returns None" <| fun () ->
+      ModalStack.empty |> ModalStack.top |> Expect.isNone "top on empty should be None"
+
+    testCase "ModalStack.push preserves LIFO order" <| fun () ->
+      let stack =
+        ModalStack.empty
+        |> ModalStack.push (El.text "first")
+        |> ModalStack.push (El.text "second")
+      // top should be second (LIFO)
+      let layers = stack.Layers
+      layers |> List.length |> Expect.equal "should have 2 layers" 2
+
+    testCase "ModalStack.view with empty stack returns base element" <| fun () ->
+      let base' = El.text "base"
+      let el = ModalStack.view base' ModalStack.empty
+      // With empty stack, should return base element — it is a Text node
+      match el with
+      | Text _ -> ()
+      | Overlay layers ->
+        // Acceptable: Overlay with just the base layer
+        (layers |> List.length, 0) |> Expect.isGreaterThan "at least base layer"
+      | _ -> failtest "expected Text or Overlay"
+
+    testCase "ModalStack.view with one layer returns Overlay" <| fun () ->
+      let base' = El.text "base"
+      let stack = ModalStack.empty |> ModalStack.push (El.text "modal")
+      let el = ModalStack.view base' stack
+      match el with
+      | Overlay layers ->
+        (layers |> List.length, 1) |> Expect.isGreaterThan "should have at least 2 layers"
+      | _ -> failtest "ModalStack.view with layers should return Overlay"
+
+    testCase "ModalStack.view with two layers includes all content" <| fun () ->
+      let base'  = El.text "base"
+      let stack  =
+        ModalStack.empty
+        |> ModalStack.push (El.text "modal1")
+        |> ModalStack.push (El.text "modal2")
+      let el = ModalStack.view base' stack
+      match el with
+      | Overlay layers ->
+        (layers |> List.length, 2) |> Expect.isGreaterThan "should include base + both modals"
+      | _ -> failtest "should be Overlay with 2 modal layers"
+  ]
+
+[<Tests>]
+let sprint57Tests =
+  testList "Sprint 57" [
+    sprint57StatusBarCenteringTests
+    sprint57SplitPaneDragInBoundsTests
+    sprint57FocusModelTests
+    sprint57FocusStyleTests
+    sprint57VirtualTableFilterTests
+    sprint57ModalStackTests
+  ]

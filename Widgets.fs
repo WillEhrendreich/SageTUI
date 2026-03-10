@@ -560,6 +560,63 @@ module FocusRing =
   let isFocusedAt (index: int) (ring: FocusRing<'a>) =
     ring.Items.Length > 0 && ring.Index = index
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FocusModel<'id> — ID-based focus management
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// ID-based focus tracker. Unlike FocusRing (index-based), FocusModel uses
+/// equality-comparable identifiers (strings, DU cases, etc.) so focus survives
+/// list reordering and item insertion.
+type FocusModel<'id when 'id : equality> = {
+  Ids:     'id list
+  Focused: 'id
+}
+
+module FocusModel =
+  /// Create a FocusModel from a non-empty list. Raises if the list is empty.
+  let create (ids: 'id list) : FocusModel<'id> =
+    match ids with
+    | [] -> invalidArg "ids" "FocusModel.create: id list must not be empty"
+    | first :: _ -> { Ids = ids; Focused = first }
+
+  /// Try to create a FocusModel from a list. Returns None if the list is empty.
+  let tryCreate (ids: 'id list) : FocusModel<'id> option =
+    match ids with
+    | [] -> None
+    | _  -> Some (create ids)
+
+  /// Advance focus to the next id (wraps around to the start).
+  let next (m: FocusModel<'id>) : FocusModel<'id> =
+    let n = m.Ids.Length
+    match n with
+    | 0 -> m
+    | _ ->
+      let idx = m.Ids |> List.tryFindIndex ((=) m.Focused) |> Option.defaultValue 0
+      { m with Focused = m.Ids.[(idx + 1) % n] }
+
+  /// Move focus to the previous id (wraps around to the end).
+  let prev (m: FocusModel<'id>) : FocusModel<'id> =
+    let n = m.Ids.Length
+    match n with
+    | 0 -> m
+    | _ ->
+      let idx = m.Ids |> List.tryFindIndex ((=) m.Focused) |> Option.defaultValue 0
+      { m with Focused = m.Ids.[(idx - 1 + n) % n] }
+
+  /// Return true if the given id is currently focused.
+  let isFocused (id: 'id) (m: FocusModel<'id>) : bool =
+    m.Focused = id
+
+  /// Apply next or prev based on a FocusDirection.
+  let route (dir: FocusDirection) (m: FocusModel<'id>) : FocusModel<'id> =
+    match dir with
+    | FocusNext -> next m
+    | FocusPrev -> prev m
+
+  /// Create a FocusSub that dispatches an updated FocusModel on Tab/Shift+Tab.
+  let focusSub (toMsg: FocusModel<'id> -> 'msg) (m: FocusModel<'id>) : Sub<'msg> =
+    FocusSub (fun dir -> Some (toMsg (route dir m)))
+
 /// Dropdown selector widget with open/closed state and keyboard navigation.
 type SelectModel<'a> = {
   Options: 'a list
@@ -1117,16 +1174,20 @@ type VirtualTableConfig<'a> = {
   ShowScrollbar: bool
   /// Current sort state — which column is sorted and in which direction. None = unsorted.
   Sort: SortState option
+  /// Optional filter predicate. When Some, only items satisfying the predicate are shown.
+  /// Applied before sorting. Default: None (show all).
+  Filter: ('a -> bool) option
 }
 
 module VirtualTable =
-  /// Default config: Blue selection, standard horizontal separator, no scrollbar, unsorted.
+  /// Default config: Blue selection, standard horizontal separator, no scrollbar, unsorted, no filter.
   let create (columns: TableColumn<'a> list) : VirtualTableConfig<'a> =
     { Columns = columns
       SelectionColor = Color.Named(BaseColor.Blue, Intensity.Normal)
       SeparatorChar = '─'
       ShowScrollbar = false
-      Sort = None }
+      Sort = None
+      Filter = None }
 
   /// Toggle sort state for a column: None → Ascending → Descending → None.
   /// Pure function — takes current sort state and column index, returns new sort state.
@@ -1154,7 +1215,25 @@ module VirtualTable =
           | Ascending  -> items |> Array.sortBy key
           | Descending -> items |> Array.sortByDescending key
 
-  let private sortIndicator (cfg: VirtualTableConfig<'a>) (colIdx: int) : string =
+  /// Set a filter predicate. Only items satisfying the predicate will be shown.
+  /// Applied before sorting. Use `clearFilter` to remove.
+  let setFilter (predicate: 'a -> bool) (cfg: VirtualTableConfig<'a>) : VirtualTableConfig<'a> =
+    { cfg with Filter = Some predicate }
+
+  /// Remove any active filter so all items are shown.
+  let clearFilter (cfg: VirtualTableConfig<'a>) : VirtualTableConfig<'a> =
+    { cfg with Filter = None }
+
+  /// Return the items that would be displayed after applying the current filter and sort.
+  /// Useful for computing row counts, building a VirtualListModel from current config, etc.
+  let displayItems (cfg: VirtualTableConfig<'a>) (items: 'a array) : 'a array =
+    let filtered =
+      match cfg.Filter with
+      | None   -> items
+      | Some f -> items |> Array.filter f
+    sortItems cfg.Columns cfg.Sort filtered
+
+  let private sortIndicator(cfg: VirtualTableConfig<'a>) (colIdx: int) : string =
     match cfg.Sort with
     | Some s when s.Column = colIdx ->
       match s.Direction with
@@ -1271,6 +1350,21 @@ module Focus =
   /// Wire this to `Focus.tabOrder` in your update function to drive keyboard navigation.
   let focusSub (toMsg: FocusDirection -> 'msg) : Sub<'msg> =
     FocusSub (fun dir -> Some (toMsg dir))
+
+  /// Wrap an element with the given style when focused, or the unfocused style otherwise.
+  /// Both styles are always applied so that the element's visual state is fully determined
+  /// by `isFocused`, with no invisible "unstyled" state.
+  let style (focusedStyle: Style) (unfocusedStyle: Style) (isFocused: bool) (el: Element) : Element =
+    match isFocused with
+    | true  -> Styled(focusedStyle, el)
+    | false -> Styled(unfocusedStyle, el)
+
+  /// Wrap an element with bold when focused; return it unchanged when unfocused.
+  /// This is the convention used by all built-in widgets (Checkbox, SelectList, etc.).
+  let defaultStyle (isFocused: bool) (el: Element) : Element =
+    match isFocused with
+    | true  -> El.bold el
+    | false -> el
 
 module Checkbox =
   /// Toggle a boolean value. Convenience helper equivalent to `not value`.
@@ -2555,6 +2649,29 @@ module SplitPane =
       | Motion -> Some (toMsg (handleDrag termWidth termHeight me m))
       | _      -> None)
 
+  /// Pane-relative drag handler. Converts `MouseEvent` coordinates to a percentage
+  /// based on the pane's own origin (`paneX`, `paneY`) and size (`paneW`, `paneH`).
+  /// Provides accurate split ratios when the SplitPane does not occupy the whole terminal.
+  /// Only acts on `Motion` phase events; all other phases return the model unchanged.
+  let handleDragInBounds (paneX: int) (paneY: int) (paneW: int) (paneH: int) (me: MouseEvent) (m: SplitPaneModel) : SplitPaneModel =
+    match me.Phase with
+    | Motion ->
+      let pct =
+        match m.Orientation with
+        | SplitHorizontal -> (me.X - paneX) * 100 / (max 1 paneW)
+        | SplitVertical   -> (me.Y - paneY) * 100 / (max 1 paneH)
+      resize pct m
+    | _ -> m
+
+  /// Like `dragSub` but uses pane-relative coordinates.
+  /// Pass the pane's screen origin and size so the split ratio is correct
+  /// even when the pane is inset inside a larger layout.
+  let dragSubInBounds (paneX: int) (paneY: int) (paneW: int) (paneH: int) (toMsg: SplitPaneModel -> 'msg) (m: SplitPaneModel) : Sub<'msg> =
+    DragSub(fun me ->
+      match me.Phase with
+      | Motion -> Some (toMsg (handleDragInBounds paneX paneY paneW paneH me m))
+      | _      -> None)
+
   /// Render the SplitPane as a Row (horizontal) or Column (vertical).
   /// Each child is wrapped in a Ratio constraint so layout splits proportionally.
   let view (m: SplitPaneModel) : Element =
@@ -3178,7 +3295,7 @@ module StatusBar =
       let leftEl   = match lefts   with [] -> El.empty | es -> El.row (interleave es)
       let centerEl = match centers with [] -> El.empty | es -> El.row (interleave es)
       let rightEl  = match rights  with [] -> El.empty | es -> El.row (interleave es)
-      El.row [ leftEl; El.fill centerEl; rightEl ]
+      El.row [ leftEl; El.fill El.empty; centerEl; El.fill El.empty; rightEl ]
 
 // ── HelpOverlay ───────────────────────────────────────────────────────────────
 // Declarative keyboard-shortcut overlay widget.  Renders a bordered panel of
@@ -3234,3 +3351,52 @@ module HelpOverlay =
           let bindings = g.Bindings |> List.map bindingRow
           heading :: bindings)
       El.bordered Rounded (El.column (titleEl :: groupEls))
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ModalStack — layered overlay manager
+// ─────────────────────────────────────────────────────────────────────────────
+// Composable stack of modal layers over a base element.  Each push adds a new
+// layer; pop removes the topmost layer.  `view` renders the stack as an Overlay
+// DU, which ArenaRender composites in Z-order (last item on top).
+
+/// A single layer in a ModalStack.
+type ModalLayer = {
+  /// The element content to render for this modal layer.
+  Content: Element
+}
+
+/// Ordered stack of modal layers. The head of `Layers` is the bottom-most layer;
+/// the last element is rendered on top.
+type ModalStack = {
+  Layers: ModalLayer list
+}
+
+module ModalStack =
+  /// An empty stack with no layers.
+  let empty : ModalStack = { Layers = [] }
+
+  /// Push a new modal layer on top of the stack (appended to end for LIFO access via `top`).
+  let push (content: Element) (stack: ModalStack) : ModalStack =
+    { stack with Layers = stack.Layers @ [{ Content = content }] }
+
+  /// Remove the topmost modal layer. If the stack is empty, returns the empty stack.
+  let pop (stack: ModalStack) : ModalStack =
+    match stack.Layers with
+    | [] -> stack
+    | ls -> { stack with Layers = ls |> List.rev |> List.tail |> List.rev }
+
+  /// Return true if the stack has no modal layers.
+  let isEmpty (stack: ModalStack) : bool =
+    stack.Layers.IsEmpty
+
+  /// Return the content element of the topmost modal, or None if the stack is empty.
+  let top (stack: ModalStack) : Element option =
+    stack.Layers |> List.tryLast |> Option.map _.Content
+
+  /// Render the base element under all modal layers.
+  /// With no layers, returns `baseEl` directly.
+  /// With one or more layers, returns `Overlay (baseEl :: [each layer content])`.
+  let view (baseEl: Element) (stack: ModalStack) : Element =
+    match stack.Layers with
+    | [] -> baseEl
+    | layers -> Overlay (baseEl :: (layers |> List.map _.Content))
