@@ -6400,51 +6400,52 @@ let sprint52LineChartTests = testList "Chart lineChart" [
 ]
 
 let sprint52ViewportTests = testList "Viewport" [
-  testCase "ofString creates model with ScrollY=0" <| fun () ->
+  testCase "ofString creates model with ScrollTop=0" <| fun () ->
     let vm = Viewport.ofString "hello\nworld"
-    vm.ScrollY |> Expect.equal "ScrollY=0" 0
+    vm.ScrollTop |> Expect.equal "ScrollTop=0" 0
 
-  testCase "ofString stores content" <| fun () ->
+  testCase "ofString stores content as Lines" <| fun () ->
     let vm = Viewport.ofString "hello\nworld"
-    vm.Content |> Expect.equal "content stored" "hello\nworld"
+    vm.Lines |> Expect.equal "content stored" [|"hello";"world"|]
 
-  testCase "ofString WrapWidth is None by default" <| fun () ->
+  testCase "ofString LastWidth is 0 by default (no wrap)" <| fun () ->
     let vm = Viewport.ofString "hello"
-    vm.WrapWidth |> Expect.isNone "WrapWidth None by default"
+    vm.LastWidth |> Expect.equal "no wrap width" 0
 
-  testCase "scrollDown increments ScrollY" <| fun () ->
-    let vm = Viewport.ofString "a\nb\nc\nd\ne"
-    let vm2 = Viewport.scrollDown 1 vm
-    vm2.ScrollY |> Expect.equal "scrolled down" 1
+  testCase "scrollDown increments ScrollTop" <| fun () ->
+    let vm = Viewport.ofString "a\nb\nc\nd\ne" |> Viewport.withHeight 3
+    let vm2 = Viewport.scrollDown vm
+    vm2.ScrollTop |> Expect.equal "scrolled down" 1
 
   testCase "scrollDown clamps at max line" <| fun () ->
-    let vm = { Viewport.ofString "a\nb\nc" with ScrollY = 10 }
-    let vm2 = Viewport.scrollDown 1 vm
-    (vm2.ScrollY, 2) |> Expect.isLessThanOrEqual "clamped at last line"
+    let vm = { Viewport.ofString "a\nb\nc" with ScrollTop = 10 }
+    let vm2 = Viewport.scrollDown vm
+    (vm2.ScrollTop, vm2.WrappedLines.Length) |> Expect.isLessThanOrEqual "clamped at last line"
 
-  testCase "scrollUp decrements ScrollY" <| fun () ->
-    let vm = { Viewport.ofString "a\nb\nc\nd\ne" with ScrollY = 3 }
-    let vm2 = Viewport.scrollUp 1 vm
-    vm2.ScrollY |> Expect.equal "scrolled up" 2
+  testCase "scrollUp decrements ScrollTop" <| fun () ->
+    let vm = { Viewport.ofString "a\nb\nc\nd\ne" with ScrollTop = 3 }
+    let vm2 = Viewport.scrollUp vm
+    vm2.ScrollTop |> Expect.equal "scrolled up" 2
 
   testCase "scrollUp clamps at 0" <| fun () ->
     let vm = Viewport.ofString "a\nb"
-    let vm2 = Viewport.scrollUp 5 vm
-    vm2.ScrollY |> Expect.equal "clamped at 0" 0
+    let vm2 = Viewport.scrollUp vm
+    vm2.ScrollTop |> Expect.equal "clamped at 0" 0
 
-  testCase "pageDown scrolls by given amount" <| fun () ->
-    let vm = Viewport.ofString (String.concat "\n" (List.replicate 20 "line"))
-    let vm2 = Viewport.pageDown 5 vm
-    vm2.ScrollY |> Expect.equal "paged down 5" 5
+  testCase "pageDown scrolls by height lines" <| fun () ->
+    let vm = Viewport.ofString (String.concat "\n" (List.replicate 20 "line")) |> Viewport.withHeight 5
+    let vm2 = Viewport.pageDown vm
+    vm2.ScrollTop |> Expect.equal "paged down 5" 5
 
-  testCase "pageUp scrolls by given amount" <| fun () ->
-    let vm = { Viewport.ofString (String.concat "\n" (List.replicate 20 "line")) with ScrollY = 10 }
-    let vm2 = Viewport.pageUp 5 vm
-    vm2.ScrollY |> Expect.equal "paged up 5" 5
+  testCase "pageUp scrolls back by height lines" <| fun () ->
+    let vm0 = Viewport.ofString (String.concat "\n" (List.replicate 20 "line")) |> Viewport.withHeight 5
+    let vm = { vm0 with ScrollTop = 10 }
+    let vm2 = Viewport.pageUp vm
+    vm2.ScrollTop |> Expect.equal "paged up 5" 5
 
   testCase "view produces non-empty element" <| fun () ->
     let vm = Viewport.ofString "hello\nworld"
-    let el = Viewport.view { ShowScrollbar = false } vm
+    let el = Viewport.view false 10 vm
     match el with
     | Empty -> failtest "Expected non-Empty element from Viewport.view"
     | _ -> ()
@@ -7026,4 +7027,246 @@ let sprint54Tests =
     sprint54ThrottleTests
     sprint54TableStateTests
     sprint54ViewStateTests
+  ]
+
+// ---------------------------------------------------------------------------
+// Sprint 55: Validation applicative, enhanced Viewport, enhanced LineChart
+// ---------------------------------------------------------------------------
+
+let sprint55ValidationTests = testList "Validation" [
+  testCase "succeed wraps in Valid" <| fun () ->
+    Validation.succeed 42 |> Expect.equal "Valid 42" (Valid 42)
+
+  testCase "fail wraps in Invalid list" <| fun () ->
+    Validation.fail "bad" |> Expect.equal "Invalid" (Invalid ["bad"])
+
+  testCase "failMany wraps multiple errors" <| fun () ->
+    Validation.failMany ["e1";"e2"] |> Expect.equal "Invalid many" (Invalid ["e1";"e2"])
+
+  testCase "map over Valid transforms value" <| fun () ->
+    Validation.succeed 5 |> Validation.map ((*) 2) |> Expect.equal "Valid 10" (Valid 10)
+
+  testCase "map over Invalid preserves errors" <| fun () ->
+    Validation.fail "oops" |> Validation.map ((*) 2) |> Expect.equal "still Invalid" (Invalid ["oops"])
+
+  testCase "apply Valid to Valid combines values" <| fun () ->
+    let f = Validation.succeed (fun x -> x + 1)
+    let x = Validation.succeed 5
+    Validation.apply f x |> Expect.equal "Valid 6" (Valid 6)
+
+  testCase "apply Invalid fn to Valid accumulates fn errors" <| fun () ->
+    let f = Validation.fail "fn-error"
+    let x = Validation.succeed 5
+    Validation.apply f x |> Expect.equal "Invalid fn" (Invalid ["fn-error"])
+
+  testCase "apply Valid fn to Invalid accumulates value errors" <| fun () ->
+    let f = Validation.succeed (fun x -> x + 1)
+    let x = Validation.fail "x-error"
+    Validation.apply f x |> Expect.equal "Invalid x" (Invalid ["x-error"])
+
+  testCase "apply Invalid fn to Invalid accumulates ALL errors" <| fun () ->
+    let f : Validation<int -> int, string> = Validation.fail "fn-error"
+    let x : Validation<int, string> = Validation.fail "x-error"
+    Validation.apply f x |> Expect.equal "both errors" (Invalid ["fn-error";"x-error"])
+
+  testCase "map2 combines two Valid values" <| fun () ->
+    Validation.map2 (fun a b -> a + b) (Valid 3) (Valid 4) |> Expect.equal "Valid 7" (Valid 7)
+
+  testCase "map2 accumulates errors from both Invalid" <| fun () ->
+    Validation.map2 (fun a b -> a + b) (Invalid ["e1"]) (Invalid ["e2"])
+    |> Expect.equal "both errors" (Invalid ["e1";"e2"])
+
+  testCase "mapError transforms errors" <| fun () ->
+    Validation.fail 42 |> Validation.mapError (fun e -> e * 2) |> Expect.equal "mapped error" (Invalid [84])
+
+  testCase "ofResult Ok becomes Valid" <| fun () ->
+    Result.Ok 99 |> Validation.ofResult |> Expect.equal "Valid 99" (Valid 99)
+
+  testCase "ofResult Error becomes Invalid" <| fun () ->
+    Result.Error "bad" |> Validation.ofResult |> Expect.equal "Invalid" (Invalid ["bad"])
+
+  testCase "ofOption Some becomes Valid" <| fun () ->
+    Some 7 |> Validation.ofOption "missing" |> Expect.equal "Valid 7" (Valid 7)
+
+  testCase "ofOption None becomes Invalid" <| fun () ->
+    None |> Validation.ofOption "missing" |> Expect.equal "Invalid" (Invalid ["missing"])
+
+  testCase "toResult Valid becomes Ok" <| fun () ->
+    Valid 3 |> Validation.toResult |> Expect.equal "Ok 3" (Result.Ok 3)
+
+  testCase "toResult Invalid becomes Error with list" <| fun () ->
+    Invalid ["a";"b"] |> Validation.toResult |> Expect.equal "Error" (Result.Error ["a";"b"])
+
+  testCase "sequence all Valid" <| fun () ->
+    [Valid 1; Valid 2; Valid 3] |> Validation.sequence |> Expect.equal "Valid [1;2;3]" (Valid [1;2;3])
+
+  testCase "sequence with one Invalid accumulates all errors" <| fun () ->
+    [Valid 1; Invalid ["e1"]; Invalid ["e2"]] |> Validation.sequence
+    |> Expect.equal "all errors" (Invalid ["e1";"e2"])
+
+  testCase "isValid returns true for Valid" <| fun () ->
+    Validation.succeed 1 |> Validation.isValid |> Expect.isTrue "isValid"
+
+  testCase "isValid returns false for Invalid" <| fun () ->
+    Validation.fail "x" |> Validation.isValid |> Expect.isFalse "not valid"
+
+  testCase "getOrElse returns value for Valid" <| fun () ->
+    Valid 5 |> Validation.getOrElse 0 |> Expect.equal "gets 5" 5
+
+  testCase "getOrElse returns default for Invalid" <| fun () ->
+    Invalid ["e"] |> Validation.getOrElse 0 |> Expect.equal "gets default" 0
+]
+
+let sprint55ViewportEnhancedTests = testList "Viewport enhanced" [
+  testCase "init creates model with empty Lines on empty string" <| fun () ->
+    let vm = Viewport.init ""
+    vm.Lines |> Expect.equal "one empty line" [|""|]
+
+  testCase "init splits lines correctly" <| fun () ->
+    let vm = Viewport.init "a\nb\nc"
+    vm.Lines |> Expect.equal "three lines" [|"a";"b";"c"|]
+
+  testCase "init sets ScrollTop to 0" <| fun () ->
+    Viewport.init "hello\nworld" |> fun vm -> vm.ScrollTop |> Expect.equal "ScrollTop 0" 0
+
+  testCase "wrapLines no wrap needed" <| fun () ->
+    Viewport.wrapLines 20 [|"hello"; "world"|] |> Expect.equal "unchanged" [|"hello";"world"|]
+
+  testCase "wrapLines wraps long line at word boundary" <| fun () ->
+    let result = Viewport.wrapLines 10 [|"hello world foo"|]
+    result |> Array.length |> fun n -> (n, 1) |> Expect.isGreaterThan "wrapped"
+
+  testCase "wrapLines hard-wraps when no spaces" <| fun () ->
+    let longWord = String.replicate 25 "x"
+    let result = Viewport.wrapLines 10 [|longWord|]
+    result |> Array.forall (fun l -> l.Length <= 10) |> Expect.isTrue "each chunk ≤ 10"
+
+  testCase "wrapLines preserves empty lines" <| fun () ->
+    let result = Viewport.wrapLines 20 [|"a";""; "b"|]
+    result |> Array.contains "" |> Expect.isTrue "empty line preserved"
+
+  testCase "update VPScrollDown moves ScrollTop down" <| fun () ->
+    let vm = Viewport.init (String.concat "\n" (List.replicate 10 "line")) |> Viewport.withHeight 3
+    let vm2 = Viewport.update (VPScrollDown) vm
+    (vm2.ScrollTop, 0) |> Expect.isGreaterThan "moved down"
+
+  testCase "update VPScrollUp moves ScrollTop up from non-zero" <| fun () ->
+    let vm = { Viewport.init (String.concat "\n" (List.replicate 10 "line")) with ScrollTop = 5 } |> Viewport.withHeight 3
+    let vm2 = Viewport.update VPScrollUp vm
+    (vm2.ScrollTop, 5) |> Expect.isLessThan "moved up"
+
+  testCase "update VPScrollToTop sets ScrollTop to 0" <| fun () ->
+    let vm = { Viewport.init "a\nb\nc\nd\ne" with ScrollTop = 3 } |> Viewport.withHeight 3
+    let vm2 = Viewport.update VPScrollToTop vm
+    vm2.ScrollTop |> Expect.equal "at top" 0
+
+  testCase "update VPScrollToBottom moves to last visible position" <| fun () ->
+    let lines = String.concat "\n" (List.replicate 10 "line")
+    let vm = Viewport.init lines |> Viewport.withHeight 3
+    let vm2 = Viewport.update VPScrollToBottom vm
+    (vm2.ScrollTop, 0) |> Expect.isGreaterThan "near bottom"
+
+  testCase "update VPResize rewraps if width changed" <| fun () ->
+    let vm = Viewport.init "hello world foo bar" |> Viewport.withHeight 10
+    let vm2 = Viewport.update (VPResize 5) vm
+    vm2.LastWidth |> Expect.equal "width updated" 5
+    vm2.WrappedLines |> Array.length |> fun n -> (n, 1) |> Expect.isGreaterThan "more lines after wrap"
+
+  testCase "update VPResize no-op if same width" <| fun () ->
+    let vm0 = Viewport.init "hello" |> Viewport.withHeight 10
+    let vm = { vm0 with LastWidth = 80 }
+    let vm2 = Viewport.update (VPResize 80) vm
+    vm2 |> Expect.equal "unchanged" vm2
+
+  testCase "update VPSetContent replaces content" <| fun () ->
+    let vm = Viewport.init "original" |> Viewport.withHeight 5
+    let vm2 = Viewport.update (VPSetContent "new content") vm
+    vm2.Lines |> Expect.equal "new content" [|"new content"|]
+
+  testCase "VPSetContent resets ScrollTop to 0" <| fun () ->
+    let vm = { Viewport.init "a\nb\nc\nd\ne" with ScrollTop = 3 } |> Viewport.withHeight 5
+    let vm2 = Viewport.update (VPSetContent "fresh") vm
+    vm2.ScrollTop |> Expect.equal "reset" 0
+
+  testCase "handleKey j → VPScrollDown" <| fun () ->
+    Viewport.handleKey (Key.Char (System.Text.Rune 'j')) |> Expect.equal "j down" (Some VPScrollDown)
+
+  testCase "handleKey k → VPScrollUp" <| fun () ->
+    Viewport.handleKey (Key.Char (System.Text.Rune 'k')) |> Expect.equal "k up" (Some VPScrollUp)
+
+  testCase "handleKey g → VPScrollToTop" <| fun () ->
+    Viewport.handleKey (Key.Char (System.Text.Rune 'g')) |> Expect.equal "g top" (Some VPScrollToTop)
+
+  testCase "handleKey G → VPScrollToBottom" <| fun () ->
+    Viewport.handleKey (Key.Char (System.Text.Rune 'G')) |> Expect.equal "G bottom" (Some VPScrollToBottom)
+
+  testCase "handleKey unrecognized → None" <| fun () ->
+    Viewport.handleKey (Key.Char (System.Text.Rune 'x')) |> Expect.isNone "no binding"
+
+  testCase "view produces non-Empty element" <| fun () ->
+    let vm = Viewport.init "hello\nworld" |> Viewport.withHeight 10
+    Viewport.view false 10 vm |> (function Empty -> failtest "Expected element" | _ -> ())
+
+  testCase "scrollbar clamped: resize clamps ScrollTop" <| fun () ->
+    let vm =
+      { Viewport.init (String.concat "\n" (List.replicate 10 "line")) with ScrollTop = 8 }
+      |> Viewport.withHeight 5
+    let vm2 = Viewport.update (VPResize 80) vm
+    vm2.ScrollTop |> (fun s -> s <= vm2.WrappedLines.Length) |> Expect.isTrue "clamped"
+]
+
+let sprint55LineChartEnhancedTests = testList "LineChart enhanced" [
+  testCase "NaN breaks series — does not throw" <| fun () ->
+    let data = [| 1.0; nan; 3.0 |]
+    LineChart.lineChart [ (Color.Default, data) ] |> ignore
+
+  testCase "single-point series renders without throw" <| fun () ->
+    LineChart.lineChart [ (Color.Default, [| 5.0 |]) ] |> ignore
+
+  testCase "all-same-value series does not divide by zero" <| fun () ->
+    LineChart.lineChart [ (Color.Default, [| 3.0; 3.0; 3.0 |]) ] |> ignore
+
+  testCase "empty series list returns El.empty" <| fun () ->
+    LineChart.lineChart [] |> (function Empty -> () | _ -> failtest "should be Empty")
+
+  testCase "lineChartV2 with legend renders non-Empty" <| fun () ->
+    let config : LineChartV2Config = {
+      V2Series = [ { SeriesLabel = "A"; SeriesColor = Color.Default; Data = [| 1.0; 2.0; 3.0 |] } ]
+      V2XLabel = None; V2YLabel = None; V2ShowGrid = false; V2LegendPosition = NoLegend
+    }
+    LineChart.lineChartV2 config |> (function Empty -> failtest "should not be Empty" | _ -> ())
+
+  testCase "lineChartV2 legend Top renders legend row above chart" <| fun () ->
+    let config : LineChartV2Config = {
+      V2Series = [ { SeriesLabel = "Revenue"; SeriesColor = Color.Named(Green, Normal); Data = [| 1.0; 2.0 |] } ]
+      V2XLabel = None; V2YLabel = None; V2ShowGrid = false; V2LegendPosition = LegendTop
+    }
+    let el = LineChart.lineChartV2 config
+    match el with
+    | Column children -> children |> List.length |> fun n -> (n, 1) |> Expect.isGreaterThan "at least 2"
+    | _ -> ()
+
+  testCase "lineChartV2 NaN in data does not throw" <| fun () ->
+    let config : LineChartV2Config = {
+      V2Series = [ { SeriesLabel = "A"; SeriesColor = Color.Default; Data = [| 1.0; nan; 3.0 |] } ]
+      V2XLabel = None; V2YLabel = None; V2ShowGrid = false; V2LegendPosition = NoLegend
+    }
+    LineChart.lineChartV2 config |> ignore
+
+  testCase "computeAutoScale expands flat range" <| fun () ->
+    let lo, hi = LineChart.computeAutoScale [| 5.0; 5.0; 5.0 |]
+    (hi - lo) |> fun d -> (d, 0.0) |> Expect.isGreaterThan "expanded"
+
+  testCase "computeAutoScale handles mixed positive/negative" <| fun () ->
+    let lo, hi = LineChart.computeAutoScale [| -3.0; 0.0; 4.0 |]
+    (lo, 0.0) |> Expect.isLessThan "min is negative"
+    (hi, 0.0) |> Expect.isGreaterThan "max is positive"
+]
+
+[<Tests>]
+let sprint55Tests =
+  testList "Sprint 55" [
+    sprint55ValidationTests
+    sprint55ViewportEnhancedTests
+    sprint55LineChartEnhancedTests
   ]

@@ -2,6 +2,94 @@ namespace SageTUI
 
 open InputHelpers
 
+// ── Validation applicative ────────────────────────────────────────────────────
+
+/// An applicative validation type that accumulates ALL errors — unlike `Result`
+/// which short-circuits on the first failure.
+type Validation<'a,'error> =
+  | Valid   of 'a
+  | Invalid of 'error list
+
+/// Operations on `Validation<'a,'error>`.
+module Validation =
+  /// Lift a value into `Valid`.
+  let succeed (a: 'a) : Validation<'a,'error> = Valid a
+
+  /// Fail with a single error.
+  let fail (e: 'error) : Validation<'a,'error> = Invalid [e]
+
+  /// Fail with multiple errors.
+  let failMany (errs: 'error list) : Validation<'a,'error> = Invalid errs
+
+  /// Functor map.
+  let map (f: 'a -> 'b) (v: Validation<'a,'error>) : Validation<'b,'error> =
+    match v with
+    | Valid a -> Valid (f a)
+    | Invalid errs -> Invalid errs
+
+  /// Map over the error list.
+  let mapError (f: 'error -> 'error2) (v: Validation<'a,'error>) : Validation<'a,'error2> =
+    match v with
+    | Valid a -> Valid a
+    | Invalid errs -> Invalid (errs |> List.map f)
+
+  /// Applicative apply — accumulates errors from BOTH sides.
+  let apply (vf: Validation<'a -> 'b,'error>) (va: Validation<'a,'error>) : Validation<'b,'error> =
+    match vf, va with
+    | Valid f,    Valid a    -> Valid (f a)
+    | Invalid ef, Valid _    -> Invalid ef
+    | Valid _,    Invalid ea -> Invalid ea
+    | Invalid ef, Invalid ea -> Invalid (ef @ ea)
+
+  /// Applicative map2 — combines two validated values with a function, accumulating errors.
+  let map2 (f: 'a -> 'b -> 'c) (va: Validation<'a,'error>) (vb: Validation<'b,'error>) : Validation<'c,'error> =
+    apply (map f va) vb
+
+  /// Convert a `Result` to a `Validation`.
+  let ofResult (r: Result<'a,'error>) : Validation<'a,'error> =
+    match r with
+    | Ok a -> Valid a
+    | Error e -> Invalid [e]
+
+  /// Convert an `Option` to a `Validation`, supplying the error for `None`.
+  let ofOption (e: 'error) (opt: 'a option) : Validation<'a,'error> =
+    match opt with
+    | Some a -> Valid a
+    | None -> Invalid [e]
+
+  /// Convert a `Validation` to a `Result`.
+  /// On failure, the error value is the list of accumulated errors.
+  let toResult (v: Validation<'a,'error>) : Result<'a,'error list> =
+    match v with
+    | Valid a -> Ok a
+    | Invalid errs -> Error errs
+
+  /// Traverse a list into a `Validation`, accumulating ALL errors.
+  let sequence (vs: Validation<'a,'error> list) : Validation<'a list,'error> =
+    List.foldBack
+      (fun v acc ->
+        match v, acc with
+        | Valid a,    Valid rest   -> Valid (a :: rest)
+        | Invalid e1, Valid _     -> Invalid e1
+        | Valid _,    Invalid e2  -> Invalid e2
+        | Invalid e1, Invalid e2  -> Invalid (e1 @ e2))
+      vs
+      (Valid [])
+
+  /// Returns true when the value is `Valid`.
+  let isValid (v: Validation<'a,'error>) : bool =
+    match v with
+    | Valid _ -> true
+    | Invalid _ -> false
+
+  /// Extract the value from `Valid`, or return the default on `Invalid`.
+  let getOrElse (def: 'a) (v: Validation<'a,'error>) : 'a =
+    match v with
+    | Valid a -> a
+    | Invalid _ -> def
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 type Theme = {
   Primary: Color
   Secondary: Color
@@ -2574,20 +2662,56 @@ type LineChartConfig = {
   ShowGrid: bool
 }
 
-/// Configuration for a `Viewport` scrollable text view.
-type ViewportConfig = {
-  /// When true, a scrollbar is rendered on the right edge. Default: false.
-  ShowScrollbar: bool
+/// Named series for `LineChartV2Config`.
+type Series = {
+  /// Display label shown in the legend.
+  SeriesLabel: string
+  /// Color used to draw this series.
+  SeriesColor: Color
+  /// Data points to plot.
+  Data: float array
 }
 
-/// State model for a read-only scrollable text pane.
+/// Where to render the chart legend.
+type LegendPosition = LegendTop | LegendBottom | LegendRight | NoLegend
+
+/// V2 line chart configuration supporting named series, legend, and grid.
+type LineChartV2Config = {
+  /// Named series list — each series has a label, color, and data array.
+  V2Series: Series list
+  /// Optional X-axis label shown below the chart.
+  V2XLabel: string option
+  /// Optional Y-axis label shown to the left of the chart.
+  V2YLabel: string option
+  /// When true, renders faint horizontal grid lines.
+  V2ShowGrid: bool
+  /// Where to render the series legend.
+  V2LegendPosition: LegendPosition
+}
+
+/// Messages for the enhanced Viewport widget.
+type ViewportMsg =
+  | VPScrollDown
+  | VPScrollUp
+  | VPPageDown
+  | VPPageUp
+  | VPScrollToTop
+  | VPScrollToBottom
+  | VPResize of int
+  | VPSetContent of string
+
+/// State model for the enhanced read-only scrollable text pane.
 type ViewportModel = {
-  /// The raw content string. Lines are split on `\n`.
-  Content: string
+  /// Raw content split on `\n`. Never joined back — use `Lines` directly.
+  Lines: string array
+  /// Lines after word-wrap was applied (same as `Lines` when `LastWidth = 0`).
+  WrappedLines: string array
+  /// Width used for the last wrap pass. 0 means not yet wrapped.
+  LastWidth: int
   /// Index of the first visible line (0-based).
-  ScrollY: int
-  /// When Some n, lines longer than n characters are soft-wrapped. None = no wrapping.
-  WrapWidth: int option
+  ScrollTop: int
+  /// Visible height in lines (set via `Viewport.withHeight`).
+  Height: int
 }
 
 /// A production-ready toast notification queue supporting concurrent toasts with
@@ -2627,52 +2751,154 @@ module ToastQueue =
     | [] -> El.empty
     | toasts -> El.column (toasts |> List.map Toast.view)
 
-/// Operations on `ViewportModel` — a read-only, scrollable text pane.
+/// Operations on `ViewportModel` — an enhanced read-only, scrollable text pane with
+/// word-wrap, resize-awareness, keyboard navigation, and proportional scrollbar.
 module Viewport =
-  /// Create a `ViewportModel` from a raw string. `ScrollY` starts at 0.
+
+  // ── Word-wrap ──────────────────────────────────────────────────────────────
+
+  /// Wrap a single line to `width` characters using soft word-wrap.
+  /// - Lines shorter than `width` are returned as-is.
+  /// - Breaks on the last space within the allowed width.
+  /// - Falls back to a hard break at `width` when no space is found.
+  let rec private wrapLine (width: int) (line: string) : string list =
+    match line.Length <= width with
+    | true -> [line]
+    | false ->
+      let slice = line[0 .. width - 1]
+      let breakAt = slice.LastIndexOf(' ')
+      match breakAt > 0 with
+      | true ->
+        line[0 .. breakAt - 1] :: wrapLine width line[breakAt + 1 ..]
+      | false ->
+        line[0 .. width - 1] :: wrapLine width line[width ..]
+
+  /// Wrap all lines in an array, returning a new array.
+  let wrapLines (width: int) (lines: string array) : string array =
+    lines |> Array.collect (fun l -> wrapLine width l |> Array.ofList)
+
+  // ── Construction ───────────────────────────────────────────────────────────
+
+  let private makeModel (lines: string array) (width: int) (scrollTop: int) (height: int) : ViewportModel =
+    let wrapped =
+      match width with
+      | w when w > 0 -> wrapLines w lines
+      | _ -> lines
+    let maxScroll = max 0 (wrapped.Length - (max 1 height))
+    { Lines = lines
+      WrappedLines = wrapped
+      LastWidth = width
+      ScrollTop = min scrollTop (max 0 maxScroll)
+      Height = height }
+
+  /// Create an empty `ViewportModel`.
+  let empty : ViewportModel =
+    { Lines = [||]; WrappedLines = [||]; LastWidth = 0; ScrollTop = 0; Height = 20 }
+
+  /// Create a `ViewportModel` from a raw string. `ScrollTop` starts at 0.
   let ofString (content: string) : ViewportModel =
-    { Content = content; ScrollY = 0; WrapWidth = None }
+    let lines = content.Split('\n')
+    { Lines = lines; WrappedLines = lines; LastWidth = 0; ScrollTop = 0; Height = 20 }
 
-  let private lineCount (vm: ViewportModel) =
-    vm.Content.Split('\n').Length
+  /// Alias for `ofString` — initialise a `ViewportModel` from a string.
+  let init (content: string) : ViewportModel = ofString content
 
-  /// Scroll down by `n` lines, clamping at the last line.
-  let scrollDown (n: int) (vm: ViewportModel) : ViewportModel =
-    let maxY = max 0 (lineCount vm - 1)
-    { vm with ScrollY = min maxY (vm.ScrollY + n) }
+  /// Set the visible height (in lines) of this viewport.
+  let withHeight (h: int) (vm: ViewportModel) : ViewportModel =
+    { vm with Height = max 1 h }
 
-  /// Scroll up by `n` lines, clamping at 0.
-  let scrollUp (n: int) (vm: ViewportModel) : ViewportModel =
-    { vm with ScrollY = max 0 (vm.ScrollY - n) }
+  // ── Update ─────────────────────────────────────────────────────────────────
 
-  /// Scroll down by `n` lines (alias for large jumps — typically used for page-down).
-  let pageDown (n: int) (vm: ViewportModel) : ViewportModel = scrollDown n vm
+  let private clampScroll (vm: ViewportModel) : ViewportModel =
+    let maxScroll = max 0 (vm.WrappedLines.Length - (max 1 vm.Height))
+    { vm with ScrollTop = min vm.ScrollTop maxScroll }
 
-  /// Scroll up by `n` lines (alias for large jumps — typically used for page-up).
-  let pageUp (n: int) (vm: ViewportModel) : ViewportModel = scrollUp n vm
+  let private scrollDownN (n: int) (vm: ViewportModel) : ViewportModel =
+    let maxScroll = max 0 (vm.WrappedLines.Length - (max 1 vm.Height))
+    { vm with ScrollTop = min maxScroll (vm.ScrollTop + n) }
 
-  /// Render the viewport as a scrollable text element showing lines from `ScrollY` onward.
-  /// When `config.ShowScrollbar` is true, a proportional scrollbar is overlaid on the right edge.
-  let view (config: ViewportConfig) (vm: ViewportModel) : Element =
-    let lines = vm.Content.Split('\n')
-    let visibleLines = lines |> Array.skip (min vm.ScrollY (max 0 (lines.Length - 1)))
-    let content =
-      El.column (visibleLines |> Array.toList |> List.map El.text)
-    match config.ShowScrollbar with
+  let private scrollUpN (n: int) (vm: ViewportModel) : ViewportModel =
+    { vm with ScrollTop = max 0 (vm.ScrollTop - n) }
+
+  /// Scroll down by 1 line.
+  let scrollDown (vm: ViewportModel) : ViewportModel = scrollDownN 1 vm
+
+  /// Scroll up by 1 line.
+  let scrollUp (vm: ViewportModel) : ViewportModel = scrollUpN 1 vm
+
+  /// Scroll down by a page (height lines).
+  let pageDown (vm: ViewportModel) : ViewportModel = scrollDownN (max 1 vm.Height) vm
+
+  /// Scroll up by a page (height lines).
+  let pageUp (vm: ViewportModel) : ViewportModel = scrollUpN (max 1 vm.Height) vm
+
+  /// Process a `ViewportMsg`, returning an updated `ViewportModel`.
+  let update (msg: ViewportMsg) (vm: ViewportModel) : ViewportModel =
+    match msg with
+    | VPScrollDown          -> scrollDown vm
+    | VPScrollUp            -> scrollUp vm
+    | VPPageDown            -> pageDown vm
+    | VPPageUp              -> pageUp vm
+    | VPScrollToTop         -> { vm with ScrollTop = 0 }
+    | VPScrollToBottom      -> clampScroll { vm with ScrollTop = System.Int32.MaxValue }
+    | VPSetContent content  ->
+      let lines = content.Split('\n')
+      let wrapped =
+        match vm.LastWidth with
+        | w when w > 0 -> wrapLines w lines
+        | _ -> lines
+      { vm with Lines = lines; WrappedLines = wrapped; ScrollTop = 0 }
+    | VPResize w ->
+      match w = vm.LastWidth with
+      | true -> vm
+      | false ->
+        let wrapped = match w with | ww when ww > 0 -> wrapLines ww vm.Lines | _ -> vm.Lines
+        let maxScroll = max 0 (wrapped.Length - (max 1 vm.Height))
+        { vm with WrappedLines = wrapped; LastWidth = w; ScrollTop = min vm.ScrollTop maxScroll }
+
+  // ── Keyboard ───────────────────────────────────────────────────────────────
+
+  /// Map common navigation keys to `ViewportMsg`. Returns `None` for unhandled keys.
+  let handleKey (key: Key) : ViewportMsg option =
+    match key with
+    | KeyChar 'j' -> Some VPScrollDown
+    | KeyChar 'k' -> Some VPScrollUp
+    | KeyChar 'g' -> Some VPScrollToTop
+    | KeyChar 'G' -> Some VPScrollToBottom
+    | Key.PageDown -> Some VPPageDown
+    | Key.PageUp   -> Some VPPageUp
+    | _ -> None
+
+  // ── View ───────────────────────────────────────────────────────────────────
+
+  /// Render the viewport.
+  /// - `showScrollbar`: when true, a proportional thumb scrollbar is overlaid on the right edge.
+  /// - `visibleHeight`: how many lines are shown (should match `vm.Height`).
+  let view (showScrollbar: bool) (visibleHeight: int) (vm: ViewportModel) : Element =
+    let lines = vm.WrappedLines
+    let total = lines.Length
+    let start = min vm.ScrollTop (max 0 (total - 1))
+    let stop  = min total (start + visibleHeight)
+    let slice = lines[start .. stop - 1]
+    let content = El.column (slice |> Array.toList |> List.map El.text)
+    match showScrollbar with
     | false -> content
     | true ->
-      let total = lines.Length
-      let ratio = match total with 0 -> 0.0 | _ -> float vm.ScrollY / float (max 1 (total - 1))
+      let height = visibleHeight
+      let thumbSize = max 1 (height * height / (max 1 total))
+      let maxScroll = max 1 (total - height)
+      let thumbPos  = int (float vm.ScrollTop / float maxScroll * float (height - thumbSize))
       let bar =
         El.canvasWithMode Braille (fun pw ph ->
-          let pos = int (ratio * float (ph - 1))
           { Width = pw; Height = ph
             Pixels =
               Array.init (pw * ph) (fun i ->
-                match i / pw = pos with
+                let row = i / pw
+                match row >= thumbPos && row < thumbPos + thumbSize with
                 | true -> Color.Named(BaseColor.White, Intensity.Normal)
                 | false -> Color.Default) })
       El.overlay [ content; El.width 1 bar ]
+
 
 /// Extension methods on the `Chart` module for multi-series line chart rendering.
 module LineChart =
@@ -2684,17 +2910,51 @@ module LineChart =
     ShowGrid = false
   }
 
+  // ── Shared Bresenham helper ────────────────────────────────────────────────
+
+  let private bresenham (pixels: Color array) (pw: int) (ph: int) (color: Color) x0 y0 x1 y1 =
+    let setPixel x y =
+      match x >= 0 && x < pw && y >= 0 && y < ph with
+      | true -> pixels[y * pw + x] <- color
+      | false -> ()
+    let dx = abs (x1 - x0)
+    let dy = abs (y1 - y0)
+    let sx = match x0 < x1 with true -> 1 | false -> -1
+    let sy = match y0 < y1 with true -> 1 | false -> -1
+    let mutable err = dx - dy
+    let mutable cx = x0
+    let mutable cy = y0
+    let mutable running = true
+    while running do
+      setPixel cx cy
+      match cx = x1 && cy = y1 with
+      | true -> running <- false
+      | false ->
+        let e2 = err * 2
+        match e2 > -dy with
+        | true -> err <- err - dy; cx <- cx + sx
+        | false -> ()
+        match e2 < dx with
+        | true -> err <- err + dx; cy <- cy + sy
+        | false -> ()
+
+  // ── V1 chart ──────────────────────────────────────────────────────────────
+
   /// Render a multi-series line chart using the Braille canvas.
   /// - Lines are drawn with Bresenham's algorithm between consecutive data points.
   /// - All series share the same Y axis, auto-scaled to the global min/max.
+  /// - NaN values are silently skipped — the line is broken at NaN gaps.
   /// - An optional `XLabel` is rendered as a text row below the chart canvas.
   let lineChart' (config: LineChartConfig) : Element =
     match config.Series with
     | [] -> El.empty
     | series ->
-      let allValues = series |> List.collect (fun (_, pts) -> pts |> Array.toList)
-      let globalMin = allValues |> List.min
-      let globalMax = allValues |> List.max
+      let allValues =
+        series
+        |> List.collect (fun (_, pts) -> pts |> Array.toList)
+        |> List.filter (fun v -> not (System.Double.IsNaN v))
+      let globalMin = match allValues with [] -> 0.0 | vs -> List.min vs
+      let globalMax = match allValues with [] -> 1.0 | vs -> List.max vs
       let range = globalMax - globalMin
       let canvas =
         Canvas {
@@ -2702,10 +2962,6 @@ module LineChart =
           Fallback = None
           Draw = fun pw ph ->
             let pixels = Array.create (pw * ph) Color.Default
-            let setPixel x y color =
-              match x >= 0 && x < pw && y >= 0 && y < ph with
-              | true -> pixels[y * pw + x] <- color
-              | false -> ()
             let toPixelY (v: float) =
               match range with
               | 0.0 -> ph / 2
@@ -2716,38 +2972,20 @@ module LineChart =
               let n = pts.Length
               match n with
               | 0 -> ()
-              | 1 -> setPixel (pw / 2) (toPixelY pts[0]) color
+              | 1 ->
+                match System.Double.IsNaN pts[0] with
+                | false -> bresenham pixels pw ph color (pw / 2) (toPixelY pts[0]) (pw / 2) (toPixelY pts[0])
+                | true -> ()
               | _ ->
                 for i in 0 .. n - 2 do
-                  let x0 = int (float i * float (pw - 1) / float (n - 1))
-                  let x1 = int (float (i + 1) * float (pw - 1) / float (n - 1))
-                  let y0 = toPixelY pts[i]
-                  let y1 = toPixelY pts[i + 1]
-                  // Bresenham's line algorithm
-                  let dx = abs (x1 - x0)
-                  let dy = abs (y1 - y0)
-                  let sx = match x0 < x1 with true -> 1 | false -> -1
-                  let sy = match y0 < y1 with true -> 1 | false -> -1
-                  let mutable err = dx - dy
-                  let mutable cx = x0
-                  let mutable cy = y0
-                  let mutable running = true
-                  while running do
-                    setPixel cx cy color
-                    match cx = x1 && cy = y1 with
-                    | true -> running <- false
-                    | false ->
-                      let e2 = err * 2
-                      match e2 > -dy with
-                      | true ->
-                        err <- err - dy
-                        cx <- cx + sx
-                      | false -> ()
-                      match e2 < dx with
-                      | true ->
-                        err <- err + dx
-                        cy <- cy + sy
-                      | false -> ()
+                  match System.Double.IsNaN pts[i] || System.Double.IsNaN pts[i + 1] with
+                  | true -> ()
+                  | false ->
+                    let x0 = int (float i * float (pw - 1) / float (n - 1))
+                    let x1 = int (float (i + 1) * float (pw - 1) / float (n - 1))
+                    let y0 = toPixelY pts[i]
+                    let y1 = toPixelY pts[i + 1]
+                    bresenham pixels pw ph color x0 y0 x1 y1
             { Width = pw; Height = ph; Pixels = pixels }
         }
       match config.XLabel with
@@ -2757,4 +2995,92 @@ module LineChart =
   /// Render a multi-series line chart from a simple series list (uses default config).
   let lineChart (series: (Color * float array) list) : Element =
     lineChart' { defaults with Series = series }
+
+  // ── V2 chart ──────────────────────────────────────────────────────────────
+
+  /// Compute auto-scale bounds from a list of finite values.
+  /// When all values are equal, expands the range by ±1.0 to avoid a zero-height chart.
+  let computeAutoScale (values: float array) : float * float =
+    let finite = values |> Array.filter (fun v -> not (System.Double.IsNaN v))
+    match finite with
+    | [||] -> (0.0, 1.0)
+    | vs ->
+      let lo = Array.min vs
+      let hi = Array.max vs
+      match lo = hi with
+      | true -> (lo - 1.0, hi + 1.0)
+      | false -> (lo, hi)
+
+  let private defaultV2 : LineChartV2Config = {
+    V2Series = []
+    V2XLabel = None
+    V2YLabel = None
+    V2ShowGrid = false
+    V2LegendPosition = NoLegend
+  }
+
+  let private legendRow (config: LineChartV2Config) : Element =
+    let items =
+      config.V2Series
+      |> List.map (fun s -> El.fg s.SeriesColor (El.text (sprintf "■ %s" s.SeriesLabel)))
+    El.row items
+
+  /// Render a V2 multi-series line chart with named series, legend, NaN-gap support,
+  /// and auto-scaled Y axis.
+  let lineChartV2 (config: LineChartV2Config) : Element =
+    match config.V2Series with
+    | [] -> El.empty
+    | series ->
+      let allValues =
+        series
+        |> List.collect (fun s -> s.Data |> Array.toList)
+        |> Array.ofList
+      let (globalMin, globalMax) = computeAutoScale allValues
+      let range = globalMax - globalMin
+      let canvas =
+        Canvas {
+          Mode = Braille
+          Fallback = None
+          Draw = fun pw ph ->
+            let pixels = Array.create (pw * ph) Color.Default
+            let toPixelY (v: float) =
+              match range with
+              | 0.0 -> ph / 2
+              | _ ->
+                let norm = (v - globalMin) / range
+                ph - 1 - int (norm * float (ph - 1))
+            for s in series do
+              let pts = s.Data
+              let color = s.SeriesColor
+              let n = pts.Length
+              match n with
+              | 0 -> ()
+              | 1 ->
+                match System.Double.IsNaN pts[0] with
+                | false -> bresenham pixels pw ph color (pw / 2) (toPixelY pts[0]) (pw / 2) (toPixelY pts[0])
+                | true -> ()
+              | _ ->
+                for i in 0 .. n - 2 do
+                  match System.Double.IsNaN pts[i] || System.Double.IsNaN pts[i + 1] with
+                  | true -> ()
+                  | false ->
+                    let x0 = int (float i * float (pw - 1) / float (n - 1))
+                    let x1 = int (float (i + 1) * float (pw - 1) / float (n - 1))
+                    let y0 = toPixelY pts[i]
+                    let y1 = toPixelY pts[i + 1]
+                    bresenham pixels pw ph color x0 y0 x1 y1
+            { Width = pw; Height = ph; Pixels = pixels }
+        }
+      let withXLabel el =
+        match config.V2XLabel with
+        | None -> el
+        | Some lbl -> El.column [el; El.text lbl]
+      let withLegend el =
+        match config.V2LegendPosition with
+        | NoLegend    -> el
+        | LegendTop   -> El.column [legendRow config; el]
+        | LegendBottom -> El.column [el; legendRow config]
+        | LegendRight  -> El.row [el; legendRow config]
+      canvas |> withXLabel |> withLegend
+
 
