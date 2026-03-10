@@ -58,10 +58,24 @@ module Detect =
         | true -> MacOS
         | false -> Linux
 
+    // Detect input capability based on terminal identity.
+    // Modern terminals (Windows Terminal, iTerm2, xterm*, kitty) all support SGR
+    // mouse reporting (?1000h+?1006h). Fall back to FunctionKeys for unknown terminals.
+    let input =
+      match termProgram with
+      | "iTerm.app" -> InputCapability.MouseSgr
+      | _ ->
+        match wtSession with
+        | Some _ -> InputCapability.MouseSgr
+        | None ->
+          match term with
+          | t when t.Contains("xterm") || t.Contains("kitty") -> InputCapability.MouseSgr
+          | _ -> InputCapability.FunctionKeys
+
     { Color = color
       Unicode = unicode
       Graphics = graphics
-      Input = InputCapability.FunctionKeys
+      Input = input
       Output = OutputCapability.AltScreen
       Size = getSize()
       TermName = termProgram

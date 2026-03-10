@@ -63,8 +63,10 @@ module App =
     let mutable prevKeyAreas = Map.empty<string, Area>
     let mutable activeTransitions: ActiveTransition list = []
     let mutable exitCode = 0
-    // Track whether button-event mouse tracking (?1002h) is currently active.
-    // Auto-toggled by reconcileSubs when DragSub enters or leaves the sub list.
+    // Track mouse tracking escape state.
+    // mouseTrackingActive: ?1000h+?1006h — click/move events (MouseSub, ClickSub)
+    // dragTrackingActive:  ?1002h+?1006h — button-motion events (DragSub)
+    let mutable mouseTrackingActive = false
     let mutable dragTrackingActive = false
     let frameSw = System.Diagnostics.Stopwatch()
 
@@ -81,7 +83,8 @@ module App =
         async {
           try do! run dispatch
           with ex ->
-            eprintfn "OfAsync error: %s" ex.Message
+            let msg = sprintf "[SageTUI] OfAsync error at %s: %s\n%s\n" (DateTime.UtcNow.ToString("u")) ex.Message ex.StackTrace
+            try System.IO.File.AppendAllText("sagetui-errors.log", msg) with _ -> ()
         } |> Async.Start
       | OfCancellableAsync(id, run) ->
         match activeSubs.TryGetValue(id) with
@@ -122,6 +125,17 @@ module App =
       // lifecycle tracking here — they are matched against events in processEvent below.
       // Warn on duplicate IDs — the second sub silently won't start (the ContainsKey guard below).
 
+      // Auto-enable any-click tracking (?1000h+?1006h) when MouseSub or ClickSub is registered.
+      // Auto-disable when the last one is removed.
+      let hasMouseSub = currentSubs |> List.exists (function MouseSub _ | ClickSub _ -> true | _ -> false)
+      match hasMouseSub, mouseTrackingActive with
+      | true, false ->
+        backend.Write Ansi.enableMouseTracking
+        mouseTrackingActive <- true
+      | false, true ->
+        backend.Write Ansi.disableMouseTracking
+        mouseTrackingActive <- false
+      | _ -> ()
       // Auto-enable button-event mouse tracking (?1002h) when a DragSub is registered.
       // Auto-disable when the last DragSub is removed. This lets apps opt in to drag
       // tracking simply by returning a DragSub — no manual terminal escape needed.
@@ -216,6 +230,9 @@ module App =
         for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
         activeSubs.Clear()
         running <- false
+        match mouseTrackingActive with
+        | true -> backend.Write Ansi.disableMouseTracking; mouseTrackingActive <- false
+        | false -> ()
         match dragTrackingActive with
         | true -> backend.Write Ansi.disableButtonTracking; dragTrackingActive <- false
         | false -> ()
@@ -541,6 +558,9 @@ module App =
         | None ->
           Thread.Sleep 1
 
+      match mouseTrackingActive with
+      | true -> backend.Write Ansi.disableMouseTracking
+      | false -> ()
       match dragTrackingActive with
       | true -> backend.Write Ansi.disableButtonTracking
       | false -> ()
@@ -555,6 +575,9 @@ module App =
       if exitCode <> 0 then
         System.Environment.Exit exitCode
     with ex ->
+      match mouseTrackingActive with
+      | true -> backend.Write Ansi.disableMouseTracking
+      | false -> ()
       match dragTrackingActive with
       | true -> backend.Write Ansi.disableButtonTracking
       | false -> ()
@@ -642,6 +665,7 @@ module App =
     let mutable running = true
     let mutable needsFullRedraw = true
     let mutable exitCode = 0
+    let mutable mouseTrackingActive = false
     let mutable dragTrackingActive = false
     let frameSw = System.Diagnostics.Stopwatch()
 
@@ -657,7 +681,9 @@ module App =
       | OfAsync run ->
         async {
           try do! run dispatch
-          with ex -> eprintfn "OfAsync error: %s" ex.Message
+          with ex ->
+            let msg = sprintf "[SageTUI] OfAsync error at %s: %s\n%s\n" (DateTime.UtcNow.ToString("u")) ex.Message ex.StackTrace
+            try System.IO.File.AppendAllText("sagetui-errors.log", msg) with _ -> ()
         } |> Async.Start
       | OfCancellableAsync(id, run) ->
         match activeSubs.TryGetValue(id) with
@@ -687,6 +713,11 @@ module App =
         running <- false
 
     let reconcileSubs (currentSubs: Sub<'msg> list) =
+      let hasMouseSub = currentSubs |> List.exists (function MouseSub _ | ClickSub _ -> true | _ -> false)
+      match hasMouseSub, mouseTrackingActive with
+      | true, false -> backend.Write Ansi.enableMouseTracking; mouseTrackingActive <- true
+      | false, true -> backend.Write Ansi.disableMouseTracking; mouseTrackingActive <- false
+      | _ -> ()
       let hasDragSub = currentSubs |> List.exists (function DragSub _ -> true | _ -> false)
       match hasDragSub, dragTrackingActive with
       | true, false -> backend.Write Ansi.enableButtonTracking; dragTrackingActive <- true
@@ -735,6 +766,9 @@ module App =
     let cleanup () =
       for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
       activeSubs.Clear()
+      match mouseTrackingActive with
+      | true -> backend.Write Ansi.disableMouseTracking; mouseTrackingActive <- false
+      | false -> ()
       match dragTrackingActive with
       | true -> backend.Write Ansi.disableButtonTracking; dragTrackingActive <- false
       | false -> ()
@@ -837,6 +871,12 @@ module App =
       | code -> System.Environment.Exit code
     with ex ->
       Console.CancelKeyPress.RemoveHandler(cancelHandler)
+      match mouseTrackingActive with
+      | true -> backend.Write Ansi.disableMouseTracking
+      | false -> ()
+      match dragTrackingActive with
+      | true -> backend.Write Ansi.disableButtonTracking
+      | false -> ()
       backend.Write(Ansi.showCursor)
       backend.Flush()
       backend.LeaveRawMode()

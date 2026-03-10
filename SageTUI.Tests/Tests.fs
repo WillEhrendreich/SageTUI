@@ -2102,13 +2102,37 @@ let detectMiscTests = testList "Detect misc" [
     let p = detect (envOf ["TERM_PROGRAM", "Alacritty"])
     p.TermName |> Expect.equal "name" "Alacritty"
 
-  testCase "defaults input to FunctionKeys" <| fun () ->
+  testCase "defaults input to FunctionKeys when TERM unknown" <| fun () ->
     let p = detect emptyEnv
     p.Input |> Expect.equal "input" InputCapability.FunctionKeys
 
   testCase "defaults output to AltScreen" <| fun () ->
     let p = detect emptyEnv
     p.Output |> Expect.equal "output" OutputCapability.AltScreen
+
+  testCase "iTerm.app → MouseSgr" <| fun () ->
+    let p = detect (envOf ["TERM_PROGRAM", "iTerm.app"])
+    p.Input |> Expect.equal "iterm → MouseSgr" InputCapability.MouseSgr
+
+  testCase "WT_SESSION set → MouseSgr" <| fun () ->
+    let p = detect (envOf ["WT_SESSION", "some-guid"])
+    p.Input |> Expect.equal "wt → MouseSgr" InputCapability.MouseSgr
+
+  testCase "TERM=xterm-256color → MouseSgr" <| fun () ->
+    let p = detect (envOf ["TERM", "xterm-256color"])
+    p.Input |> Expect.equal "xterm → MouseSgr" InputCapability.MouseSgr
+
+  testCase "TERM=xterm-kitty → MouseSgr" <| fun () ->
+    let p = detect (envOf ["TERM", "xterm-kitty"])
+    p.Input |> Expect.equal "kitty → MouseSgr" InputCapability.MouseSgr
+
+  testCase "TERM=linux (framebuffer) → FunctionKeys" <| fun () ->
+    let p = detect (envOf ["TERM", "linux"])
+    p.Input |> Expect.equal "linux → FunctionKeys" InputCapability.FunctionKeys
+
+  testCase "TERM=dumb → FunctionKeys" <| fun () ->
+    let p = detect (envOf ["TERM", "dumb"])
+    p.Input |> Expect.equal "dumb → FunctionKeys" InputCapability.FunctionKeys
 ]
 
 let multiplexerTests = testList "Multiplexer" [
@@ -5319,4 +5343,97 @@ let sprint41Tests =
   testList "Sprint 41" [
     sprint41BorderedTitleTests
     sprint41ScrollTests
+  ]
+
+let sprint45MouseTrackingSubTests = testList "Sprint 45: mouse tracking sub auto-enable" [
+  testCase "enableMouseTracking contains ?1000h" <| fun () ->
+    Ansi.enableMouseTracking |> Expect.stringContains "has ?1000h" "?1000h"
+
+  testCase "enableMouseTracking contains ?1006h" <| fun () ->
+    Ansi.enableMouseTracking |> Expect.stringContains "has ?1006h" "?1006h"
+
+  testCase "disableMouseTracking contains ?1000l" <| fun () ->
+    Ansi.disableMouseTracking |> Expect.stringContains "has ?1000l" "?1000l"
+
+  testCase "disableMouseTracking contains ?1006l" <| fun () ->
+    Ansi.disableMouseTracking |> Expect.stringContains "has ?1006l" "?1006l"
+
+  testCase "hasMouseOrClick: empty list → false" <| fun () ->
+    let subs: Sub<int> list = []
+    subs |> List.exists (function MouseSub _ | ClickSub _ -> true | _ -> false)
+    |> Expect.isFalse "empty"
+
+  testCase "hasMouseOrClick: MouseSub → true" <| fun () ->
+    let subs: Sub<int> list = [ MouseSub (fun _ -> None) ]
+    subs |> List.exists (function MouseSub _ | ClickSub _ -> true | _ -> false)
+    |> Expect.isTrue "MouseSub detected"
+
+  testCase "hasMouseOrClick: ClickSub → true" <| fun () ->
+    let subs: Sub<int> list = [ ClickSub (fun _ -> None) ]
+    subs |> List.exists (function MouseSub _ | ClickSub _ -> true | _ -> false)
+    |> Expect.isTrue "ClickSub detected"
+
+  testCase "hasMouseOrClick: DragSub only → false" <| fun () ->
+    let subs: Sub<int> list = [ DragSub (fun _ -> None) ]
+    subs |> List.exists (function MouseSub _ | ClickSub _ -> true | _ -> false)
+    |> Expect.isFalse "DragSub is not MouseSub/ClickSub"
+
+  testCase "hasMouseOrClick: KeySub + MouseSub → true" <| fun () ->
+    let subs: Sub<int> list = [ KeySub (fun _ -> None); MouseSub (fun _ -> None) ]
+    subs |> List.exists (function MouseSub _ | ClickSub _ -> true | _ -> false)
+    |> Expect.isTrue "mixed list with MouseSub"
+
+  testCase "App writes enableMouseTracking when MouseSub registered" <| fun () ->
+    let events = [ TerminalEvent.KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, getOutput = TestBackend.create 20 3 events
+    let program: Program<unit, Key> = {
+      Init = fun () -> (), NoCmd
+      Update = fun msg () ->
+        match msg with
+        | Key.Escape -> (), Quit 0
+        | _ -> (), NoCmd
+      View = fun () -> El.text "mouse test"
+      // KeySub needed so Escape dispatches; MouseSub triggers enableMouseTracking
+      Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); MouseSub (fun _ -> None) ]
+    }
+    App.runWithBackend backend program
+    let output = getOutput()
+    output |> Expect.stringContains "?1000h written" "?1000h"
+
+  testCase "App writes disableMouseTracking on quit" <| fun () ->
+    let events = [ TerminalEvent.KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, getOutput = TestBackend.create 20 3 events
+    let program: Program<unit, Key> = {
+      Init = fun () -> (), NoCmd
+      Update = fun msg () ->
+        match msg with
+        | Key.Escape -> (), Quit 0
+        | _ -> (), NoCmd
+      View = fun () -> El.text "mouse test"
+      // KeySub needed so Escape dispatches; MouseSub triggers enableMouseTracking
+      Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); MouseSub (fun _ -> None) ]
+    }
+    App.runWithBackend backend program
+    let output = getOutput()
+    output |> Expect.stringContains "?1000l written on quit" "?1000l"
+
+  testCase "App does NOT write enableMouseTracking when no MouseSub/ClickSub" <| fun () ->
+    let events = [ TerminalEvent.KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, getOutput = TestBackend.create 20 3 events
+    let program: Program<unit, Key> = {
+      Init = fun () -> (), NoCmd
+      Update = fun msg () ->
+        match msg with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+      View = fun () -> El.text "no mouse"
+      Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
+    }
+    App.runWithBackend backend program
+    let output = getOutput()
+    output.Contains("?1000h") |> Expect.isFalse "?1000h not written without MouseSub"
+]
+
+[<Tests>]
+let sprint45Tests =
+  testList "Sprint 45" [
+    sprint45MouseTrackingSubTests
   ]
