@@ -39,6 +39,7 @@ module Measure =
       breakpoints |> List.tryHead |> Option.map (snd >> measureWidth) |> Option.defaultValue 0
     | ResponsiveH breakpoints ->
       breakpoints |> List.tryHead |> Option.map (snd >> measureWidth) |> Option.defaultValue 0
+    | Scroll(_, child) -> measureWidth child
 
   let rec measureHeight (elem: Element) : int =
     match elem with
@@ -72,6 +73,7 @@ module Measure =
       breakpoints |> List.tryHead |> Option.map (snd >> measureHeight) |> Option.defaultValue 0
     | ResponsiveH breakpoints ->
       breakpoints |> List.tryHead |> Option.map (snd >> measureHeight) |> Option.defaultValue 0
+    | Scroll(_, child) -> measureHeight child
 
   /// Measure content sizes for children in a Row context (width dimension).
   let childWidths (children: Element list) : int list =

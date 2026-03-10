@@ -130,3 +130,13 @@ module Render =
           match List.tryHead breakpoints with
           | Some (_, child) -> render area inheritedStyle buf child
           | None -> ()
+
+      | Scroll(offset, child) ->
+        let naturalH = max area.Height (Measure.measureHeight child)
+        let vBuf = Buffer.create area.Width naturalH
+        render { X = 0; Y = 0; Width = area.Width; Height = naturalH } inheritedStyle vBuf child
+        let safeOffset = max 0 (min offset (naturalH - area.Height))
+        for row = 0 to area.Height - 1 do
+          let srcRow = safeOffset + row
+          for col = 0 to area.Width - 1 do
+            Buffer.set (area.X + col) (area.Y + row) (Buffer.get col srcRow vBuf) buf

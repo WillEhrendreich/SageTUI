@@ -5106,6 +5106,111 @@ let sprint41BorderedTitleTests = testList "Sprint 41 BorderedWithTitle" [
     Buffer.get 0 2 buf |> fun c -> c.Rune |> Expect.equal "left V bar row2" (int (System.Text.Rune '\u2502').Value)
 ]
 
+let sprint41ScrollTests = testList "Sprint 41 El.scroll" [
+  testCase "El.scroll 0 — offset 0 shows top rows" <| fun () ->
+    let items = [ El.text "A"; El.text "B"; El.text "C"; El.text "D"; El.text "E" ]
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (El.scroll 0 (El.column items))
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "row0=A" (int (System.Text.Rune 'A').Value)
+    Buffer.get 0 1 buf |> fun c -> c.Rune |> Expect.equal "row1=B" (int (System.Text.Rune 'B').Value)
+    Buffer.get 0 2 buf |> fun c -> c.Rune |> Expect.equal "row2=C" (int (System.Text.Rune 'C').Value)
+
+  testCase "El.scroll 1 — offset 1 shifts rows up by 1" <| fun () ->
+    let items = [ El.text "A"; El.text "B"; El.text "C"; El.text "D"; El.text "E" ]
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (El.scroll 1 (El.column items))
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "row0=B" (int (System.Text.Rune 'B').Value)
+    Buffer.get 0 1 buf |> fun c -> c.Rune |> Expect.equal "row1=C" (int (System.Text.Rune 'C').Value)
+    Buffer.get 0 2 buf |> fun c -> c.Rune |> Expect.equal "row2=D" (int (System.Text.Rune 'D').Value)
+
+  testCase "El.scroll 2 — offset 2 shows rows 2..4" <| fun () ->
+    let items = [ El.text "A"; El.text "B"; El.text "C"; El.text "D"; El.text "E" ]
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (El.scroll 2 (El.column items))
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "row0=C" (int (System.Text.Rune 'C').Value)
+    Buffer.get 0 1 buf |> fun c -> c.Rune |> Expect.equal "row1=D" (int (System.Text.Rune 'D').Value)
+    Buffer.get 0 2 buf |> fun c -> c.Rune |> Expect.equal "row2=E" (int (System.Text.Rune 'E').Value)
+
+  testCase "El.scroll: offset clamped at max" <| fun () ->
+    // 5 items, viewport 3 → maxOffset = 2; offset=99 clamps to 2
+    let items = [ El.text "A"; El.text "B"; El.text "C"; El.text "D"; El.text "E" ]
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (El.scroll 99 (El.column items))
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "clamped row0=C" (int (System.Text.Rune 'C').Value)
+    Buffer.get 0 2 buf |> fun c -> c.Rune |> Expect.equal "clamped row2=E" (int (System.Text.Rune 'E').Value)
+
+  testCase "El.scroll: negative offset clamped to 0" <| fun () ->
+    let items = [ El.text "X"; El.text "Y"; El.text "Z" ]
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (El.scroll -5 (El.column items))
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "neg clamp row0=X" (int (System.Text.Rune 'X').Value)
+
+  testCase "El.scroll: Scroll DU wraps offset and child" <| fun () ->
+    match El.scroll 3 (El.text "Hi") with
+    | Scroll(3, Text("Hi", _)) -> ()
+    | _ -> failtest "expected Scroll(3, Text(Hi, _))"
+
+  testCase "El.scroll: Measure.measureWidth = child width" <| fun () ->
+    El.scroll 0 (El.text "Hello")
+    |> Measure.measureWidth
+    |> Expect.equal "scroll width = 5" 5
+
+  testCase "El.scroll: Measure.measureHeight = child natural height" <| fun () ->
+    let items = [ El.text "A"; El.text "B"; El.text "C" ]
+    El.scroll 0 (El.column items)
+    |> Measure.measureHeight
+    |> Expect.equal "scroll natural height = 3" 3
+
+  testCase "El.scroll: child wider than viewport renders correctly" <| fun () ->
+    // 4 rows child, 3-row viewport — can scroll 1 row
+    let buf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty buf (El.scroll 1 (El.column [ El.text "ABCDE"; El.text "FGHIJ"; El.text "KLMNO"; El.text "PQRST" ]))
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "row0=F" (int (System.Text.Rune 'F').Value)
+    Buffer.get 4 0 buf |> fun c -> c.Rune |> Expect.equal "row0 last=J" (int (System.Text.Rune 'J').Value)
+
+  testCase "El.scroll: with styled child propagates inherited style" <| fun () ->
+    let buf = Buffer.create 5 3
+    let styled = El.fg Color.Default (El.column [ El.text "A"; El.text "B"; El.text "C"; El.text "D" ])
+    Render.render (area4 5 3) Style.empty buf (El.scroll 1 styled)
+    Buffer.get 0 0 buf |> fun c -> c.Rune |> Expect.equal "styled offset 1 row0=B" (int (System.Text.Rune 'B').Value)
+
+  testCase "El.scroll: Arena parity with Render path (offset 0)" <| fun () ->
+    let items = El.column [ El.text "A"; El.text "B"; El.text "C"; El.text "D"; El.text "E" ]
+    let elem = El.scroll 0 items
+    let refBuf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty refBuf elem
+    let arena = FrameArena.create 100 1000 100
+    let root = Arena.lower arena elem
+    let arenaBuf = Buffer.create 5 3
+    ArenaRender.renderRoot arena root { X = 0; Y = 0; Width = 5; Height = 3 } arenaBuf
+    Buffer.get 0 0 arenaBuf |> fun c -> c.Rune |> Expect.equal "arena offset0 row0=A" (Buffer.get 0 0 refBuf).Rune
+    Buffer.get 0 1 arenaBuf |> fun c -> c.Rune |> Expect.equal "arena offset0 row1=B" (Buffer.get 0 1 refBuf).Rune
+    Buffer.get 0 2 arenaBuf |> fun c -> c.Rune |> Expect.equal "arena offset0 row2=C" (Buffer.get 0 2 refBuf).Rune
+
+  testCase "El.scroll: Arena parity with Render path (offset 2)" <| fun () ->
+    let items = El.column [ El.text "A"; El.text "B"; El.text "C"; El.text "D"; El.text "E" ]
+    let elem = El.scroll 2 items
+    let refBuf = Buffer.create 5 3
+    Render.render (area4 5 3) Style.empty refBuf elem
+    let arena = FrameArena.create 100 1000 100
+    let root = Arena.lower arena elem
+    let arenaBuf = Buffer.create 5 3
+    ArenaRender.renderRoot arena root { X = 0; Y = 0; Width = 5; Height = 3 } arenaBuf
+    Buffer.get 0 0 arenaBuf |> fun c -> c.Rune |> Expect.equal "arena offset2 row0=C" (Buffer.get 0 0 refBuf).Rune
+    Buffer.get 0 2 arenaBuf |> fun c -> c.Rune |> Expect.equal "arena offset2 row2=E" (Buffer.get 0 2 refBuf).Rune
+
+  testCase "El.scroll: non-zero X/Y area offsets applied correctly" <| fun () ->
+    let items = El.column [ El.text "A"; El.text "B"; El.text "C"; El.text "D" ]
+    let buf = Buffer.create 20 10
+    // Render into a sub-area at (5, 3) with size 5x2
+    let subArea = { X = 5; Y = 3; Width = 5; Height = 2 }
+    Render.render subArea Style.empty buf (El.scroll 1 items)
+    Buffer.get 5 3 buf |> fun c -> c.Rune |> Expect.equal "sub-area row0=B" (int (System.Text.Rune 'B').Value)
+    Buffer.get 5 4 buf |> fun c -> c.Rune |> Expect.equal "sub-area row1=C" (int (System.Text.Rune 'C').Value)
+    // Surrounding area untouched
+    Buffer.get 4 3 buf |> fun c -> c.Rune |> Expect.equal "outside left untouched" (int (System.Text.Rune ' ').Value)
+]
+
 [<Tests>]
 let sprint40Tests =
   testList "Sprint 40" [
@@ -5118,4 +5223,5 @@ let sprint40Tests =
 let sprint41Tests =
   testList "Sprint 41" [
     sprint41BorderedTitleTests
+    sprint41ScrollTests
   ]

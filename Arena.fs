@@ -277,6 +277,13 @@ module Arena =
           first
       arena.Nodes.[idx] <- mkNode 15uy 0UL 0us 0uy 0s fc -1 0 0
       h
+    | Scroll(offset, child) ->
+      let h = FrameArena.allocNode arena
+      let (NodeHandle idx) = h
+      let (NodeHandle ci) = lower arena child
+      // DataStart encodes the scroll offset; DataLen unused (0)
+      arena.Nodes.[idx] <- mkNode 17uy 0UL 0us 0uy 0s ci -1 offset 0
+      h
 
   and lowerChildren (arena: FrameArena) (children: Element list) : int =
     match children with

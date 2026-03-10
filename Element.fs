@@ -74,6 +74,11 @@ type Element =
   /// The last breakpoint whose minHeight ≤ available height is selected.
   /// Composes with Responsive for 2D breakpoints.
   | ResponsiveH of (int * Element) list
+  /// Vertically clips a child element to the current viewport, starting at the given row offset.
+  /// The visible region is determined by the available height at render time.
+  /// Use with El.height to set the viewport size; the child renders at its natural (full) height
+  /// into an offscreen buffer, then the viewport slice is copied into the target buffer.
+  | Scroll of offset: int * child: Element
 
 /// Column width distribution for El.grid.
 type GridColumns =
@@ -324,6 +329,16 @@ module El =
   let responsiveH (breakpoints: (int * Element) list) : Element =
     ResponsiveH breakpoints
 
+  /// Vertically scroll a child element, showing only the region starting at `offset` rows.
+  /// The visible height is determined by the layout area at render time.
+  /// The child renders at its natural height into an offscreen buffer; only the viewport
+  /// slice [offset .. offset + viewportH) is copied into the target buffer.
+  ///
+  /// Typical usage — pair with El.height to set the viewport size:
+  ///   El.scroll model.scrollOffset (El.column rows) |> El.height 20
+  let scroll (offset: int) (child: Element) : Element =
+    Scroll(offset, child)
+
   /// Memoize a view function: returns cached Element when input equals the previous input.
   /// Declare at module level to persist the cache across renders.
   /// Use at module level: `let lazyCounter = El.lazy' Counter.view`
@@ -419,6 +434,8 @@ module El =
         label "Resp" (Responsive(breakpoints |> List.map (fun (minW, child) -> (minW, dbg (depth + 1) child))))
       | ResponsiveH breakpoints ->
         label "RespH" (ResponsiveH(breakpoints |> List.map (fun (minH, child) -> (minH, dbg (depth + 1) child))))
+      | Scroll(off, child) ->
+        label (sprintf "Scroll:%d" off) (Scroll(off, dbg (depth + 1) child))
     dbg 0 elem
 
   /// Lay children out in a grid of `cols` columns.

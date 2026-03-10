@@ -124,6 +124,10 @@ module ArenaRender =
       match node.FirstChild with
       | -1 -> 0
       | wi -> measureWidth arena arena.Nodes.[wi].FirstChild
+    | 17uy -> // Scroll — width = child width
+      match node.FirstChild with
+      | -1 -> 0
+      | ci -> measureWidth arena ci
     | _ -> 0
 
   /// Measure intrinsic height of an arena node.
@@ -190,6 +194,10 @@ module ArenaRender =
       match node.FirstChild with
       | -1 -> 0
       | wi -> measureHeight arena arena.Nodes.[wi].FirstChild
+    | 17uy -> // Scroll — height = child natural height
+      match node.FirstChild with
+      | -1 -> 0
+      | ci -> measureHeight arena ci
     | _ -> 0
 
   let rec render (arena: FrameArena) (nodeIdx: int) (area: Area) (inheritedFg: int) (inheritedBg: int) (inheritedAttrs: uint16) (buf: Buffer) =
@@ -566,6 +574,19 @@ module ArenaRender =
         match target with
         | -1 -> ()
         | idx -> render arena idx area inheritedFg inheritedBg inheritedAttrs buf
+
+      | 17uy -> // Scroll — render child into virtual buffer, copy viewport rows
+        let ci = node.FirstChild
+        if ci >= 0 then
+          let offset = node.DataStart
+          let naturalH = max area.Height (measureHeight arena ci)
+          let vBuf = Buffer.create area.Width naturalH
+          render arena ci { X = 0; Y = 0; Width = area.Width; Height = naturalH } inheritedFg inheritedBg inheritedAttrs vBuf
+          let safeOffset = max 0 (min offset (naturalH - area.Height))
+          for row = 0 to area.Height - 1 do
+            let srcRow = safeOffset + row
+            for col = 0 to area.Width - 1 do
+              Buffer.set (area.X + col) (area.Y + row) (Buffer.get col srcRow vBuf) buf
 
       | _ -> ()
 

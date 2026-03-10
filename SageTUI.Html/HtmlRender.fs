@@ -131,6 +131,11 @@ module HtmlRender =
       Elem.div
         [ Attr.style "display:contents" ]
         [ render child ]
+    | Scroll(_, child) ->
+      // HTML: render child directly (no viewport clipping in HTML context)
+      Elem.div
+        [ Attr.style "overflow:hidden" ]
+        [ render child ]
 
   /// Render Element to HTML string
   let renderToString (el: Element) : string =
