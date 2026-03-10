@@ -5437,3 +5437,179 @@ let sprint45Tests =
   testList "Sprint 45" [
     sprint45MouseTrackingSubTests
   ]
+
+// ---------------------------------------------------------------------------
+// Sprint 46: Zero-alloc diff + bracketed paste
+// ---------------------------------------------------------------------------
+
+let sprint46DiffIntoTests = testList "Sprint 46: Buffer.diffInto zero-alloc" [
+  testCase "diffInto same result as diff" <| fun () ->
+    let prev = Buffer.create 4 2
+    let curr = Buffer.create 4 2
+    let cell = { Rune = int 'X'; Fg = PackedColor.pack (Named(Red, Normal)); Bg = PackedColor.pack Default; Attrs = TextAttrs.none.Value; _pad = 0us }
+    Buffer.set 1 0 cell curr
+    let expected = Buffer.diff prev curr |> Seq.toList
+    let changes = ResizeArray<int>(64)
+    Buffer.diffInto changes prev curr
+    changes |> Seq.toList |> Expect.equal "same indices as diff" expected
+
+  testCase "diffInto clears prior contents before filling" <| fun () ->
+    let prev = Buffer.create 4 2
+    let curr = Buffer.create 4 2
+    let cell = { Rune = int 'A'; Fg = PackedColor.pack Default; Bg = PackedColor.pack Default; Attrs = TextAttrs.none.Value; _pad = 0us }
+    Buffer.set 0 0 cell curr
+    let changes = ResizeArray<int>(64)
+    Buffer.diffInto changes prev curr
+    let firstCount = changes.Count
+    Buffer.diffInto changes curr curr
+    changes.Count |> Expect.equal "cleared on second call with identical buffers" 0
+    firstCount |> Expect.equal "first call found one change" 1
+
+  testCase "diffInto pre-alloc larger than changes does not accumulate stale entries" <| fun () ->
+    let prev = Buffer.create 10 1
+    let curr = Buffer.create 10 1
+    let cell = { Rune = int 'Z'; Fg = PackedColor.pack Default; Bg = PackedColor.pack Default; Attrs = TextAttrs.none.Value; _pad = 0us }
+    Buffer.set 3 0 cell curr
+    let changes = ResizeArray<int>(256)
+    Buffer.diffInto changes prev curr
+    Buffer.set 3 0 Buffer.emptyCell curr
+    Buffer.diffInto changes prev curr
+    changes.Count |> Expect.equal "no stale entries" 0
+
+  testProperty "diffInto always matches diff output (property)" <| fun (seed: int) ->
+    let rng = System.Random(seed)
+    let w, h = 8, 4
+    let prev = Buffer.create w h
+    let curr = Buffer.create w h
+    for _ in 1 .. rng.Next(0, w * h) do
+      let idx = rng.Next(0, w * h)
+      let cell = { Rune = rng.Next(32, 127); Fg = PackedColor.pack Default; Bg = PackedColor.pack Default; Attrs = TextAttrs.none.Value; _pad = 0us }
+      Buffer.set (idx % w) (idx / w) cell curr
+    let expected = Buffer.diff prev curr |> Seq.toList
+    let changes = ResizeArray<int>(64)
+    Buffer.diffInto changes prev curr
+    changes |> Seq.toList |> Expect.equal "matches diff" expected
+]
+
+let sprint46AnsiTests = testList "Sprint 46: bracketed paste ANSI constants" [
+  testCase "enableBracketedPaste contains ?2004h" <| fun () ->
+    Ansi.enableBracketedPaste |> Expect.stringContains "has ?2004h" "?2004h"
+
+  testCase "disableBracketedPaste contains ?2004l" <| fun () ->
+    Ansi.disableBracketedPaste |> Expect.stringContains "has ?2004l" "?2004l"
+
+  testCase "enable and disable are different strings" <| fun () ->
+    (Ansi.enableBracketedPaste = Ansi.disableBracketedPaste)
+    |> Expect.isFalse "enable ≠ disable"
+]
+
+let sprint46ParseTests = testList "Sprint 46: bracketed paste parsing" [
+  testCase "isCompleteEscSeq: simple bracketed paste with ESC prefix on closer" <| fun () ->
+    let buf = "[200~hello\x1b[201~"
+    AnsiParser.isCompleteEscSeq buf |> Expect.isTrue "complete with ESC[201~"
+
+  testCase "isCompleteEscSeq: bracketed paste with bare [201~ closer" <| fun () ->
+    let buf = "[200~hello[201~"
+    AnsiParser.isCompleteEscSeq buf |> Expect.isTrue "complete with [201~"
+
+  testCase "isCompleteEscSeq: bracketed paste prefix only → incomplete" <| fun () ->
+    let buf = "[200~hello"
+    AnsiParser.isCompleteEscSeq buf |> Expect.isFalse "incomplete without closer"
+
+  testCase "isCompleteEscSeq: bracketed paste empty content" <| fun () ->
+    let buf = "[200~\x1b[201~"
+    AnsiParser.isCompleteEscSeq buf |> Expect.isTrue "empty content is complete"
+
+  testCase "parseEscape: extracts content between markers (ESC prefix)" <| fun () ->
+    let result = AnsiParser.parseEscape "[200~hello world\x1b[201~"
+    result |> Expect.equal "pasted content" (Some (Pasted "hello world"))
+
+  testCase "parseEscape: extracts content between markers (no ESC prefix on closer)" <| fun () ->
+    let result = AnsiParser.parseEscape "[200~hello world[201~"
+    result |> Expect.equal "pasted content bare" (Some (Pasted "hello world"))
+
+  testCase "parseEscape: multiline paste content" <| fun () ->
+    let result = AnsiParser.parseEscape "[200~line1\nline2\nline3\x1b[201~"
+    result |> Expect.equal "multiline" (Some (Pasted "line1\nline2\nline3"))
+
+  testCase "parseEscape: empty paste content" <| fun () ->
+    let result = AnsiParser.parseEscape "[200~\x1b[201~"
+    result |> Expect.equal "empty paste" (Some (Pasted ""))
+
+  testCase "hasPasteSub: empty list → false" <| fun () ->
+    let subs: Sub<int> list = []
+    subs |> List.exists (function PasteSub _ -> true | _ -> false)
+    |> Expect.isFalse "empty"
+
+  testCase "hasPasteSub: PasteSub → true" <| fun () ->
+    let subs: Sub<int> list = [ PasteSub (fun _ -> None) ]
+    subs |> List.exists (function PasteSub _ -> true | _ -> false)
+    |> Expect.isTrue "PasteSub detected"
+
+  testCase "hasPasteSub: KeySub + PasteSub → true" <| fun () ->
+    let subs: Sub<int> list = [ KeySub (fun _ -> None); PasteSub (fun _ -> None) ]
+    subs |> List.exists (function PasteSub _ -> true | _ -> false)
+    |> Expect.isTrue "mixed list with PasteSub"
+
+  testCase "hasPasteSub: MouseSub only → false" <| fun () ->
+    let subs: Sub<int> list = [ MouseSub (fun _ -> None) ]
+    subs |> List.exists (function PasteSub _ -> true | _ -> false)
+    |> Expect.isFalse "MouseSub is not PasteSub"
+]
+
+let sprint46AppWiringTests = testList "Sprint 46: App PasteSub wiring" [
+  testCase "App writes enableBracketedPaste when PasteSub registered" <| fun () ->
+    let events = [ TerminalEvent.KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, getOutput = TestBackend.create 20 3 events
+    let program: Program<unit, Key> = {
+      Init = fun () -> (), NoCmd
+      Update = fun msg () ->
+        match msg with
+        | Key.Escape -> (), Quit 0
+        | _ -> (), NoCmd
+      View = fun () -> El.text "paste test"
+      Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); PasteSub (fun _ -> None) ]
+    }
+    App.runWithBackend backend program
+    let output = getOutput()
+    output |> Expect.stringContains "?2004h written" "?2004h"
+
+  testCase "App writes disableBracketedPaste on quit" <| fun () ->
+    let events = [ TerminalEvent.KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, getOutput = TestBackend.create 20 3 events
+    let program: Program<unit, Key> = {
+      Init = fun () -> (), NoCmd
+      Update = fun msg () ->
+        match msg with
+        | Key.Escape -> (), Quit 0
+        | _ -> (), NoCmd
+      View = fun () -> El.text "paste test"
+      Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); PasteSub (fun _ -> None) ]
+    }
+    App.runWithBackend backend program
+    let output = getOutput()
+    output |> Expect.stringContains "?2004l written on quit" "?2004l"
+
+  testCase "App does NOT write enableBracketedPaste when no PasteSub" <| fun () ->
+    let events = [ TerminalEvent.KeyPressed(Key.Escape, Modifiers.None) ]
+    let backend, getOutput = TestBackend.create 20 3 events
+    let program: Program<unit, Key> = {
+      Init = fun () -> (), NoCmd
+      Update = fun msg () ->
+        match msg with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+      View = fun () -> El.text "no paste"
+      Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
+    }
+    App.runWithBackend backend program
+    let output = getOutput()
+    output.Contains("?2004h") |> Expect.isFalse "?2004h not written without PasteSub"
+]
+
+[<Tests>]
+let sprint46Tests =
+  testList "Sprint 46" [
+    sprint46DiffIntoTests
+    sprint46AnsiTests
+    sprint46ParseTests
+    sprint46AppWiringTests
+  ]

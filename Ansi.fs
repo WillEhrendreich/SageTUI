@@ -23,6 +23,11 @@ module Ansi =
   let enableButtonTracking = sprintf "%s?1002h%s?1006h" esc esc
   /// Disable button-event tracking (?1002l) and SGR extended encoding (?1006l).
   let disableButtonTracking = sprintf "%s?1002l%s?1006l" esc esc
+  /// Enable bracketed paste mode (?2004h): terminal wraps pasted text with ESC[200~ ... ESC[201~.
+  /// PasteSub in Tea.fs requires this to receive Pasted events.
+  let enableBracketedPaste = sprintf "%s?2004h" esc
+  /// Disable bracketed paste mode (?2004l).
+  let disableBracketedPaste = sprintf "%s?2004l" esc
   let resetStyle = sprintf "%s0m" esc
 
   let fgColor (c: Color) =

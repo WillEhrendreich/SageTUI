@@ -102,10 +102,11 @@ module Buffer =
   let clear buf =
     System.Array.Fill(buf.Cells, emptyCell)
 
-  /// SIMD-accelerated diff via chunk-skip pattern.
+  /// SIMD-accelerated diff via chunk-skip pattern. Fills a pre-allocated ResizeArray.
   /// Span.SequenceEqual is JIT-vectorized in .NET 8+.
-  let diff (prev: Buffer) (curr: Buffer) =
-    let changes = ResizeArray<int>()
+  /// Pre-allocating `changes` in the caller keeps this allocation-free between frames.
+  let diffInto (changes: ResizeArray<int>) (prev: Buffer) (curr: Buffer) =
+    changes.Clear()
     let prevBytes = MemoryMarshal.AsBytes(System.ReadOnlySpan(prev.Cells))
     let currBytes = MemoryMarshal.AsBytes(System.ReadOnlySpan(curr.Cells))
     let cellSz = sizeof<PackedCell>
@@ -126,6 +127,12 @@ module Buffer =
       if not (prevBytes.Slice(bs, cellSz).SequenceEqual(currBytes.Slice(bs, cellSz))) then
         changes.Add(i)
       i <- i + 1
+
+  /// SIMD-accelerated diff via chunk-skip pattern.
+  /// Allocates a new ResizeArray on every call. Prefer diffInto for hot paths.
+  let diff (prev: Buffer) (curr: Buffer) =
+    let changes = ResizeArray<int>()
+    diffInto changes prev curr
     changes
 
   let toString buf =

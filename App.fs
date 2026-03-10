@@ -66,8 +66,10 @@ module App =
     // Track mouse tracking escape state.
     // mouseTrackingActive: ?1000h+?1006h — click/move events (MouseSub, ClickSub)
     // dragTrackingActive:  ?1002h+?1006h — button-motion events (DragSub)
+    // pasteTrackingActive: ?2004h        — bracketed paste wrapping (PasteSub)
     let mutable mouseTrackingActive = false
     let mutable dragTrackingActive = false
+    let mutable pasteTrackingActive = false
     let frameSw = System.Diagnostics.Stopwatch()
 
     let msgChannel = ConcurrentQueue<'msg>()
@@ -147,6 +149,16 @@ module App =
       | false, true ->
         backend.Write Ansi.disableButtonTracking
         dragTrackingActive <- false
+      | _ -> ()
+      // Auto-enable bracketed paste mode (?2004h) when a PasteSub is registered.
+      let hasPasteSub = currentSubs |> List.exists (function PasteSub _ -> true | _ -> false)
+      match hasPasteSub, pasteTrackingActive with
+      | true, false ->
+        backend.Write Ansi.enableBracketedPaste
+        pasteTrackingActive <- true
+      | false, true ->
+        backend.Write Ansi.disableBracketedPaste
+        pasteTrackingActive <- false
       | _ -> ()
       let ids =
         currentSubs
@@ -236,6 +248,9 @@ module App =
         match dragTrackingActive with
         | true -> backend.Write Ansi.disableButtonTracking; dragTrackingActive <- false
         | false -> ()
+        match pasteTrackingActive with
+        | true -> backend.Write Ansi.disableBracketedPaste; pasteTrackingActive <- false
+        | false -> ()
         match automation.UseAltScreen with
         | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
         | false -> backend.Write(Ansi.showCursor)
@@ -289,6 +304,9 @@ module App =
       interpretCmd initCmd
       let mutable subs = program.Subscribe model
       reconcileSubs subs
+      // Pre-allocate the diff buffer once. diffInto clears and fills it each frame,
+      // eliminating the per-frame ResizeArray allocation that would defeat the zero-GC claim.
+      let diffChanges = ResizeArray<int>(256)
 
       while running do
         let mutable msg = Unchecked.defaultof<'msg>
@@ -463,13 +481,13 @@ module App =
           // Remove completed transitions
           activeTransitions <- activeTransitions |> List.filter (fun at -> not (ActiveTransition.isDone nowMs at))
   
-          let changes = Buffer.diff frontBuf backBuf
+          Buffer.diffInto diffChanges frontBuf backBuf
           let diffMs = frameSw.Elapsed.TotalMilliseconds - renderMs
   
-          match changes.Count > 0 with
+          match diffChanges.Count > 0 with
           | true ->
             let presentStart = frameSw.Elapsed.TotalMilliseconds
-            let output = Presenter.present changes backBuf
+            let output = Presenter.present diffChanges backBuf
             backend.Write(output)
             backend.Flush()
             let presentMs = frameSw.Elapsed.TotalMilliseconds - presentStart
@@ -478,7 +496,7 @@ module App =
                 DiffMs = diffMs
                 PresentMs = presentMs
                 TotalMs = frameSw.Elapsed.TotalMilliseconds
-                ChangedCells = changes.Count }
+                ChangedCells = diffChanges.Count }
             for sub in subs do
               match sub with
               | FrameTimingsSub toMsg -> dispatch (toMsg timings)
@@ -564,6 +582,9 @@ module App =
       match dragTrackingActive with
       | true -> backend.Write Ansi.disableButtonTracking
       | false -> ()
+      match pasteTrackingActive with
+      | true -> backend.Write Ansi.disableBracketedPaste
+      | false -> ()
       match automation.UseAltScreen with
       | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
       | false -> backend.Write(Ansi.showCursor)
@@ -580,6 +601,9 @@ module App =
       | false -> ()
       match dragTrackingActive with
       | true -> backend.Write Ansi.disableButtonTracking
+      | false -> ()
+      match pasteTrackingActive with
+      | true -> backend.Write Ansi.disableBracketedPaste
       | false -> ()
       match automation.UseAltScreen with
       | true -> backend.Write(Ansi.showCursor + Ansi.leaveAltScreen)
@@ -667,6 +691,7 @@ module App =
     let mutable exitCode = 0
     let mutable mouseTrackingActive = false
     let mutable dragTrackingActive = false
+    let mutable pasteTrackingActive = false
     let frameSw = System.Diagnostics.Stopwatch()
 
     let msgChannel = ConcurrentQueue<'msg>()
@@ -723,6 +748,11 @@ module App =
       | true, false -> backend.Write Ansi.enableButtonTracking; dragTrackingActive <- true
       | false, true -> backend.Write Ansi.disableButtonTracking; dragTrackingActive <- false
       | _ -> ()
+      let hasPasteSub = currentSubs |> List.exists (function PasteSub _ -> true | _ -> false)
+      match hasPasteSub, pasteTrackingActive with
+      | true, false -> backend.Write Ansi.enableBracketedPaste; pasteTrackingActive <- true
+      | false, true -> backend.Write Ansi.disableBracketedPaste; pasteTrackingActive <- false
+      | _ -> ()
       let ids =
         currentSubs
         |> List.choose (function
@@ -772,6 +802,9 @@ module App =
       match dragTrackingActive with
       | true -> backend.Write Ansi.disableButtonTracking; dragTrackingActive <- false
       | false -> ()
+      match pasteTrackingActive with
+      | true -> backend.Write Ansi.disableBracketedPaste; pasteTrackingActive <- false
+      | false -> ()
       match clearOnExit with
       | true ->
         clearInlineArea()
@@ -795,6 +828,7 @@ module App =
       interpretCmd initCmd
       let mutable subs = program.Subscribe model
       reconcileSubs subs
+      let diffChanges = ResizeArray<int>(256)
 
       while running do
         let mutable msg = Unchecked.defaultof<'msg>
@@ -836,11 +870,11 @@ module App =
           let area = { X = 0; Y = 0; Width = width; Height = inlineHeight }
           frameSw.Restart()
           ArenaRender.renderRoot arena rootHandle area backBuf
-          let changes = Buffer.diff frontBuf backBuf
-          match changes.Count with
+          Buffer.diffInto diffChanges frontBuf backBuf
+          match diffChanges.Count with
           | 0 -> ()
           | _ ->
-            let output = Presenter.presentAt startRow changes backBuf
+            let output = Presenter.presentAt startRow diffChanges backBuf
             backend.Write(output)
             backend.Flush()
             Array.blit backBuf.Cells 0 frontBuf.Cells 0 frontBuf.Cells.Length
@@ -876,6 +910,9 @@ module App =
       | false -> ()
       match dragTrackingActive with
       | true -> backend.Write Ansi.disableButtonTracking
+      | false -> ()
+      match pasteTrackingActive with
+      | true -> backend.Write Ansi.disableBracketedPaste
       | false -> ()
       backend.Write(Ansi.showCursor)
       backend.Flush()

@@ -108,8 +108,17 @@ module AnsiParser =
     | s ->
       match s.[0] with
       | '[' ->
+        // Bracketed paste: starts with "[200~" and ends with the next ESC[201~ sequence.
+        // The buf here is everything AFTER the first ESC; a bracketed paste chunk
+        // looks like "[200~<content>ESC[201~". We detect completion by finding "[201~" at the end.
+        match s.StartsWith("[200~") with
+        | true ->
+          // Use Ordinal comparison: ESC (\x1b = char 27) is a Unicode-ignorable character
+          // in cultural comparisons, so EndsWith("\x1b[201~") would return true even without
+          // the ESC byte. Ordinal guarantees a byte-exact check.
+          s.EndsWith("\x1b[201~", System.StringComparison.Ordinal) || s.EndsWith("[201~", System.StringComparison.Ordinal)
         // CSI: '[' + zero-or-more param/intermediate bytes + one final byte (0x40–0x7E)
-        s.Length >= 2 && s.[s.Length - 1] >= '@' && s.[s.Length - 1] <= '~'
+        | false -> s.Length >= 2 && s.[s.Length - 1] >= '@' && s.[s.Length - 1] <= '~'
       | 'O' ->
         // SS3: 'O' + exactly one char (F1=P, F2=Q, F3=R, F4=S)
         s.Length = 2
@@ -267,6 +276,19 @@ module AnsiParser =
     // Terminal OS-level focus reporting (?1004h): ESC [ I = gained, ESC [ O = lost
     | "[I"  -> Some FocusGained
     | "[O"  -> Some FocusLost
+    | s when s.StartsWith("[200~") ->
+      // Bracketed paste: "[200~<content>ESC[201~" or "[200~<content>[201~"
+      // Strip the "[200~" prefix and the closing "[201~" / "\x1b[201~" suffix.
+      let content = s.[5..]  // drop "[200~"
+      let pasted =
+        // Use Ordinal: ESC is Unicode-ignorable in cultural comparison.
+        match content.EndsWith("\x1b[201~", System.StringComparison.Ordinal) with
+        | true  -> content.[..content.Length - 7]   // strip ESC[201~ (6 chars)
+        | false ->
+          match content.EndsWith("[201~", System.StringComparison.Ordinal) with
+          | true  -> content.[..content.Length - 6]  // strip [201~ (5 chars)
+          | false -> content
+      Some (Pasted pasted)
     | s when s.Length > 2 && s.[0] = '[' && s.[1] = '<' ->
       // SGR mouse: CSI body is "[<btn;x;yM" → pass "<btn;x;yM" to parseSgrMouse
       parseSgrMouse s.[1..] |> Option.map MouseInput
