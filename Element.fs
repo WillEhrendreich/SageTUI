@@ -470,6 +470,17 @@ module El =
   ///   El.markupf "Found [bold]%d[/bold] matches in [cyan]%s[/]" count filename
   let markupf fmt = Printf.ksprintf markup fmt
 
+  /// Render a pre-parsed list of `(text, style)` spans as an inline row.
+  /// Each span is rendered as a `Styled` text node. Empty input returns `El.empty`.
+  ///
+  /// Example:
+  ///   El.markupSpans [ ("Error: ", boldRedStyle); ("file not found", italicStyle) ]
+  let markupSpans (spans: (string * Style) list) : Element =
+    match spans with
+    | [] -> Empty
+    | [ (t, s) ] -> Styled(s, Text(t, Style.empty))
+    | _ -> Row(spans |> List.map (fun (t, s) -> Styled(s, Text(t, Style.empty))))
+
   // Text wrapping (composition — no new DU case)
   let private wordWrap (maxWidth: int) (s: string) =
     match maxWidth <= 0 with

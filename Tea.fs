@@ -111,6 +111,28 @@ module Cmd =
           dispatch (onError ex)
       })
 
+  /// Run an `Async<Result<'a, exn>>` and dispatch the appropriate message.
+  /// On `Ok value`, dispatches `onOk value`. On `Error exn`, dispatches `onError exn`.
+  /// Unlike `Cmd.ofAsync`, exceptions embedded in the Result are surfaced as messages —
+  /// nothing is silently swallowed.
+  ///
+  /// Example:
+  ///   let loadFile path = async {
+  ///     try return Ok (File.ReadAllText path)
+  ///     with ex -> return Error ex }
+  ///   Cmd.ofAsyncResult (loadFile "data.txt") (fun text -> Loaded text) (fun ex -> LoadFailed ex.Message)
+  let ofAsyncResult
+    (computation: Async<Result<'a, exn>>)
+    (onOk: 'a -> 'msg)
+    (onError: exn -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        let! result = computation
+        match result with
+        | Ok value -> dispatch (onOk value)
+        | Error ex -> dispatch (onError ex)
+      })
+
   /// Extract all synchronously-dispatchable messages from a Cmd tree.
   /// Returns messages from every Delay and DirectMsg case.
   /// Async operations and subscriptions are not executed.

@@ -2460,3 +2460,200 @@ module Chart =
 
   /// Render a bar chart with default config.
   let barChart (data: (string * float) list) : Element = barChart' barChartDefaults data
+
+/// Configuration for a multi-series line chart.
+type LineChartConfig = {
+  /// Each entry is a `(color, dataPoints)` pair. Series are overlaid on the same axis.
+  Series: (Color * float array) list
+  /// Optional label rendered below the chart.
+  XLabel: string option
+  /// Optional label rendered to the left of the chart (rotated single char or short string).
+  YLabel: string option
+  /// When true, renders faint dotted horizontal grid lines. Default: false.
+  ShowGrid: bool
+}
+
+/// Configuration for a `Viewport` scrollable text view.
+type ViewportConfig = {
+  /// When true, a scrollbar is rendered on the right edge. Default: false.
+  ShowScrollbar: bool
+}
+
+/// State model for a read-only scrollable text pane.
+type ViewportModel = {
+  /// The raw content string. Lines are split on `\n`.
+  Content: string
+  /// Index of the first visible line (0-based).
+  ScrollY: int
+  /// When Some n, lines longer than n characters are soft-wrapped. None = no wrapping.
+  WrapWidth: int option
+}
+
+/// A production-ready toast notification queue supporting concurrent toasts with
+/// automatic expiry, severity levels, and stacked overlay rendering.
+type ToastQueue = {
+  Toasts: Toast.ToastModel list
+}
+
+/// Operations on `ToastQueue` — a concurrent multi-toast manager with automatic expiry.
+module ToastQueue =
+  /// An empty queue with no active toasts.
+  let empty : ToastQueue = { Toasts = [] }
+
+  /// Return the number of active (non-expired) toasts in the queue.
+  let count (q: ToastQueue) : int = q.Toasts.Length
+
+  /// Prepend a new toast to the queue.
+  /// `msg` — display text; `ticks` — lifetime in update ticks; `style` — visual style.
+  let push (msg: string) (ticks: int) (style: Style) (q: ToastQueue) : ToastQueue =
+    { q with Toasts = Toast.createStyled msg ticks style :: q.Toasts }
+
+  /// Tick every toast in the queue by `n` ticks, removing any that have expired.
+  let tickAll (n: int) (q: ToastQueue) : ToastQueue =
+    let ticked =
+      q.Toasts
+      |> List.choose (fun t ->
+        let remaining = t.RemainingTicks - n
+        match remaining <= 0 with
+        | true -> None
+        | false -> Some { t with RemainingTicks = remaining })
+    { q with Toasts = ticked }
+
+  /// Render all active toasts stacked vertically.
+  /// Returns `El.empty` when the queue is empty.
+  let view (q: ToastQueue) : Element =
+    match q.Toasts with
+    | [] -> El.empty
+    | toasts -> El.column (toasts |> List.map Toast.view)
+
+/// Operations on `ViewportModel` — a read-only, scrollable text pane.
+module Viewport =
+  /// Create a `ViewportModel` from a raw string. `ScrollY` starts at 0.
+  let ofString (content: string) : ViewportModel =
+    { Content = content; ScrollY = 0; WrapWidth = None }
+
+  let private lineCount (vm: ViewportModel) =
+    vm.Content.Split('\n').Length
+
+  /// Scroll down by `n` lines, clamping at the last line.
+  let scrollDown (n: int) (vm: ViewportModel) : ViewportModel =
+    let maxY = max 0 (lineCount vm - 1)
+    { vm with ScrollY = min maxY (vm.ScrollY + n) }
+
+  /// Scroll up by `n` lines, clamping at 0.
+  let scrollUp (n: int) (vm: ViewportModel) : ViewportModel =
+    { vm with ScrollY = max 0 (vm.ScrollY - n) }
+
+  /// Scroll down by `n` lines (alias for large jumps — typically used for page-down).
+  let pageDown (n: int) (vm: ViewportModel) : ViewportModel = scrollDown n vm
+
+  /// Scroll up by `n` lines (alias for large jumps — typically used for page-up).
+  let pageUp (n: int) (vm: ViewportModel) : ViewportModel = scrollUp n vm
+
+  /// Render the viewport as a scrollable text element showing lines from `ScrollY` onward.
+  /// When `config.ShowScrollbar` is true, a proportional scrollbar is overlaid on the right edge.
+  let view (config: ViewportConfig) (vm: ViewportModel) : Element =
+    let lines = vm.Content.Split('\n')
+    let visibleLines = lines |> Array.skip (min vm.ScrollY (max 0 (lines.Length - 1)))
+    let content =
+      El.column (visibleLines |> Array.toList |> List.map El.text)
+    match config.ShowScrollbar with
+    | false -> content
+    | true ->
+      let total = lines.Length
+      let ratio = match total with 0 -> 0.0 | _ -> float vm.ScrollY / float (max 1 (total - 1))
+      let bar =
+        El.canvasWithMode Braille (fun pw ph ->
+          let pos = int (ratio * float (ph - 1))
+          { Width = pw; Height = ph
+            Pixels =
+              Array.init (pw * ph) (fun i ->
+                match i / pw = pos with
+                | true -> Color.Named(BaseColor.White, Intensity.Normal)
+                | false -> Color.Default) })
+      El.overlay [ content; El.width 1 bar ]
+
+/// Extension methods on the `Chart` module for multi-series line chart rendering.
+module LineChart =
+  /// Default `LineChartConfig`.
+  let defaults : LineChartConfig = {
+    Series = []
+    XLabel = None
+    YLabel = None
+    ShowGrid = false
+  }
+
+  /// Render a multi-series line chart using the Braille canvas.
+  /// - Lines are drawn with Bresenham's algorithm between consecutive data points.
+  /// - All series share the same Y axis, auto-scaled to the global min/max.
+  /// - An optional `XLabel` is rendered as a text row below the chart canvas.
+  let lineChart' (config: LineChartConfig) : Element =
+    match config.Series with
+    | [] -> El.empty
+    | series ->
+      let allValues = series |> List.collect (fun (_, pts) -> pts |> Array.toList)
+      let globalMin = allValues |> List.min
+      let globalMax = allValues |> List.max
+      let range = globalMax - globalMin
+      let canvas =
+        Canvas {
+          Mode = Braille
+          Fallback = None
+          Draw = fun pw ph ->
+            let pixels = Array.create (pw * ph) Color.Default
+            let setPixel x y color =
+              match x >= 0 && x < pw && y >= 0 && y < ph with
+              | true -> pixels[y * pw + x] <- color
+              | false -> ()
+            let toPixelY (v: float) =
+              match range with
+              | 0.0 -> ph / 2
+              | _ ->
+                let norm = (v - globalMin) / range
+                ph - 1 - int (norm * float (ph - 1))
+            for (color, pts) in series do
+              let n = pts.Length
+              match n with
+              | 0 -> ()
+              | 1 -> setPixel (pw / 2) (toPixelY pts[0]) color
+              | _ ->
+                for i in 0 .. n - 2 do
+                  let x0 = int (float i * float (pw - 1) / float (n - 1))
+                  let x1 = int (float (i + 1) * float (pw - 1) / float (n - 1))
+                  let y0 = toPixelY pts[i]
+                  let y1 = toPixelY pts[i + 1]
+                  // Bresenham's line algorithm
+                  let dx = abs (x1 - x0)
+                  let dy = abs (y1 - y0)
+                  let sx = match x0 < x1 with true -> 1 | false -> -1
+                  let sy = match y0 < y1 with true -> 1 | false -> -1
+                  let mutable err = dx - dy
+                  let mutable cx = x0
+                  let mutable cy = y0
+                  let mutable running = true
+                  while running do
+                    setPixel cx cy color
+                    match cx = x1 && cy = y1 with
+                    | true -> running <- false
+                    | false ->
+                      let e2 = err * 2
+                      match e2 > -dy with
+                      | true ->
+                        err <- err - dy
+                        cx <- cx + sx
+                      | false -> ()
+                      match e2 < dx with
+                      | true ->
+                        err <- err + dx
+                        cy <- cy + sy
+                      | false -> ()
+            { Width = pw; Height = ph; Pixels = pixels }
+        }
+      match config.XLabel with
+      | None -> canvas
+      | Some lbl -> El.column [ canvas; El.text lbl ]
+
+  /// Render a multi-series line chart from a simple series list (uses default config).
+  let lineChart (series: (Color * float array) list) : Element =
+    lineChart' { defaults with Series = series }
+

@@ -6349,3 +6349,205 @@ let sprint51Tests =
     sprint51NamingTests
     sprint51PropertyTests
   ]
+
+// ============================================================
+// Sprint 52 Tests — Chart.lineChart, Viewport, Cmd.ofAsyncResult, ToastQueue, El.markupSpans
+// ============================================================
+
+let sprint52LineChartTests = testList "Chart lineChart" [
+  testCase "empty series returns empty" <| fun () ->
+    let el = LineChart.lineChart' { Series = []; XLabel = None; YLabel = None; ShowGrid = false }
+    match el with
+    | Empty -> ()
+    | _ -> failtest "Expected Empty element for empty series"
+
+  testCase "single series returns non-empty element" <| fun () ->
+    let config = { Series = [ (Color.Default, [| 1.0; 2.0; 3.0 |]) ]; XLabel = None; YLabel = None; ShowGrid = false }
+    let el = LineChart.lineChart' config
+    match el with
+    | Empty -> failtest "Expected non-Empty element"
+    | _ -> ()
+
+  testCase "lineChart convenience wraps lineChart'" <| fun () ->
+    let el = LineChart.lineChart [ (Color.Default, [| 1.0; 2.0 |]) ]
+    match el with
+    | Empty -> failtest "Expected non-Empty element"
+    | _ -> ()
+
+  testCase "XLabel Some produces Column" <| fun () ->
+    let el = LineChart.lineChart' { Series = [ (Color.Default, [| 1.0; 2.0 |]) ]; XLabel = Some "Time"; YLabel = None; ShowGrid = false }
+    match el with
+    | Column _ -> ()
+    | _ -> failtest "Expected Column element when XLabel is Some"
+
+  testCase "multiple series no exception" <| fun () ->
+    let config = {
+      Series = [
+        (Color.Named(BaseColor.Red, Intensity.Normal), [| 1.0; 2.0; 3.0 |])
+        (Color.Named(BaseColor.Blue, Intensity.Normal), [| 3.0; 1.5; 2.0 |])
+      ]
+      XLabel = None; YLabel = None; ShowGrid = false
+    }
+    LineChart.lineChart' config |> ignore
+
+  testCase "all-same values no divide by zero" <| fun () ->
+    let config = { Series = [ (Color.Default, [| 5.0; 5.0; 5.0 |]) ]; XLabel = None; YLabel = None; ShowGrid = false }
+    LineChart.lineChart' config |> ignore
+
+  testCase "single point series no exception" <| fun () ->
+    let config = { Series = [ (Color.Default, [| 42.0 |]) ]; XLabel = None; YLabel = None; ShowGrid = false }
+    LineChart.lineChart' config |> ignore
+]
+
+let sprint52ViewportTests = testList "Viewport" [
+  testCase "ofString creates model with ScrollY=0" <| fun () ->
+    let vm = Viewport.ofString "hello\nworld"
+    vm.ScrollY |> Expect.equal "ScrollY=0" 0
+
+  testCase "ofString stores content" <| fun () ->
+    let vm = Viewport.ofString "hello\nworld"
+    vm.Content |> Expect.equal "content stored" "hello\nworld"
+
+  testCase "ofString WrapWidth is None by default" <| fun () ->
+    let vm = Viewport.ofString "hello"
+    vm.WrapWidth |> Expect.isNone "WrapWidth None by default"
+
+  testCase "scrollDown increments ScrollY" <| fun () ->
+    let vm = Viewport.ofString "a\nb\nc\nd\ne"
+    let vm2 = Viewport.scrollDown 1 vm
+    vm2.ScrollY |> Expect.equal "scrolled down" 1
+
+  testCase "scrollDown clamps at max line" <| fun () ->
+    let vm = { Viewport.ofString "a\nb\nc" with ScrollY = 10 }
+    let vm2 = Viewport.scrollDown 1 vm
+    (vm2.ScrollY, 2) |> Expect.isLessThanOrEqual "clamped at last line"
+
+  testCase "scrollUp decrements ScrollY" <| fun () ->
+    let vm = { Viewport.ofString "a\nb\nc\nd\ne" with ScrollY = 3 }
+    let vm2 = Viewport.scrollUp 1 vm
+    vm2.ScrollY |> Expect.equal "scrolled up" 2
+
+  testCase "scrollUp clamps at 0" <| fun () ->
+    let vm = Viewport.ofString "a\nb"
+    let vm2 = Viewport.scrollUp 5 vm
+    vm2.ScrollY |> Expect.equal "clamped at 0" 0
+
+  testCase "pageDown scrolls by given amount" <| fun () ->
+    let vm = Viewport.ofString (String.concat "\n" (List.replicate 20 "line"))
+    let vm2 = Viewport.pageDown 5 vm
+    vm2.ScrollY |> Expect.equal "paged down 5" 5
+
+  testCase "pageUp scrolls by given amount" <| fun () ->
+    let vm = { Viewport.ofString (String.concat "\n" (List.replicate 20 "line")) with ScrollY = 10 }
+    let vm2 = Viewport.pageUp 5 vm
+    vm2.ScrollY |> Expect.equal "paged up 5" 5
+
+  testCase "view produces non-empty element" <| fun () ->
+    let vm = Viewport.ofString "hello\nworld"
+    let el = Viewport.view { ShowScrollbar = false } vm
+    match el with
+    | Empty -> failtest "Expected non-Empty element from Viewport.view"
+    | _ -> ()
+]
+
+let sprint52CmdTests = testList "Cmd.ofAsyncResult" [
+  testCase "success dispatches onOk result" <| fun () ->
+    let dispatched = ResizeArray<int>()
+    let cmd = Cmd.ofAsyncResult (async { return Ok 42 }) id (fun _ -> -1)
+    match cmd with
+    | OfAsync run ->
+      Async.RunSynchronously (run (fun msg -> dispatched.Add(msg)))
+      dispatched |> Seq.toList |> Expect.equal "dispatched Ok 42" [ 42 ]
+    | _ -> failtest "Expected OfAsync"
+
+  testCase "failure dispatches onError result" <| fun () ->
+    let dispatched = ResizeArray<int>()
+    let ex = exn "test error"
+    let cmd = Cmd.ofAsyncResult (async { return Error ex }) id (fun _ -> -1)
+    match cmd with
+    | OfAsync run ->
+      Async.RunSynchronously (run (fun msg -> dispatched.Add(msg)))
+      dispatched |> Seq.toList |> Expect.equal "dispatched onError" [ -1 ]
+    | _ -> failtest "Expected OfAsync"
+
+  testCase "returns OfAsync case" <| fun () ->
+    let cmd : Cmd<int> = Cmd.ofAsyncResult (async { return Ok 1 }) id (fun _ -> 0)
+    match cmd with
+    | OfAsync _ -> ()
+    | _ -> failtest "Expected OfAsync"
+]
+
+let sprint52ToastQueueTests = testList "ToastQueue" [
+  testCase "empty has zero count" <| fun () ->
+    ToastQueue.empty |> ToastQueue.count |> Expect.equal "count=0" 0
+
+  testCase "push adds a toast" <| fun () ->
+    ToastQueue.empty
+    |> ToastQueue.push "hello" 5 Style.empty
+    |> ToastQueue.count
+    |> Expect.equal "count=1" 1
+
+  testCase "push multiple toasts" <| fun () ->
+    ToastQueue.empty
+    |> ToastQueue.push "a" 5 Style.empty
+    |> ToastQueue.push "b" 5 Style.empty
+    |> ToastQueue.count
+    |> Expect.equal "count=2" 2
+
+  testCase "tickAll decrements ticks and keeps active" <| fun () ->
+    let q = ToastQueue.empty |> ToastQueue.push "a" 5 Style.empty
+    let q2 = ToastQueue.tickAll 1 q
+    q2 |> ToastQueue.count |> Expect.equal "still one" 1
+
+  testCase "tickAll removes expired toasts" <| fun () ->
+    let q = ToastQueue.empty |> ToastQueue.push "a" 1 Style.empty
+    let q2 = ToastQueue.tickAll 1 q
+    q2 |> ToastQueue.count |> Expect.equal "expired and gone" 0
+
+  testCase "view empty queue returns El.empty" <| fun () ->
+    match ToastQueue.view ToastQueue.empty with
+    | Empty -> ()
+    | _ -> failtest "Expected Empty element for empty ToastQueue"
+
+  testCase "view non-empty queue returns non-empty element" <| fun () ->
+    let q = ToastQueue.empty |> ToastQueue.push "Alert" 10 Style.empty
+    match ToastQueue.view q with
+    | Empty -> failtest "Expected non-Empty element from ToastQueue.view"
+    | _ -> ()
+]
+
+let sprint52MarkupSpansTests = testList "El.markupSpans" [
+  testCase "empty list returns El.empty" <| fun () ->
+    match El.markupSpans [] with
+    | Empty -> ()
+    | _ -> failtest "Expected Empty for empty span list"
+
+  testCase "single span returns Styled Text" <| fun () ->
+    let style = { Style.empty with Fg = Some Color.Default }
+    let el = El.markupSpans [ ("hi", style) ]
+    match el with
+    | Styled(s, Text("hi", _)) -> s |> Expect.equal "style preserved" style
+    | _ -> failtest (sprintf "Expected Styled(style, Text \"hi\") but got %A" el)
+
+  testCase "multiple spans produce Row" <| fun () ->
+    let el = El.markupSpans [ ("hello", Style.empty); (" world", Style.empty) ]
+    match el with
+    | Row _ -> ()
+    | _ -> failtest "Expected Row for multiple spans"
+
+  testCase "span text is preserved" <| fun () ->
+    let el = El.markupSpans [ ("abc", Style.empty) ]
+    match el with
+    | Styled(_, Text(t, _)) -> t |> Expect.equal "text preserved" "abc"
+    | _ -> failtest "Expected Styled(_, Text)"
+]
+
+[<Tests>]
+let sprint52Tests =
+  testList "Sprint 52" [
+    sprint52LineChartTests
+    sprint52ViewportTests
+    sprint52CmdTests
+    sprint52ToastQueueTests
+    sprint52MarkupSpansTests
+  ]
