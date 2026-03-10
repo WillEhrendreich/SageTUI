@@ -46,7 +46,7 @@ let makeCounter (label: string) : Program<CounterModel, CounterMsg> =
     Update    = counterUpdate
     View      = counterView
     Subscribe = fun _ -> []
-    OnError   = None }
+    OnError = CrashOnError }
 
 type Model = { Left: CounterModel; Right: CounterModel }
 
@@ -106,7 +106,7 @@ let subscribe (_: Model) : Sub<Msg> list =
   [ leftBindings; rightBindings; quitBindings ]
 
 let rawProgram : Program<Model, Msg> =
-  { Init = init; Update = update; View = view; Subscribe = subscribe; OnError = None }
+  { Init = init; Update = update; View = view; Subscribe = subscribe; OnError = CrashOnError }
 
 let program = Theme.forProgram Theme.nord rawProgram
 

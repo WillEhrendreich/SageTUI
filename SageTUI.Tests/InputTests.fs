@@ -297,7 +297,7 @@ let mouseDispatchTests = testList "Mouse dispatch" [
           [ MouseSub (fun me -> Some (Some me))
             KeySub (fun (k, _) ->
               match k with Key.Escape -> Some None | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     received |> List.rev
     |> Expect.equal "received events" [ mouseEvent ]
@@ -319,7 +319,7 @@ let mouseDispatchTests = testList "Mouse dispatch" [
           [ ClickSub (fun (me, hitKey) -> Some (Some (me, hitKey)))
             KeySub (fun (k, _) ->
               match k with Key.Escape -> Some None | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     match received with
     | (me, _) :: _ -> me |> Expect.equal "mouse event" mouseEvent
@@ -340,7 +340,7 @@ let mouseDispatchTests = testList "Mouse dispatch" [
         Subscribe = fun _ ->
           [ MouseSub (fun _ -> Some true)
             KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     mouseCount |> Expect.equal "no mouse events" 0
 ]
@@ -367,7 +367,7 @@ let dragSubTests = testList "Sprint 32: DragSub and motion coalescing" [
         Subscribe = fun _ ->
           [ DragSub (fun _ -> Some true)
             KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     dragCount |> Expect.equal "drag fired for motion" 1
 
@@ -387,7 +387,7 @@ let dragSubTests = testList "Sprint 32: DragSub and motion coalescing" [
         Subscribe = fun _ ->
           [ DragSub (fun _ -> Some true)
             KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     dragCount |> Expect.equal "drag not fired for press" 0
 
@@ -407,7 +407,7 @@ let dragSubTests = testList "Sprint 32: DragSub and motion coalescing" [
         Subscribe = fun _ ->
           [ DragSub (fun me -> Some (Some (me.X, me.Y)))
             KeySub (fun (k, _) -> match k with Key.Escape -> Some None | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     // After coalescing, only the last Motion position should arrive
     positions |> List.rev |> Expect.equal "only last motion retained" [(3, 3)]
@@ -429,7 +429,7 @@ let dragSubTests = testList "Sprint 32: DragSub and motion coalescing" [
         Subscribe = fun _ ->
           [ DragSub (fun _ -> Some true)
             KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     dragCount |> Expect.equal "both buttons fire" 2
 ]
@@ -449,7 +449,7 @@ let bracketedPasteTests = testList "Sprint 32: bracketed paste" [
         Subscribe = fun _ ->
           [ PasteSub (fun text -> received <- text :: received; None)
             KeySub (fun (k, _) -> match k with Key.Escape -> Some () | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     received |> Expect.equal "paste received" ["hello world"]
 
@@ -464,7 +464,7 @@ let bracketedPasteTests = testList "Sprint 32: bracketed paste" [
         Subscribe = fun _ ->
           [ PasteSub (fun _ -> pasteCount <- pasteCount + 1; None)
             KeySub (fun (k, _) -> match k with Key.Escape -> Some () | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     pasteCount |> Expect.equal "no paste for key event" 0
 
@@ -505,7 +505,7 @@ let sprintThirtyTests = testList "Sprint 30: phase filtering and new subs" [
         Subscribe = fun _ ->
           [ ClickSub (fun _ -> Some true)
             KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     clickCount |> Expect.equal "click not fired for release" 0
 
@@ -525,7 +525,7 @@ let sprintThirtyTests = testList "Sprint 30: phase filtering and new subs" [
         Subscribe = fun _ ->
           [ ClickSub (fun _ -> Some true)
             KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     clickCount |> Expect.equal "click fired for press" 1
 
@@ -545,7 +545,7 @@ let sprintThirtyTests = testList "Sprint 30: phase filtering and new subs" [
         Subscribe = fun _ ->
           [ MouseSub (fun _ -> Some true)
             KeySub (fun (k, _) -> match k with Key.Escape -> Some false | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     mouseCount |> Expect.equal "MouseSub not fired for motion" 0
 
@@ -566,7 +566,7 @@ let sprintThirtyTests = testList "Sprint 30: phase filtering and new subs" [
         Subscribe = fun _ ->
           [ MouseSub (fun me -> Some (Some me.Phase))
             KeySub (fun (k, _) -> match k with Key.Escape -> Some None | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     phases |> List.rev |> Expect.equal "press then release" [ Pressed; Released ]
 
@@ -587,7 +587,7 @@ let sprintThirtyTests = testList "Sprint 30: phase filtering and new subs" [
         Subscribe = fun _ ->
           [ DragSub (fun me -> Some (Some (me.X, me.Y)))
             KeySub (fun (k, _) -> match k with Key.Escape -> Some None | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     positions |> List.rev |> Expect.equal "only motion event" [ (6, 3) ]
 
@@ -606,7 +606,7 @@ let sprintThirtyTests = testList "Sprint 30: phase filtering and new subs" [
         Subscribe = fun _ ->
           [ TerminalFocusSub (fun gained -> Some (Some gained))
             KeySub (fun (k, _) -> match k with Key.Escape -> Some None | _ -> None) ]
-        OnError = None }
+        OnError = CrashOnError }
     App.runWithBackend backend program
     focusStates |> List.rev |> Expect.equal "gained then lost" [ true; false ]
 ]

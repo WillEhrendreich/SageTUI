@@ -19,7 +19,7 @@ let counterProgram : Program<int, CounterMsg> =
       | Dec -> (max 0 (count - 1)), Cmd.none
     View = fun count -> El.text (string count)
     Subscribe = fun _ -> []
-    OnError = None }
+    OnError = CrashOnError }
 
 type OuterModel= { Counter: int; Name: string }
 
@@ -37,7 +37,7 @@ let modalProgram : Program<ModalModel, CounterMsg> =
       | Dec -> { model with Count = max 0 (model.Count - 1) }, Cmd.none
     View = fun model -> El.text (sprintf "[%s:%d]" model.Title model.Count)
     Subscribe = fun _ -> []
-    OnError = None }
+    OnError = CrashOnError }
 
 type ModalOuter= { Modal: ModalModel option; Status: string }
 

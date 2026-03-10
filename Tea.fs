@@ -215,7 +215,44 @@ module Cmd =
       do! System.Threading.Tasks.Task.Delay(delayMs, ct) |> Async.AwaitTask
       dispatch msg })
 
-  /// Returns the platform-appropriate application data directory for the given app name.
+  /// Run an `Async<'a>` computation and dispatch the result through a `Result<'a, exn>` mapper.
+  /// If the async throws, the exception is wrapped in `Error` and passed to `toMsg`.
+  /// This gives a single-callback API: the caller decides what both success and failure produce.
+  ///
+  /// Example:
+  ///   Cmd.fromAsync (loadData url) (function Ok data -> DataLoaded data | Error ex -> LoadFailed ex.Message)
+  let fromAsync (computation: Async<'a>) (toMsg: Result<'a, exn> -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        try
+          let! result = computation
+          dispatch (toMsg (Ok result))
+        with ex ->
+          dispatch (toMsg (Error ex))
+      })
+
+  /// Run a `unit -> Task<'a>` function and dispatch the result through a `Result<'a, exn>` mapper.
+  /// If the task throws, the exception is wrapped in `Error` and passed to `toMsg`.
+  ///
+  /// Example:
+  ///   Cmd.fromTask (fun () -> httpClient.GetStringAsync url) (function Ok s -> GotResponse s | Error e -> RequestFailed e.Message)
+  let fromTask (task: unit -> Threading.Tasks.Task<'a>) (toMsg: Result<'a, exn> -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        try
+          let! result = task() |> Async.AwaitTask
+          dispatch (toMsg (Ok result))
+        with ex ->
+          dispatch (toMsg (Error ex))
+      })
+
+  /// Write a raw ANSI/escape sequence through the terminal backend.
+  /// Alias for `Cmd.terminalWrite` — prefer this name for clarity at call sites.
+  /// Written before the next frame flush. Only use for valid ANSI sequences —
+  /// arbitrary text will corrupt the display.
+  let unsafeTerminalWrite (sequence: string) : Cmd<'msg> = TerminalOutput sequence
+
+
   /// - Windows:  `%APPDATA%\{appName}`
   /// - macOS:    `~/Library/Application Support/{appName}`
   /// - Linux:    `$XDG_DATA_HOME/{appName}` or `~/.local/share/{appName}`
@@ -610,16 +647,28 @@ module Undoable =
   let truncate (maxDepth: int) (m: UndoableModel<'model>) : UndoableModel<'model> =
     { m with Past = m.Past |> List.truncate maxDepth }
 
+/// Controls how the TEA loop responds to exceptions thrown by the `Update` function.
+///
+/// - `CrashOnError` — the exception propagates; the app terminates (default, explicit fail-fast).
+/// - `LogAndContinue` — the exception is silently absorbed; the app keeps running.
+/// - `RecoverWith handler` — `handler` is called with the exception; return `Some msg` to dispatch
+///   a recovery message, or `None` to absorb silently.
+type ErrorPolicy<'msg> =
+  | CrashOnError
+  | LogAndContinue
+  | RecoverWith of (exn -> 'msg option)
+
 /// The Elm Architecture program definition. Init/Update/View/Subscribe/OnError.
 type Program<'model, 'msg> = {
   Init: unit -> 'model * Cmd<'msg>
   Update: 'msg -> 'model -> 'model * Cmd<'msg>
   View: 'model -> Element
   Subscribe: 'model -> Sub<'msg> list
-  /// Optional error boundary. When set, exceptions thrown by Update are passed to this
-  /// handler. Return `Some msg` to dispatch a recovery message; return `None` to crash
-  /// (the default behaviour when this field is `None`).
-  OnError: (exn -> 'msg option) option
+  /// Error boundary policy. Controls behaviour when `Update` throws an exception.
+  /// Defaults to `CrashOnError` (explicit fail-fast — no silent swallowing).
+  /// Use `RecoverWith handler` to dispatch a recovery message.
+  /// Use `LogAndContinue` to absorb exceptions silently.
+  OnError: ErrorPolicy<'msg>
 }
 
 /// A pair of get/set functions forming a lawful lens from 'outer to 'inner.
@@ -748,16 +797,16 @@ module Program =
     |> List.scan (fun (m, _) msg -> program.Update msg m) (initModel, initCmd)
     |> List.tail
 
-  /// Install an error boundary on a program. When the `Update` function throws,
+  /// Install a `RecoverWith` error boundary on a program. When the `Update` function throws,
   /// `handler` is called with the exception. Return `Some msg` to dispatch a recovery
-  /// message and keep the app running; return `None` to re-throw and crash.
+  /// message and keep the app running; return `None` to absorb the exception silently.
   ///
   /// The last call to `withOnError` wins — each call replaces the previous handler.
   ///
   /// Example:
   ///   let program = { ... } |> Program.withOnError (fun ex -> Some (ErrorOccurred ex.Message))
   let withOnError (handler: exn -> 'msg option) (program: Program<'model, 'msg>) : Program<'model, 'msg> =
-    { program with OnError = Some handler }
+    { program with OnError = RecoverWith handler }
 
   /// Combine two independent programs into a single program whose model is a tuple and
   /// whose message type is `Choice<'msg1,'msg2>`.
@@ -801,7 +850,7 @@ module Program =
       Subscribe = fun (m1, m2) ->
         [ yield! p1.Subscribe m1 |> List.map (Sub.map Choice1Of2)
           yield! p2.Subscribe m2 |> List.map (Sub.map Choice2Of2) ]
-      OnError = None }
+      OnError = CrashOnError }
 
 /// A vocabulary type for asynchronous data loading states.
 /// The most commonly reinvented type in F# async applications — provided here so

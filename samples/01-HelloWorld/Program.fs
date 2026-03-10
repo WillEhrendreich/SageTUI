@@ -79,7 +79,7 @@ let program : Program<Model, Msg> =
     Update = update
     View = view
     Subscribe = fun _ -> [ keyBindings ]
-    OnError = None }
+    OnError = CrashOnError }
 
 [<EntryPoint>]
 let main _ = App.run program; 0

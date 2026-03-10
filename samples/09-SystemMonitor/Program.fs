@@ -414,7 +414,7 @@ let program : Program<Model, Msg> =
     Update = update
     View = view
     Subscribe = fun _ -> [ keyBindings; TimerSub("tick", TimeSpan.FromMilliseconds(500.0), fun () -> Tick) ]
-    OnError = None }
+    OnError = CrashOnError }
 
 [<EntryPoint>]
 let main _ = App.run program; 0

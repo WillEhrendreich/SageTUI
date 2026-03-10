@@ -1353,7 +1353,7 @@ let frameTimingsTests = testList "Sub.frameTimings" [
           match msg with | GotTimings _ -> m, Cmd.none | OtherMsg -> m + 1, Cmd.none
         View    = fun m -> El.text (string m)
         Subscribe = fun _ -> [ keySub; timingsSub ]
-        OnError = None }
+        OnError = CrashOnError }
     let app = TestHarness.init 80 24 prog
     let app' = TestHarness.pressKey (Key.Char (System.Text.Rune 'q')) app
     app'.Model |> Expect.equal "key handled" 1

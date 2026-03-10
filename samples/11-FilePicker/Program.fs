@@ -309,7 +309,7 @@ let subscribe (model: Model) : Sub<Msg> list =
 // ── Program ───────────────────────────────────────────────────────────────────
 
 let program : Program<Model, Msg> =
-  { Init = init; Update = update; View = view; Subscribe = subscribe; OnError = None }
+  { Init = init; Update = update; View = view; Subscribe = subscribe; OnError = CrashOnError }
 
 [<EntryPoint>]
 let main _ =

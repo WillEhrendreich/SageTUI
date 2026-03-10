@@ -227,7 +227,7 @@ let integrationTests = testList "Integration" [
           | _                            -> model, NoCmd
         View    = fun model -> El.text (sprintf "Count: %d" model)
         Subscribe = fun _ -> [KeySub (fun (k, m) -> Some (KeyPressed(k, m)))]
-        OnError = None }
+        OnError = CrashOnError }
 
     let inputEvents = [
       KeyPressed(Key.Up,      Modifiers.None)

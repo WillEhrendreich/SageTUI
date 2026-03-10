@@ -40,7 +40,7 @@ let counterProgram : Program<int, CounterMsg> =
         Key.Char (System.Text.Rune 'q'), QuitCounter
         Key.Escape, QuitCounter
       ] ]
-    OnError = None }
+    OnError = CrashOnError }
 
 // ============================================================
 // COUNTER INTEGRATION TESTS
@@ -552,7 +552,7 @@ let kanbanProgram : Program<KanbanModel, KanbanMsg> =
         Key.Char (System.Text.Rune ' '), KGrab
         Key.Char (System.Text.Rune 'q'), KQuit
       ] ]
-    OnError = None }
+    OnError = CrashOnError }
 
 let kanbanIntegrationTests =
   testList "Kanban" [
@@ -740,7 +740,7 @@ let formProgram : Program<FormModel, FormMsg> =
       ]
     Subscribe = fun _ ->
       [ KeySub (fun (key, mods) -> Some (FormKey(key, mods))) ]
-    OnError = None }
+    OnError = CrashOnError }
 
 let formIntegrationTests =
   testList "Form" [
@@ -843,7 +843,7 @@ let delayedProgram : Program<DelayedModel, DelayedMsg> =
       | Triggered -> Done, Cmd.none
     View = fun _ -> El.empty
     Subscribe = fun _ -> []
-    OnError = None }
+    OnError = CrashOnError }
 
 type ChainMsg= StartChain | GotA | GotB
 type ChainModel = Idle | HaveA | HaveAB
@@ -857,7 +857,7 @@ let chainProgram : Program<ChainModel, ChainMsg> =
       | GotB -> HaveAB, Cmd.none
     View = fun _ -> El.empty
     Subscribe = fun _ -> []
-    OnError = None }
+    OnError = CrashOnError }
 
 type TwinMsg= First | Second
 type TwinModel = { Fired: TwinMsg list }
@@ -870,7 +870,7 @@ let twinDelayProgram : Program<TwinModel, TwinMsg> =
       { model with Fired = model.Fired @ [msg] }, Cmd.none
     View = fun _ -> El.empty
     Subscribe = fun _ -> []
-    OnError = None }
+    OnError = CrashOnError }
 
 let pendingDelayTests=
   testList "PendingDelays" [
@@ -907,7 +907,7 @@ let pendingDelayTests=
             | _ -> model, Cmd.none
           View = fun _ -> El.empty
           Subscribe = fun _ -> []
-          OnError = None }
+          OnError = CrashOnError }
       let app = TestHarness.init 40 10 immediateProgram |> TestHarness.sendMsg "kick"
       app.Model |> Expect.equal "fired synchronously" 1
       TestHarness.pendingDelayCount app |> Expect.equal "no pending delays" 0

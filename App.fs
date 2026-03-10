@@ -91,11 +91,12 @@ module App =
                      Possible Cmd.ofMsg cycle detected. Check your Update function for \
                      infinite message chains." maxDrain)
         match program.OnError with
-        | Some handler ->
+        | RecoverWith handler ->
           match handler drainEx with
           | Some recoveryMsg -> dispatch recoveryMsg
           | None             -> ()
-        | None -> raise drainEx
+        | LogAndContinue -> ()
+        | CrashOnError -> raise drainEx
         stop <- true
       else
         try
@@ -105,13 +106,13 @@ module App =
           interpretCmd cmd
         with ex ->
           match program.OnError with
-          | Some handler ->
-            // Some recoveryMsg → dispatch recovery; None → handler absorbed it, continue silently.
-            // To reraise from inside a handler call `raise ex` in the handler body.
+          | RecoverWith handler ->
+            // RecoverWith: Some recoveryMsg → dispatch recovery; None → absorb silently.
             match handler ex with
             | Some recoveryMsg -> dispatch recoveryMsg
             | None             -> ()
-          | None -> reraise()
+          | LogAndContinue -> ()
+          | CrashOnError -> reraise()
     m, changed
 
   let runWith (config: AppConfig) (backend: TerminalBackend) (program: Program<'model, 'msg>) =
@@ -702,7 +703,7 @@ module App =
     (update: 'msg -> 'model -> 'model * Cmd<'msg>)
     (view: 'model -> Element)
     : Program<'model, 'msg> =
-    { Init = init; Update = update; View = view; Subscribe = (fun _ -> []); OnError = None }
+    { Init = init; Update = update; View = view; Subscribe = (fun _ -> []); OnError = CrashOnError }
 
   /// Display a static element. Press Escape to quit.
   let display (view: unit -> Element) =
@@ -712,7 +713,7 @@ module App =
           match msg with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
         View = fun () -> view ()
         Subscribe = fun _ -> [KeySub (fun (k, _) -> Some k)]
-        OnError = None }
+        OnError = CrashOnError }
     run program
 
   /// Run a program inline below the current cursor position (no alt-screen).

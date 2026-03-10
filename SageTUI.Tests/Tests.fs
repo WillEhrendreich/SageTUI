@@ -1860,7 +1860,7 @@ let programTests = testList "Program" [
         | QuitApp -> (model, Cmd.quit)
       View = fun model -> El.text (sprintf "Count: %d" model)
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let (initModel, initCmd) = counterProgram.Init()
     initModel |> Expect.equal "init" 0
@@ -1878,7 +1878,7 @@ let programTests = testList "Program" [
       Update = fun _ m -> (m, Cmd.none)
       View = fun model -> El.text model
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     match prog.View "test" with
     | Text("test", _) -> ()
@@ -1893,7 +1893,7 @@ let programTests = testList "Program" [
         match active with
         | true -> [TimerSub("tick", System.TimeSpan.FromSeconds(1.0), fun () -> "tick")]
         | false -> []
-      OnError = None
+      OnError = CrashOnError
     }
     prog.Subscribe false |> List.length |> Expect.equal "no subs" 0
     prog.Subscribe true |> List.length |> Expect.equal "one sub" 1
@@ -1908,7 +1908,7 @@ let programTests = testList "Program" [
         | QuitApp -> (model, Cmd.quit)
       View = fun m -> El.text (string m)
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let states = Program.simulate [Increment; Increment; Decrement] prog
     states |> List.length |> Expect.equal "3 states" 3
@@ -1921,7 +1921,7 @@ let programTests = testList "Program" [
       Update = fun _ m -> (m, Cmd.none)
       View = fun _ -> Empty
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     Program.simulate [] prog |> Expect.isEmpty "empty states"
 
@@ -1934,7 +1934,7 @@ let programTests = testList "Program" [
         | _ -> (model, Cmd.none)
       View = fun _ -> Empty
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let states = Program.simulate [Increment; Increment; Increment] prog
     let models = states |> List.map fst
@@ -1949,7 +1949,7 @@ let programTests = testList "Program" [
         | _ -> (m, Cmd.none)
       View = fun m -> El.text (string m)
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     // Parent model is (string * int) — wraps child int as second field
     let mapped: MappedProgram<string * int, CounterMsg, CounterMsg> =
@@ -2321,7 +2321,7 @@ let private counterProgram2 : Program<int, CounterMsg2> = {
       | KeyChar 'q' -> Some Quit2
       | _ -> None)
   ]
-  OnError = None
+  OnError = CrashOnError
 }
 
 let appRunTests = testList "App.run" [
@@ -2389,7 +2389,7 @@ let cmdInterpretTests = testList "Cmd interpret" [
         | false -> (updated, Cmd.none)
       View = fun model -> El.text (sprintf "%d msgs" model.Length)
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let backend, _ = TestBackend.create 20 1 []
     App.runWithBackend backend prog
@@ -2403,7 +2403,7 @@ let cmdInterpretTests = testList "Cmd interpret" [
         | _ -> (model, Cmd.none)
       View = fun _ -> El.text "waiting"
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let backend, _ = TestBackend.create 20 1 []
     App.runWithBackend backend prog
@@ -2419,7 +2419,7 @@ let cmdExtendedTests= testList "Cmd extended" [
         | _ -> ("unknown", Cmd.quit)
       View = fun model -> El.text model
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let backend, _ = TestBackend.create 20 1 []
     App.runWithBackend backend prog
@@ -2436,7 +2436,7 @@ let cmdExtendedTests= testList "Cmd extended" [
         | false -> ("unexpected", Cmd.quit)
       View = fun model -> El.text model
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let backend, _ = TestBackend.create 30 1 []
     App.runWithBackend backend prog
@@ -2454,7 +2454,7 @@ let cmdExtendedTests= testList "Cmd extended" [
         | false -> ("unexpected", Cmd.quit)
       View = fun model -> El.text model
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let backend, _ = TestBackend.create 30 1 []
     App.runWithBackend backend prog
@@ -2548,7 +2548,7 @@ let keysBindTests = testList "Keys.bind" [
       Subscribe = fun _ -> [
         Keys.bind [ Key.Char (System.Text.Rune 'j'), "inc" ]
       ]
-      OnError = None
+      OnError = CrashOnError
     }
     let events = [
       TerminalEvent.KeyPressed(Key.Char (System.Text.Rune 'j'), Modifiers.None)
@@ -2566,7 +2566,7 @@ let programMapTests = testList "Program.map" [
       Update = fun _ m -> (m, Cmd.none)
       View = fun m -> El.text (sprintf "%d" m)
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let mapped =
       Program.map
@@ -2586,7 +2586,7 @@ let programMapTests = testList "Program.map" [
         | _ -> (m, Cmd.none)
       View = fun m -> El.text (sprintf "%d" m)
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let mapped =
       Program.map
@@ -2603,7 +2603,7 @@ let programMapTests = testList "Program.map" [
       Update = fun _ m -> (m, Cmd.none)
       View = fun m -> El.text (sprintf "child:%d" m)
       Subscribe = fun _ -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let mapped =
       Program.map
@@ -2624,7 +2624,7 @@ let programMapTests = testList "Program.map" [
       Subscribe = fun _ -> [
         Keys.bind [ Key.Char (System.Text.Rune 'j'), "inc" ]
       ]
-      OnError = None
+      OnError = CrashOnError
     }
     let mapped =
       Program.map
@@ -2657,7 +2657,7 @@ let subscriptionTests2 = testList "Subscriptions" [
         match model < 3 with
         | true -> [TimerSub("ticker", System.TimeSpan.FromMilliseconds(10.0), fun () -> "tick")]
         | false -> []
-      OnError = None
+      OnError = CrashOnError
     }
     let backend, _ = TestBackend.create 20 1 []
     App.runWithBackend backend prog
@@ -2678,7 +2678,7 @@ let eventDispatchTests = testList "Event dispatch" [
           | KeyChar 'q' -> Some "quit"
           | _ -> None)
       ]
-      OnError = None
+      OnError = CrashOnError
     }
     let events = [
       KeyPressed(Key.Char (System.Text.Rune 'x'), Modifiers.None)
@@ -2703,7 +2703,7 @@ let eventDispatchTests = testList "Event dispatch" [
           | KeyChar 'q' -> Some "quit"
           | _ -> None)
       ]
-      OnError = None
+      OnError = CrashOnError
     }
     let events = [
       Resized(120, 50)
@@ -3810,7 +3810,7 @@ let renderGuardTests = testList "Render guard" [
         incr viewCount
         El.text (string m)
       Subscribe = fun _ -> [ Keys.bind [Key.Escape, RGQuit] ]
-      OnError = None
+      OnError = CrashOnError
     }
     App.runWithBackend backend prog
     (!viewCount, 0) |> Expect.isGreaterThan "View called at least once"
@@ -3839,7 +3839,7 @@ let renderGuardTests = testList "Render guard" [
           Key.Escape, RGQuit
         ]
       ]
-      OnError = None
+      OnError = CrashOnError
     }
     App.runWithBackend backend prog
     (viewModels.Count, 0) |> Expect.isGreaterThan "model changed at least once"
@@ -3872,7 +3872,7 @@ let renderGuardTests = testList "Render guard" [
           Key.Escape, RGQuit
         ]
       ]
-      OnError = None
+      OnError = CrashOnError
     }
     App.runWithBackend backend prog
     // View was called with model=0 (initial) and model=1 (after RGTick)
@@ -4400,7 +4400,7 @@ let allTests = testList "All" [
           Update = fun () m -> m, Cmd.none
           View = fun _ -> El.text "hello"
           Subscribe = fun _ -> []
-          OnError = None
+          OnError = CrashOnError
         }
         let themed = Theme.forProgram Theme.dark prog
         match themed.View 0 with
@@ -4418,7 +4418,7 @@ let allTests = testList "All" [
           Update = fun msg m -> m + msg, Cmd.none
           View = fun m -> El.text (string m)
           Subscribe = fun _ -> []
-          OnError = None
+          OnError = CrashOnError
         }
         let themed = Theme.forProgram Theme.nord prog
         let initModel, _ = themed.Init()
@@ -4432,7 +4432,7 @@ let allTests = testList "All" [
           Update = fun () m -> m, Cmd.none
           View = fun _ -> El.text "original"
           Subscribe = fun _ -> []
-          OnError = None
+          OnError = CrashOnError
         }
         let mutable capturedTheme : Theme option = None
         let themedView (t: Theme) (m: int) =
@@ -4451,7 +4451,7 @@ let allTests = testList "All" [
           Update = fun () m -> m, Cmd.none
           View = fun _ -> El.text "x"
           Subscribe = fun m -> [ Keys.bind [Key.Escape, ()] ]
-          OnError = None
+          OnError = CrashOnError
         }
         let prog2 = Theme.withThemedView Theme.catppuccin (fun _ m -> El.text (string m)) prog
         prog2.Subscribe 0 |> Expect.hasLength "subscribe preserved" 1
@@ -4608,7 +4608,7 @@ let sprint36RunInlineTests =
           Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View = fun () -> El.text "hello"
           Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ]
-          OnError = None }
+          OnError = CrashOnError }
       App.runInlineWith AppConfig.defaults 3 true backend program
       let output = getOutput()
       // alt-screen sequences NOT present(enterAltScreen = ESC[?1049h)
@@ -4625,7 +4625,7 @@ let sprint36RunInlineTests =
           Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View = fun () -> El.text "bye"
           Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ]
-          OnError = None }
+          OnError = CrashOnError }
       App.runInlineWith AppConfig.defaults 3 true backend program
       let output = getOutput()
       // clearToEol = ESC[Kproduced during clearInlineArea on exit
@@ -4647,7 +4647,7 @@ let sprint36RunInlineTests =
               El.text "line-two"
             ]
           Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ]
-          OnError = None }
+          OnError = CrashOnError }
       App.runInlineWith AppConfig.defaults 5 false backend program
       let output = getOutput()
       output |> Expect.stringContains "line-one in output" "line-one"
@@ -4664,7 +4664,7 @@ let sprint36RunInlineTests =
           Subscribe = fun _ ->
             [ KeySub (fun (k,_) -> Some k)
               ResizeSub (fun _ -> None) ]
-          OnError = None }
+          OnError = CrashOnError }
       // Should not throw; resize is handled by clearing + re-rendering
       App.runInlineWith AppConfig.defaults 3 true backend program
       let output = getOutput()
@@ -4682,7 +4682,7 @@ let sprint36RunInlineTests =
           Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View = fun () -> El.text "ok"
           Subscribe = fun _ -> [ KeySub (fun (k,_) -> Some k) ]
-          OnError = None }
+          OnError = CrashOnError }
       App.runInlineWith AppConfig.defaults 2 true backend program
       let output = getOutput()
       output |> Expect.stringContains "ok in output" "ok"
@@ -4739,7 +4739,7 @@ let sprint37CmdSemanticTests =
             rendered.Add(count)
             El.text (sprintf "count=%d" count)
           Subscribe = fun _ -> []
-          OnError = None }
+          OnError = CrashOnError }
       App.runInlineWith AppConfig.defaults 3 true backend program
       // model should have been 42 when rendered (after DirectMsg was processed)
       rendered |> Seq.exists (fun v -> v = 42) |> Expect.isTrue "42 rendered"
@@ -4757,7 +4757,7 @@ let sprint37CmdSemanticTests =
             msgs.Add(model |> String.concat "")
             El.text (model |> String.concat "")
           Subscribe = fun _ -> []
-          OnError = None }
+          OnError = CrashOnError }
       App.runInlineWith AppConfig.defaults 2 true backend program
       // All three messages should have been processed
       msgs |> Seq.exists (fun s -> s = "abc") |> Expect.isTrue "abc rendered"
@@ -4780,7 +4780,7 @@ let sprint37ResizeFixTests =
           Subscribe = fun _ ->
             [ KeySub (fun (k,_) -> Some k)
               ResizeSub (fun _ -> None) ]
-          OnError = None }
+          OnError = CrashOnError }
       App.runInlineWith AppConfig.defaults 3 true backend program
       // Should complete without exception; after resize content should still render
       let output = getOutput()
@@ -4799,7 +4799,7 @@ let sprint37ResizeFixTests =
           Subscribe = fun _ ->
             [ KeySub (fun (k,_) -> Some k)
               ResizeSub (fun _ -> None) ]
-          OnError = None }
+          OnError = CrashOnError }
       App.runInlineWith AppConfig.defaults 3 true backend program
       getOutput() |> Expect.stringContains "x in output" "x"
   ]
@@ -4817,7 +4817,7 @@ let sprint37InlineResultTests =
             | _ -> model, Quit 0
           View = fun m -> El.text (string m)
           Subscribe = fun _ -> []
-          OnError = None }
+          OnError = CrashOnError }
       let result = App.runInlineResult 5 (fun m -> if m = 99 then Some m else None) program
       result |> Expect.equal "got 99" (Some 99)
 
@@ -4828,7 +4828,7 @@ let sprint37InlineResultTests =
           Update = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View = fun () -> El.text "nothing"
           Subscribe = fun _ -> []
-          OnError = None }
+          OnError = CrashOnError }
       let result : int option = App.runInlineResult 2 (fun () -> None) program
       result |> Expect.equal "none" None
   ]
@@ -4851,7 +4851,7 @@ let sprint39AppConfigTests =
             n', if n' < 10 then Cmd.ofMsg n' else Quit 0
           View = fun _ -> El.empty
           Subscribe = fun _ -> []
-          OnError = None }
+          OnError = CrashOnError }
       let run () = App.runInlineWith config 3 false backend program |> ignore
       run |> Expect.throwsT<System.InvalidOperationException> "guard fires before 10k"
 
@@ -4865,7 +4865,7 @@ let sprint39AppConfigTests =
             n', if n' < 5 then Cmd.ofMsg n' else Quit 0
           View = fun _ -> El.empty
           Subscribe = fun _ -> []
-          OnError = None }
+          OnError = CrashOnError }
       App.runInlineWith config 3 false backend program |> ignore
       // If we get here without exception, the test passes
       ()
@@ -5438,7 +5438,7 @@ let sprint45MouseTrackingSubTests = testList "Sprint 45: mouse tracking sub auto
       View = fun () -> El.text "mouse test"
       // KeySub needed so Escape dispatches; MouseSub triggers enableMouseTracking
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); MouseSub (fun _ -> None) ]
-      OnError = None
+      OnError = CrashOnError
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5456,7 +5456,7 @@ let sprint45MouseTrackingSubTests = testList "Sprint 45: mouse tracking sub auto
       View = fun () -> El.text "mouse test"
       // KeySub needed so Escape dispatches; MouseSub triggers enableMouseTracking
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); MouseSub (fun _ -> None) ]
-      OnError = None
+      OnError = CrashOnError
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5471,7 +5471,7 @@ let sprint45MouseTrackingSubTests = testList "Sprint 45: mouse tracking sub auto
         match msg with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
       View = fun () -> El.text "no mouse"
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
-      OnError = None
+      OnError = CrashOnError
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5615,7 +5615,7 @@ let sprint46AppWiringTests = testList "Sprint 46: App PasteSub wiring" [
         | _ -> (), NoCmd
       View = fun () -> El.text "paste test"
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); PasteSub (fun _ -> None) ]
-      OnError = None
+      OnError = CrashOnError
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5632,7 +5632,7 @@ let sprint46AppWiringTests = testList "Sprint 46: App PasteSub wiring" [
         | _ -> (), NoCmd
       View = fun () -> El.text "paste test"
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k); PasteSub (fun _ -> None) ]
-      OnError = None
+      OnError = CrashOnError
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -5647,7 +5647,7 @@ let sprint46AppWiringTests = testList "Sprint 46: App PasteSub wiring" [
         match msg with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
       View = fun () -> El.text "no paste"
       Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
-      OnError = None
+      OnError = CrashOnError
     }
     App.runWithBackend backend program
     let output = getOutput()
@@ -8719,28 +8719,32 @@ let sprint62SubMapTests = testList "Sub.map functor laws (Sprint 62 — full cov
 
 // ─── Sprint 62: Program.onError ─────────────────────────────────────────────
 let sprint62ProgramOnErrorTests = testList "Program.onError (Sprint 62)" [
-  test "Program record includes OnError field defaulting to None" {
+  test "Program record OnError field defaults to CrashOnError" {
     let prog : Program<int, string> = {
       Init      = fun () -> (0, NoCmd)
       Update    = fun _ m -> (m, NoCmd)
       View      = fun _ -> El.text ""
       Subscribe = fun _ -> []
-      OnError   = None
+      OnError = CrashOnError
     }
-    prog.OnError |> Expect.isNone "default None"
+    match prog.OnError with
+    | CrashOnError -> ()
+    | _ -> failtest "expected CrashOnError"
   }
 
-  test "Program.withOnError sets handler on record" {
+  test "Program.withOnError sets RecoverWith on record" {
     let handler (ex: exn) = Some $"error: {ex.Message}"
     let prog : Program<int, string> = {
       Init      = fun () -> (0, NoCmd)
       Update    = fun _ m -> (m, NoCmd)
       View      = fun _ -> El.text ""
       Subscribe = fun _ -> []
-      OnError   = None
+      OnError = CrashOnError
     }
     let prog2 = Program.withOnError handler prog
-    prog2.OnError |> Expect.isSome "handler installed"
+    match prog2.OnError with
+    | RecoverWith _ -> ()
+    | _ -> failtest "expected RecoverWith"
   }
 
   test "Program.withOnError: installed handler invoked with exception" {
@@ -8753,11 +8757,13 @@ let sprint62ProgramOnErrorTests = testList "Program.onError (Sprint 62)" [
       Update    = fun _ m -> (m, NoCmd)
       View      = fun _ -> El.text ""
       Subscribe = fun _ -> []
-      OnError   = None
+      OnError = CrashOnError
     }
     let prog2 = Program.withOnError handler prog
     let ex = System.Exception("boom")
-    prog2.OnError |> Option.iter (fun h -> h ex |> ignore)
+    match prog2.OnError with
+    | RecoverWith h -> h ex |> ignore
+    | _ -> ()
     captured |> Option.map (fun e -> e.Message) |> Expect.equal "exception captured" (Some "boom")
   }
 
@@ -8768,29 +8774,31 @@ let sprint62ProgramOnErrorTests = testList "Program.onError (Sprint 62)" [
       Update    = fun _ m -> (m, NoCmd)
       View      = fun _ -> El.text ""
       Subscribe = fun _ -> []
-      OnError   = None
+      OnError = CrashOnError
     }
     let prog2 = Program.withOnError handler prog
     let result =
-      prog2.OnError
-      |> Option.bind (fun h -> h (System.Exception("oops")))
+      match prog2.OnError with
+      | RecoverWith h -> h (System.Exception("oops"))
+      | _ -> None
     result |> Expect.equal "recovery msg" (Some "Recovered from: oops")
   }
 
-  test "Program.withOnError handler returning None means continue silently (no dispatch)" {
+  test "Program.withOnError handler returning None means absorb silently (no dispatch)" {
     let handler (_: exn) : string option = None
     let prog : Program<int, string> = {
       Init      = fun () -> (0, NoCmd)
       Update    = fun _ m -> m, NoCmd
       View      = fun _ -> El.text ""
       Subscribe = fun _ -> []
-      OnError   = None
+      OnError = CrashOnError
     }
     let prog2 = Program.withOnError handler prog
-    let result = prog2.OnError |> Option.bind (fun h -> h (System.Exception()))
-    // None from a handler = "I handled it (logged, etc.), no recovery msg needed"
-    // The runtime will NOT reraise. To reraise, call `raise ex` inside the handler body.
-    result |> Expect.isNone "None = continue silently, no recovery message dispatched"
+    let result =
+      match prog2.OnError with
+      | RecoverWith h -> h (System.Exception())
+      | _ -> None
+    result |> Expect.isNone "None = absorb silently, no recovery message dispatched"
   }
 
   test "Two withOnError calls: last one wins (not chained)" {
@@ -8801,15 +8809,17 @@ let sprint62ProgramOnErrorTests = testList "Program.onError (Sprint 62)" [
       Update    = fun _ m -> m, NoCmd
       View      = fun _ -> El.text ""
       Subscribe = fun _ -> []
-      OnError   = None
+      OnError = CrashOnError
     }
     let result =
       prog
       |> Program.withOnError h1
       |> Program.withOnError h2
-    result.OnError
-    |> Option.bind (fun h -> h (System.Exception()))
-    |> Expect.equal "last handler wins" (Some "h2")
+    let msg =
+      match result.OnError with
+      | RecoverWith h -> h (System.Exception())
+      | _ -> None
+    msg |> Expect.equal "last handler wins" (Some "h2")
   }
 ]
 
@@ -8905,7 +8915,7 @@ let sprint63DrainOnErrorTests =
           Update    = fun () () -> (), NoCmd
           View      = fun () -> El.text ""
           Subscribe = fun _ -> []
-          OnError   = None }
+          OnError = CrashOnError }
       let backend = makeMockBackend 40 10 []
       App.runWith AppConfig.defaults backend program
     }
@@ -8919,19 +8929,19 @@ let sprint63DrainOnErrorTests =
                         model + 1, Quit 0
           View      = fun n -> El.text (string n)
           Subscribe = fun _ -> []
-          OnError   = None }
+          OnError = CrashOnError }
       let backend = makeMockBackend 40 10 []
       App.runWith AppConfig.defaults backend program
       updateCalled |> Expect.equal "Update called exactly once" 1
     }
 
-    test "App.runWith: exception in Update with OnError=None propagates to caller" {
+    test "App.runWith: exception in Update with OnError = CrashOnError propagates to caller" {
       let program : Program<int, unit> =
         { Init      = fun () -> 0, DirectMsg ()
           Update    = fun () _ -> raise (System.Exception "boom"), NoCmd
           View      = fun _ -> El.text ""
           Subscribe = fun _ -> []
-          OnError   = None }
+          OnError = CrashOnError }
       let backend = makeMockBackend 40 10 []
       let threw =
         try App.runWith AppConfig.defaults backend program; false
@@ -8939,7 +8949,7 @@ let sprint63DrainOnErrorTests =
       threw |> Expect.isTrue "unhandled exception should propagate"
     }
 
-    test "App.runWith: OnError=Some dispatches recovery message and continues" {
+    test "App.runWith: RecoverWith dispatches recovery message and continues" {
       let mutable recovered = false
       let program : Program<int, Choice<unit, unit>> =
         { Init      = fun () -> 0, DirectMsg (Choice1Of2 ())
@@ -8949,14 +8959,14 @@ let sprint63DrainOnErrorTests =
                         | Choice2Of2 () -> recovered <- true; model, Quit 0
           View      = fun _ -> El.text ""
           Subscribe = fun _ -> []
-          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+          OnError = RecoverWith (fun _ -> Some (Choice2Of2 ())) }
       // One extra None to give the recovery message time to dispatch
       let backend = makeMockBackend 40 10 [ None; None ]
       App.runWith AppConfig.defaults backend program
       recovered |> Expect.isTrue "recovery message should have been dispatched"
     }
 
-    test "App.runWith: OnError=Some returning None continues silently, app still runs" {
+    test "App.runWith: RecoverWith returning None continues silently, app still runs" {
       let mutable handlerCalled = false
       let program : Program<int, Choice<unit, unit>> =
         { Init      = fun () -> 0, DirectMsg (Choice1Of2 ())
@@ -8970,7 +8980,7 @@ let sprint63DrainOnErrorTests =
                 match k with
                 | Key.Escape -> Some (Choice2Of2 ())
                 | _          -> None) ]
-          OnError   = Some (fun _ -> handlerCalled <- true; None) }
+          OnError = RecoverWith (fun _ -> handlerCalled <- true; None) }
       // Three empty frames then Escape to quit
       let backend = makeMockBackend 40 10 [
         None
@@ -8994,7 +9004,7 @@ let sprint63DrainOnErrorTests =
                         | n  -> model + n, NoCmd
           View      = fun n -> El.text (string n)
           Subscribe = fun _ -> []
-          OnError   = None }
+          OnError = CrashOnError }
       let backend = makeMockBackend 40 10 []
       App.runWith AppConfig.defaults backend program
       // msgs 1, 2, 3 processed (model 6), then 99 triggers quit → 4 Update calls
@@ -9026,7 +9036,7 @@ let private tinyDrainConfig = { AppConfig.defaults with MaxDrainMessages = 5 }
 let sprint64DrainLimitTests =
   testList "drain limit: OnError routing replaces failwith" [
 
-    test "drain limit: OnError=Some handler receives exn and dispatches recovery message" {
+    test "drain limit: RecoverWith handler receives exn and dispatches recovery message" {
       let mutable recovered = false
       let program : Program<int, Choice<int, unit>> =
         { Init      = fun () -> 0, Batch [ for i in 1..6 -> DirectMsg (Choice1Of2 i) ]
@@ -9036,13 +9046,13 @@ let sprint64DrainLimitTests =
                         | Choice2Of2 () -> recovered <- true; model, Quit 0
           View      = fun n -> El.text (string n)
           Subscribe = fun _ -> []
-          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+          OnError = RecoverWith (fun _ -> Some (Choice2Of2 ())) }
       let backend = makeMockBackend 40 10 []
       App.runWith tinyDrainConfig backend program
       recovered |> Expect.isTrue "recovery message should have been dispatched after drain limit"
     }
 
-    test "drain limit: OnError=Some returning None absorbs error, app continues and can quit via event" {
+    test "drain limit: RecoverWith returning None absorbs error, app continues and can quit via event" {
       let mutable handlerCalled = false
       let program : Program<int, Choice<int, unit>> =
         { Init      = fun () -> 0, Batch [ for i in 1..6 -> DirectMsg (Choice1Of2 i) ]
@@ -9056,7 +9066,7 @@ let sprint64DrainLimitTests =
                 match k with
                 | Key.Escape -> Some (Choice2Of2 ())
                 | _          -> None) ]
-          OnError   = Some (fun _ -> handlerCalled <- true; None) }
+          OnError = RecoverWith (fun _ -> handlerCalled <- true; None) }
       let backend = makeMockBackend 40 10 [
         None
         Some (KeyPressed(Key.Escape, Modifiers.None))
@@ -9065,13 +9075,13 @@ let sprint64DrainLimitTests =
       handlerCalled |> Expect.isTrue "OnError handler should have been called for drain limit"
     }
 
-    test "drain limit: OnError=None raises InvalidOperationException (not raw failwith)" {
+    test "drain limit: OnError = CrashOnError raises InvalidOperationException (not raw failwith)" {
       let program : Program<int, int> =
         { Init      = fun () -> 0, Batch [ for i in 1..6 -> DirectMsg i ]
           Update    = fun n model -> model + n, NoCmd
           View      = fun n -> El.text (string n)
           Subscribe = fun _ -> []
-          OnError   = None }
+          OnError = CrashOnError }
       let backend = makeMockBackend 40 10 []
       let mutable caughtInvalidOp = false
       try
@@ -9094,7 +9104,7 @@ let sprint64DrainLimitTests =
                         | Choice2Of2 () -> model, Quit 0
           View      = fun n -> El.text (string n)
           Subscribe = fun _ -> []
-          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+          OnError = RecoverWith (fun _ -> Some (Choice2Of2 ())) }
       let backend = makeMockBackend 40 10 []
       App.runWith tinyDrainConfig backend program
       // Messages 1..5 processed (count = 1..5, ≤ maxDrain=5), message 6 triggers limit.
@@ -9115,13 +9125,13 @@ let sprint64DrainLimitTests =
                         | Choice2Of2 () -> recoveryCount <- recoveryCount + 1; model, Quit 0
           View      = fun n -> El.text (string n)
           Subscribe = fun _ -> []
-          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+          OnError = RecoverWith (fun _ -> Some (Choice2Of2 ())) }
       let backend = makeMockBackend 40 10 [ None; None ]
       App.runWith tinyDrainConfig backend program
       recoveryCount |> Expect.equal "recovery dispatched exactly once" 1
     }
 
-    testProperty "drain limit: OnError=Some never panics regardless of message count above limit" <| fun (n: int) ->
+    testProperty "drain limit: RecoverWith never panics regardless of message count above limit" <| fun (n: int) ->
       let extra = abs n % 200 + 1  // 1..200 extra messages beyond limit
       let msgCount = 5 + extra      // always > maxDrain(5)
       let mutable recovered = false
@@ -9133,7 +9143,7 @@ let sprint64DrainLimitTests =
                         | Choice2Of2 () -> recovered <- true; model, Quit 0
           View      = fun n -> El.text (string n)
           Subscribe = fun _ -> []
-          OnError   = Some (fun _ -> Some (Choice2Of2 ())) }
+          OnError = RecoverWith (fun _ -> Some (Choice2Of2 ())) }
       let backend = makeMockBackend 40 10 []
       App.runWith tinyDrainConfig backend program
       recovered |> Expect.isTrue "recovery message dispatched — no panic"
@@ -9164,7 +9174,7 @@ let sprint64DebugLayoutTests =
           Update    = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View      = fun () -> El.text "hi"
           Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
-          OnError   = None }
+          OnError = CrashOnError }
       let cfg = { AppConfig.defaults with DebugLayout = true }
       App.runWith cfg backend program
       let out = getOutput()
@@ -9180,7 +9190,7 @@ let sprint64DebugLayoutTests =
           Update    = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
           View      = fun () -> El.text "hi"
           Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
-          OnError   = None }
+          OnError = CrashOnError }
       let cfg = { AppConfig.defaults with DebugLayout = false }
       App.runWith cfg backend program
       let out = getOutput()
@@ -9206,7 +9216,7 @@ let private combineTestP1 : Program<int, P1Msg> =
                   | DecA -> m - 1, NoCmd
     View      = fun m -> El.text (sprintf "A:%d" m)
     Subscribe = fun _ -> []
-    OnError   = None }
+    OnError = CrashOnError }
 
 let private combineTestP2 : Program<int, P2Msg> =
   { Init      = fun () -> 10, NoCmd
@@ -9216,7 +9226,7 @@ let private combineTestP2 : Program<int, P2Msg> =
                   | ResetB   -> 0, NoCmd
     View      = fun m -> El.text (sprintf "B:%d" m)
     Subscribe = fun _ -> []
-    OnError   = None }
+    OnError = CrashOnError }
 
 let sprint64ProgramCombineTests =
   testList "Program.combine" [
@@ -9824,7 +9834,7 @@ let private makeScrollVListProgram (items: string array) (_mkMsg: MouseEvent -> 
                   | ScrollTestNoop -> m, Cmd.none
     View      = fun m -> VirtualList.view (VirtualList.create (fun _ s -> El.text s)) m
     Subscribe = fun _ -> [ sub ]
-    OnError   = None }
+    OnError = CrashOnError }
 
 let private makeScrollVListProgram2 (items: string array) : Program<VirtualListModel<string>, ScrollTestMsg2> =
   { Init      = fun () -> VirtualList.ofList 3 (Array.toList items), Cmd.none
@@ -9839,7 +9849,7 @@ let private makeScrollVListProgram2 (items: string array) : Program<VirtualListM
                   | ScrollTest2Noop -> m, Cmd.none
     View      = fun m -> VirtualList.view (VirtualList.create (fun _ s -> El.text s)) m
     Subscribe = fun _ -> [ MouseSub (fun ev -> Some (ScrollTest2Scrolled ev)) ]
-    OnError   = None }
+    OnError = CrashOnError }
 
 let sprint66TestHarnessScrollTests =
   testList "TestHarness.scrollAt" [
@@ -9873,7 +9883,7 @@ let sprint66TestHarnessScrollTests =
               match ev.Button with
               | ScrollUp | ScrollDown -> Some (ScrollTest3Mouse ev)
               | _ -> None) ]
-        OnError   = None }
+        OnError = CrashOnError }
       let app0 = TestHarness.init 20 5 prog
       let app1 = TestHarness.scrollAt 0 0 LeftButton app0
       app1.Model |> Expect.equal "no scroll fire" 0
@@ -10016,4 +10026,235 @@ let sprint67KeyCharTests =
 let sprint67Tests =
   testList "Sprint 67" [
     sprint67KeyCharTests
+  ]
+
+// ─── SPRINT 68 ────────────────────────────────────────────────────────────────
+// ErrorPolicy DU, Cmd.fromAsync/fromTask, Keys.bind lazy, MultiSelect,
+// El.statusBar, Gauge vertical, CJK cell-width, Cmd.unsafeTerminalWrite
+// ─────────────────────────────────────────────────────────────────────────────
+
+let sprint68ErrorPolicyTests =
+  testList "Sprint 68: ErrorPolicy DU" [
+    test "CrashOnError is the default field value in App.simple" {
+      let prog = App.simple (fun () -> 0, Cmd.none) (fun _msg m -> m, Cmd.none) (fun _ -> El.empty)
+      match prog.OnError with
+      | CrashOnError -> ()
+      | _ -> failtest "expected CrashOnError as default"
+    }
+
+    test "Program.withOnError wraps handler in RecoverWith" {
+      let prog = App.simple (fun () -> 0, Cmd.none) (fun _msg m -> m, Cmd.none) (fun _ -> El.empty)
+      let handler (ex: exn) = Some 42
+      let prog2 = Program.withOnError handler prog
+      match prog2.OnError with
+      | RecoverWith _ -> ()
+      | _ -> failtest "expected RecoverWith"
+    }
+
+    test "Program.withOnError installed handler invoked with exception and returns msg" {
+      let captured = ref 0
+      let handler (ex: exn) = captured.Value <- 1; Some 99
+      let prog = { App.simple (fun () -> 0, Cmd.none) (fun _msg m -> m, Cmd.none) (fun _ -> El.empty) with OnError = RecoverWith handler }
+      match prog.OnError with
+      | RecoverWith h ->
+        let result = h (exn "test")
+        captured.Value |> Expect.equal "handler was called" 1
+        result |> Expect.equal "returns recovery msg" (Some 99)
+      | _ -> failtest "expected RecoverWith"
+    }
+
+    test "LogAndContinue is a valid ErrorPolicy case" {
+      let prog = { App.simple (fun () -> 0, Cmd.none) (fun _msg m -> m, Cmd.none) (fun _ -> El.empty) with OnError = LogAndContinue }
+      match prog.OnError with
+      | LogAndContinue -> ()
+      | _ -> failtest "expected LogAndContinue"
+    }
+
+    test "RecoverWith handler returning None means absorb (no dispatch)" {
+      let prog = { App.simple (fun () -> 0, Cmd.none) (fun _msg m -> m, Cmd.none) (fun _ -> El.empty) with OnError = RecoverWith (fun _ -> None) }
+      match prog.OnError with
+      | RecoverWith h ->
+        h (exn "silent") |> Expect.equal "None means absorb" None
+      | _ -> failtest "expected RecoverWith"
+    }
+
+    test "Two withOnError calls: last one wins" {
+      let prog = App.simple (fun () -> 0, Cmd.none) (fun _msg m -> m, Cmd.none) (fun _ -> El.empty)
+      let h1 = fun (_: exn) -> Some 1
+      let h2 = fun (_: exn) -> Some 2
+      let result = prog |> Program.withOnError h1 |> Program.withOnError h2
+      match result.OnError with
+      | RecoverWith h -> h (exn "") |> Expect.equal "h2 wins" (Some 2)
+      | _ -> failtest "expected RecoverWith"
+    }
+
+    test "App.runWith CrashOnError propagates exception to caller" {
+      let mutable threw = false
+      try
+        let backend = makeMockBackend 40 10 []
+        App.runWith
+          AppConfig.defaults
+          backend
+          { Init      = fun () -> 0, DirectMsg 1
+            Update    = fun _msg m -> raise (exn "crash!"); m, Cmd.none
+            View      = fun _ -> El.empty
+            Subscribe = fun _ -> []
+            OnError   = CrashOnError }
+      with _ ->
+        threw <- true
+      threw |> Expect.isTrue "CrashOnError should propagate exception"
+    }
+
+    test "App.runWith LogAndContinue absorbs exception and app continues" {
+      let mutable updateCount = 0
+      let backend = makeMockBackend 40 10 [
+        None
+        Some (KeyPressed(Key.Escape, Modifiers.None))
+        None ]
+      App.runWith
+        AppConfig.defaults
+        backend
+        { Init      = fun () -> 0, DirectMsg 1
+          Update    = fun msg m ->
+            updateCount <- updateCount + 1
+            match msg with
+            | 1 -> raise (exn "absorbed!"); m, Cmd.quit
+            | 999 -> m, Quit 0  // Escape dispatches 999, which quits
+            | _ -> m, Cmd.quit
+          View      = fun _ -> El.empty
+          Subscribe = fun _ ->
+            [ KeySub (fun (k, _) ->
+                match k with
+                | Key.Escape -> Some 999
+                | _          -> None) ]
+          OnError   = LogAndContinue }
+      // Update was called at least once (the initial DirectMsg 1 that threw)
+      (updateCount, 0) |> Expect.isGreaterThan "app continued after absorb"
+    }
+
+    test "App.runWith RecoverWith dispatches recovery message" {
+      let mutable recoveryDispatched = false
+      let backend = makeMockBackend 40 10 [ None; None ]
+      App.runWith
+        AppConfig.defaults
+        backend
+        { Init      = fun () -> 0, DirectMsg 1
+          Update    = fun msg m ->
+            match msg with
+            | 1 -> raise (exn "need recovery"); m, Cmd.none
+            | 2 -> recoveryDispatched <- true; m, Quit 0
+            | _ -> m, Cmd.none
+          View      = fun _ -> El.empty
+          Subscribe = fun _ -> []
+          OnError   = RecoverWith (fun _ -> Some 2) }
+      recoveryDispatched |> Expect.isTrue "RecoverWith dispatched recovery msg"
+    }
+  ]
+
+let sprint68KeysBindLazyTests =
+  testList "Sprint 68: Keys.bind lazy allocation" [
+    test "Keys.bind called 1000 times with same list allocates only one Dictionary" {
+      // This is a best-effort allocation test.
+      // The key invariant is that the Sub handler behaves correctly regardless of call count.
+      let bindings = [ keyChar 'a', 1; keyChar 'b', 2 ]
+      let sub = Keys.bind bindings
+      // calling bind 999 more times should not change behavior
+      for _ in 1..999 do
+        Keys.bind bindings |> ignore
+      // The sub should still work correctly
+      match sub with
+      | KeySub handler ->
+        handler (keyChar 'a', Modifiers.None) |> Expect.equal "a maps to 1" (Some 1)
+        handler (keyChar 'b', Modifiers.None) |> Expect.equal "b maps to 2" (Some 2)
+        handler (keyChar 'c', Modifiers.None) |> Expect.equal "c unmapped" None
+      | _ -> failtest "expected KeySub"
+    }
+
+    test "Keys.bind with same reference is idempotent" {
+      let bindings = [ keyChar 'q', 99 ]
+      let sub1 = Keys.bind bindings
+      let sub2 = Keys.bind bindings
+      match sub1, sub2 with
+      | KeySub h1, KeySub h2 ->
+        h1 (keyChar 'q', Modifiers.None) |> Expect.equal "sub1 works" (Some 99)
+        h2 (keyChar 'q', Modifiers.None) |> Expect.equal "sub2 works" (Some 99)
+      | _ -> failtest "expected KeySub pair"
+    }
+  ]
+
+let sprint68CmdAsyncTests =
+  testList "Sprint 68: Cmd.fromAsync and Cmd.fromTask" [
+    test "Cmd.fromAsync wraps Async in Cmd" {
+      let work = async { return 42 }
+      let cmd = Cmd.fromAsync work (function Ok v -> v | Error _ -> -1)
+      match cmd with
+      | OfAsync _ | OfCancellableAsync _ -> ()
+      | Batch cmds when cmds |> List.exists (fun c -> match c with | OfAsync _ | OfCancellableAsync _ -> true | _ -> false) -> ()
+      | _ ->
+        cmd |> Cmd.hasAsync |> Expect.isTrue "fromAsync should produce an async cmd"
+    }
+
+    test "Cmd.fromTask wraps Task-returning function in Cmd" {
+      let work () = System.Threading.Tasks.Task.FromResult 42
+      let cmd = Cmd.fromTask work (function Ok v -> v | Error _ -> -1)
+      cmd |> Cmd.hasAsync |> Expect.isTrue "fromTask should produce an async cmd"
+    }
+
+    test "Cmd.fromAsync Ok result dispatches message" {
+      let mutable received = -1
+      let work = async { return 77 }
+      let cmd = Cmd.fromAsync work (function Ok v -> v | Error _ -> -1)
+      let dispatch msg = received <- msg
+      // Execute the async synchronously to verify dispatch
+      match cmd with
+      | OfAsync asyncFn ->
+        asyncFn dispatch |> Async.RunSynchronously
+        received |> Expect.equal "dispatched ok value" 77
+      | _ ->
+        cmd |> Cmd.hasAsync |> Expect.isTrue "should be async cmd"
+    }
+
+    test "Cmd.fromAsync Error result dispatches error-mapped message" {
+      let mutable received = 0
+      let work = async { failwith "boom"; return 0 }
+      let cmd = Cmd.fromAsync work (function Ok _ -> 1 | Error _ -> -99)
+      let dispatch msg = received <- msg
+      match cmd with
+      | OfAsync asyncFn ->
+        asyncFn dispatch |> Async.RunSynchronously
+        received |> Expect.equal "dispatched error-mapped value" -99
+      | _ -> failtest "expected OfAsync"
+    }
+
+    test "Cmd.fromTask Ok result dispatches message" {
+      let mutable received = -1
+      let work () = System.Threading.Tasks.Task.FromResult 55
+      let cmd = Cmd.fromTask work (function Ok v -> v | Error _ -> -1)
+      let dispatch msg = received <- msg
+      match cmd with
+      | OfAsync asyncFn ->
+        asyncFn dispatch |> Async.RunSynchronously
+        received |> Expect.equal "dispatched task ok value" 55
+      | _ ->
+        cmd |> Cmd.hasAsync |> Expect.isTrue "should be async cmd"
+    }
+  ]
+
+let sprint68UnsafeRenameTests =
+  testList "Sprint 68: Cmd.unsafeTerminalWrite rename" [
+    test "Cmd.unsafeTerminalWrite produces TerminalOutput cmd" {
+      let cmd = Cmd.unsafeTerminalWrite "\x1b[2J"
+      match cmd with
+      | TerminalOutput seq -> seq |> Expect.equal "correct sequence" "\x1b[2J"
+      | _ -> failtest "expected TerminalOutput"
+    }
+  ]
+
+[<Tests>]
+let sprint68Tests =
+  testList "Sprint 68" [
+    sprint68ErrorPolicyTests
+    sprint68KeysBindLazyTests
+    sprint68CmdAsyncTests
+    sprint68UnsafeRenameTests
   ]

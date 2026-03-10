@@ -273,7 +273,7 @@ let program : Program<Model, Msg> =
     Update = update
     View = view
     Subscribe = subscribe
-    OnError = None }
+    OnError = CrashOnError }
 
 [<EntryPoint>]
 let main _ = App.run program; 0

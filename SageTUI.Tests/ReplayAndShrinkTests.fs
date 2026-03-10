@@ -19,7 +19,7 @@ let counterProgram : Program<CounterModel, CounterMsg> =
       | Reset -> { Count = 0 }, Cmd.none
     View    = fun model -> El.text (sprintf "Count: %d" model.Count)
     Subscribe = fun _ -> []
-    OnError = None }
+    OnError = CrashOnError }
 
 // ── Testing.replaySession────────────────────────────────────────────────────
 
@@ -163,7 +163,7 @@ let keyCounterProgram : Program<CounterModel, KeyCounterMsg> =
       | KeyQuit  -> model, Cmd.quitWith 0
     View    = fun model -> El.text (sprintf "Count: %d" model.Count)
     Subscribe = fun _ -> [ bindings ]
-    OnError = None }
+    OnError = CrashOnError }
 
 let routeTerminalEventTests = testList "Testing.routeTerminalEvent" [
   test "KeyPressed routes to KeySub handler" {
@@ -290,7 +290,7 @@ let mouseProgram : Program<MouseModel, MouseMsg> =
         MouseSub  (fun me -> match me.Phase with
                              | MousePhase.Released -> Some (MouseReleased (me.X, me.Y))
                              | _ -> None) ]
-    OnError = None }
+    OnError = CrashOnError }
 
 let mousePipelineTests = testList "E2E: mouse pipeline (ClickSub / DragSub / MouseSub)" [
   test "clickAt fires ClickSub with correct coordinates" {

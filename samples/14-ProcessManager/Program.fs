@@ -307,6 +307,6 @@ let main _ =
       Update    = update
       View      = view
       Subscribe = subscribe
-      OnError = None }
+      OnError = CrashOnError }
   App.run program
   0

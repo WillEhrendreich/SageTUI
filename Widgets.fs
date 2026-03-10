@@ -1,4 +1,4 @@
-﻿namespace SageTUI
+namespace SageTUI
 
 open InputHelpers
 
