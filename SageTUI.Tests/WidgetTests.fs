@@ -2322,6 +2322,194 @@ let textInputSurrogateTests = testList "TextInput surrogate pair handling" [
   }
 ]
 
+// ── TextInput property tests (Sprint 59) ──────────────────────────────────────
+
+/// Operations applied by property-based TextInput tests.
+/// Only printable ASCII chars are generated to avoid surrogate/control-char edge cases.
+type TextOp =
+  | TInsert     of char
+  | TDeleteBack
+  | TDeleteFwd
+  | TMoveLeft
+  | TMoveRight
+  | TSelectAll
+  | TClearSel
+  | TMoveToStart
+  | TMoveToEnd
+
+type TextOpArb =
+  static member TextOp() : Arbitrary<TextOp> =
+    let printableChar = Gen.map char (Gen.choose (32, 126))
+    let gen =
+      Gen.frequency [
+        5, printableChar |> Gen.map TInsert
+        2, Gen.constant TDeleteBack
+        2, Gen.constant TDeleteFwd
+        1, Gen.constant TMoveLeft
+        1, Gen.constant TMoveRight
+        1, Gen.constant TSelectAll
+        1, Gen.constant TClearSel
+        1, Gen.constant TMoveToStart
+        1, Gen.constant TMoveToEnd
+      ]
+    Arb.fromGen gen
+
+let private applyTextOp (op: TextOp) (m: TextInputModel) : TextInputModel =
+  match op with
+  | TInsert c    -> TextInput.insert c m
+  | TDeleteBack  -> TextInput.deleteBackward m
+  | TDeleteFwd   -> TextInput.deleteForward m
+  | TMoveLeft    -> TextInput.moveCursorLeft m
+  | TMoveRight   -> TextInput.moveCursorRight m
+  | TSelectAll   -> TextInput.selectAll m
+  | TClearSel    -> TextInput.clearSelection m
+  | TMoveToStart -> TextInput.moveToStart m
+  | TMoveToEnd   -> TextInput.moveToEnd m
+
+let private tiPropCfg = { FsCheckConfig.defaultConfig with maxTest = 500; arbitrary = [ typeof<TextOpArb> ] }
+
+let textInputPropTests = testList "TextInput property invariants" [
+  testPropertyWithConfig tiPropCfg "cursor always in [0, text.Length] after any ops" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      m.Cursor >= 0 && m.Cursor <= m.Text.Length
+
+  testPropertyWithConfig tiPropCfg "text length never negative after any ops" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      m.Text.Length >= 0
+
+  testPropertyWithConfig tiPropCfg "SelectionAnchor when Some is in [0, text.Length]" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      match m.SelectionAnchor with
+      | None   -> true
+      | Some a -> a >= 0 && a <= m.Text.Length
+
+  testPropertyWithConfig tiPropCfg "selectionRange always lo < hi when Some" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      match TextInput.selectionRange m with
+      | None         -> true
+      | Some (lo,hi) -> lo < hi && lo >= 0 && hi <= m.Text.Length
+
+  testPropertyWithConfig tiPropCfg "getSelected length equals selectionRange hi-lo" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      match TextInput.selectionRange m with
+      | None         -> TextInput.getSelected m = ""
+      | Some (lo,hi) -> (TextInput.getSelected m).Length = hi - lo
+
+  testPropertyWithConfig tiPropCfg "deleteBackward on empty is identity" <|
+    fun () ->
+      TextInput.deleteBackward TextInput.empty = TextInput.empty
+
+  testPropertyWithConfig tiPropCfg "insert one char increases text length by 1 when no selection" <|
+    fun (ops: TextOp list) ->
+      let m0 =
+        List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+        |> TextInput.clearSelection
+      let m1 = TextInput.insert 'x' m0
+      m1.Text.Length = m0.Text.Length + 1
+
+  testPropertyWithConfig tiPropCfg "moveToStart: cursor = 0 after any ops" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      (TextInput.moveToStart m).Cursor = 0
+
+  testPropertyWithConfig tiPropCfg "moveToEnd: cursor = text.Length after any ops" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      let m2 = TextInput.moveToEnd m
+      m2.Cursor = m2.Text.Length
+
+  testPropertyWithConfig tiPropCfg "clearSelection: selectionRange = None" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      TextInput.selectionRange (TextInput.clearSelection m) = None
+
+  testPropertyWithConfig tiPropCfg "selectAll: cursor at text end, covers full text or None if empty" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      let m2 = TextInput.selectAll m
+      m2.Cursor = m2.Text.Length &&
+        match m2.Text.Length with
+        | 0 -> TextInput.selectionRange m2 = None
+        | n -> TextInput.selectionRange m2 = Some (0, n)
+]
+
+// ── VirtualList property tests (Sprint 59) ────────────────────────────────────
+
+/// Navigation operations for property-based VirtualList testing.
+type VNavOp = VNavUp | VNavDown | VNavPageUp | VNavPageDown | VNavFirst | VNavLast
+
+let private applyVNavOp (m: VirtualListModel<int>) (op: VNavOp) : VirtualListModel<int> =
+  match op with
+  | VNavUp       -> VirtualList.selectPrev m
+  | VNavDown     -> VirtualList.selectNext m
+  | VNavPageUp   -> VirtualList.pageUp m
+  | VNavPageDown -> VirtualList.pageDown m
+  | VNavFirst    -> VirtualList.selectFirst m
+  | VNavLast     -> VirtualList.selectLast m
+
+let virtualListPropTests = testList "VirtualList property invariants" [
+  testProperty "selectedIndex always in [0, n-1] for non-empty after nav" <|
+    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) ->
+      let m = List.fold applyVNavOp (VirtualList.ofArray 5 items) ops
+      match m.SelectedIndex with
+      | None   -> false  // non-empty list must always have a selection
+      | Some i -> i >= 0 && i < items.Length
+
+  testProperty "empty list: selectedIndex = None after any nav ops" <|
+    fun (ops: VNavOp list) ->
+      let m = List.fold applyVNavOp (VirtualList.ofArray 5 [||]) ops
+      m.SelectedIndex = None
+
+  testProperty "scrollOffset is always non-negative" <|
+    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) ->
+      let m = List.fold applyVNavOp (VirtualList.ofArray 5 items) ops
+      m.ScrollOffset >= 0
+
+  testProperty "selectedIndex is always visible in viewport" <|
+    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) ->
+      let m = List.fold applyVNavOp (VirtualList.ofArray 5 items) ops
+      match m.SelectedIndex with
+      | None   -> true
+      | Some i -> i >= m.ScrollOffset && i < m.ScrollOffset + m.ViewportHeight
+
+  testProperty "selectFirst gives SelectedIndex = Some 0 for non-empty" <|
+    fun (NonEmptyArray (items: int[])) ->
+      let m = VirtualList.ofArray 5 items |> VirtualList.selectFirst
+      m.SelectedIndex = Some 0
+
+  testProperty "selectLast gives last index for non-empty" <|
+    fun (NonEmptyArray (items: int[])) ->
+      let m = VirtualList.ofArray 5 items |> VirtualList.selectLast
+      m.SelectedIndex = Some (items.Length - 1)
+
+  testProperty "pageDown never moves selection past last item" <|
+    fun (NonEmptyArray (items: int[])) ->
+      let m = VirtualList.ofArray 5 items |> VirtualList.pageDown
+      match m.SelectedIndex with
+      | None   -> true
+      | Some i -> i <= items.Length - 1
+
+  testProperty "pageUp never moves selection before first item" <|
+    fun (NonEmptyArray (items: int[])) ->
+      let m = VirtualList.ofArray 5 items |> VirtualList.pageUp
+      match m.SelectedIndex with
+      | None   -> true
+      | Some i -> i >= 0
+
+  testProperty "resize: selectedIndex remains visible after viewport change" <|
+    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) (PositiveInt h) ->
+      let m = List.fold applyVNavOp (VirtualList.ofArray 5 items) ops
+      let m2 = VirtualList.resize h m
+      match m2.SelectedIndex with
+      | None   -> true
+      | Some i -> i >= m2.ScrollOffset && i < m2.ScrollOffset + m2.ViewportHeight
+]
+
 [<Tests>]
 let allWidgetTests = testList "Widgets" [
   progressBarTests
@@ -2354,4 +2542,6 @@ let allWidgetTests = testList "Widgets" [
   virtualTableTests
   vtSortFillTests
   splitPaneTests
+  textInputPropTests
+  virtualListPropTests
 ]

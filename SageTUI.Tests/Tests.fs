@@ -8208,3 +8208,64 @@ let sprint58Tests =
     sprint58SplitPanePrecisionTests
     sprint58TextInputTests
   ]
+
+// ── Sprint 59: Cmd.ofAsyncResultSafe ──────────────────────────────────────────
+
+let sprint59CmdSafeTests = testList "Cmd.ofAsyncResultSafe" [
+  testCase "exception in async body dispatches onError" <| fun () ->
+    let dispatched = ResizeArray<string>()
+    let bomb : Async<Result<int, exn>> = async { return failwith "boom" }
+    let cmd = Cmd.ofAsyncResultSafe bomb (fun _ -> "ok") (fun ex -> ex.Message)
+    match cmd with
+    | OfAsync run ->
+      Async.RunSynchronously (run (fun msg -> dispatched.Add(msg)))
+      dispatched |> Seq.toList |> Expect.equal "exception message dispatched" [ "boom" ]
+    | _ -> failtest "Expected OfAsync"
+
+  testCase "Ok result dispatched via onOk" <| fun () ->
+    let dispatched = ResizeArray<int>()
+    let cmd = Cmd.ofAsyncResultSafe (async { return Ok 99 }) id (fun _ -> -1)
+    match cmd with
+    | OfAsync run ->
+      Async.RunSynchronously (run (fun msg -> dispatched.Add(msg)))
+      dispatched |> Seq.toList |> Expect.equal "Ok 99 dispatched" [ 99 ]
+    | _ -> failtest "Expected OfAsync"
+
+  testCase "Error result dispatched via onError (not re-thrown)" <| fun () ->
+    let dispatched = ResizeArray<int>()
+    let ex = exn "expected error"
+    let cmd = Cmd.ofAsyncResultSafe (async { return Error ex }) id (fun _ -> -1)
+    match cmd with
+    | OfAsync run ->
+      Async.RunSynchronously (run (fun msg -> dispatched.Add(msg)))
+      dispatched |> Seq.toList |> Expect.equal "Error dispatched via onError" [ -1 ]
+    | _ -> failtest "Expected OfAsync"
+
+  testCase "exception does not propagate to caller" <| fun () ->
+    let dispatched = ResizeArray<string>()
+    let bomb : Async<Result<int, exn>> = async {
+      do! Async.Sleep 0
+      return failwith "kaboom"
+    }
+    let cmd = Cmd.ofAsyncResultSafe bomb (fun _ -> "ok") (fun ex -> ex.Message)
+    let mutable threw = false
+    try
+      match cmd with
+      | OfAsync run -> Async.RunSynchronously (run (fun msg -> dispatched.Add(msg)))
+      | _ -> failtest "Expected OfAsync"
+    with _ -> threw <- true
+    threw            |> Expect.isFalse "no exception should escape ofAsyncResultSafe"
+    dispatched.Count |> Expect.equal "exactly one error msg dispatched" 1
+
+  testCase "returns OfAsync case" <| fun () ->
+    let cmd : Cmd<int> = Cmd.ofAsyncResultSafe (async { return Ok 1 }) id (fun _ -> 0)
+    match cmd with
+    | OfAsync _ -> ()
+    | _ -> failtest "Expected OfAsync"
+]
+
+[<Tests>]
+let sprint59Tests =
+  testList "Sprint 59" [
+    sprint59CmdSafeTests
+  ]

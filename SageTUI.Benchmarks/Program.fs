@@ -126,9 +126,47 @@ type LayoutBenchmarks() =
     let root = Arena.lower arena100 nested
     ArenaRender.renderRoot arena100 root area80x100 buf100
 
+[<MemoryDiagnoser>]
+[<SimpleJob(warmupCount = 3, iterationCount = 10)>]
+type LargeBufferDiffBenchmarks() =
+  let mutable front        = Buffer.create 220 50
+  let mutable backIdentical = Buffer.create 220 50
+  let mutable backAllChg   = Buffer.create 220 50
+  let mutable backTenPct   = Buffer.create 220 50
+
+  [<GlobalSetup>]
+  member _.Setup() =
+    let cell    = PackedCell.create (int 'A') 0xC8C8C8 0x000000 0us
+    let changed = PackedCell.create (int 'B') 0xFF0000 0x000000 0us
+    let total   = 220 * 50
+    front         <- Buffer.create 220 50
+    backIdentical <- Buffer.create 220 50
+    backAllChg    <- Buffer.create 220 50
+    backTenPct    <- Buffer.create 220 50
+    for i in 0 .. total - 1 do
+      front.Cells[i]         <- cell
+      backIdentical.Cells[i] <- cell
+      backAllChg.Cells[i]    <- changed
+      backTenPct.Cells[i]    <- cell
+    for i in 0 .. 10 .. total - 1 do
+      backTenPct.Cells[i] <- changed
+
+  [<Benchmark(Description = "Large diff 220x50 identical")>]
+  member _.DiffLargeIdentical() =
+    Buffer.diff front backIdentical |> ignore
+
+  [<Benchmark(Description = "Large diff 220x50 all changed")>]
+  member _.DiffLargeAllChanged() =
+    Buffer.diff front backAllChg |> ignore
+
+  [<Benchmark(Description = "Large diff 220x50 10% changed")>]
+  member _.DiffLargeTenPct() =
+    Buffer.diff front backTenPct |> ignore
+
 [<EntryPoint>]
 let main _argv =
   BenchmarkRunner.Run<BufferDiffBenchmarks>() |> ignore
   BenchmarkRunner.Run<RenderBenchmarks>() |> ignore
   BenchmarkRunner.Run<LayoutBenchmarks>() |> ignore
+  BenchmarkRunner.Run<LargeBufferDiffBenchmarks>() |> ignore
   0

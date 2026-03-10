@@ -133,6 +133,28 @@ module Cmd =
         | Error ex -> dispatch (onError ex)
       })
 
+  /// Run an `Async<Result<'a, exn>>`, catching any exceptions thrown in the async body.
+  /// On `Ok value`, dispatches `onOk value`. On `Error exn` or an exception escaping the
+  /// async body, dispatches `onError exn`.
+  ///
+  /// Use this in preference to `ofAsyncResult` when the async computation may throw
+  /// instead of returning `Error`. Unlike `ofAsyncResult`, no exception can escape
+  /// to the .NET async runtime — all failures are dispatched as messages.
+  let ofAsyncResultSafe
+    (computation: Async<Result<'a, exn>>)
+    (onOk: 'a -> 'msg)
+    (onError: exn -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        try
+          let! result = computation
+          match result with
+          | Ok value -> dispatch (onOk value)
+          | Error ex -> dispatch (onError ex)
+        with ex ->
+          dispatch (onError ex)
+      })
+
   /// Extract all synchronously-dispatchable messages from a Cmd tree.
   /// Returns messages from every Delay and DirectMsg case.
   /// Async operations and subscriptions are not executed.
