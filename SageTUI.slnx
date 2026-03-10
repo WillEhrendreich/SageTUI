@@ -28,6 +28,9 @@
   <Folder Name="/samples/14-ProcessManager/">
     <Project Path="samples/14-ProcessManager/ProcessManager.fsproj" />
   </Folder>
+  <Folder Name="/samples/15-LogViewer/">
+    <Project Path="samples/15-LogViewer/LogViewer.fsproj" />
+  </Folder>
   <Project Path="SageTUI.Html/SageTUI.Html.fsproj" />
   <Project Path="SageTUI.Library.fsproj" />
   <Project Path="SageTUI.Tests\SageTUI.Tests.fsproj" />

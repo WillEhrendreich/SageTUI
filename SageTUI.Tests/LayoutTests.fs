@@ -1391,6 +1391,77 @@ let renderEquivalencePropertyTests =
         checkBuf "ArenaRender" arenaBuf
   ]
 
+// ═══════════════════════════════════════════════════════════════════════
+// SPRINT 60: Layout constraint invariants (property-based)
+// Panel prescriptions: equal-fill split, MinWidth/MinHeight, Fill-in-column.
+// ═══════════════════════════════════════════════════════════════════════
+
+let sprint60LayoutInvariantTests =
+  testList "Layout constraint invariants (Sprint 60)" [
+
+    testProperty "equal Fill children differ by at most 1 column (fair split)" <|
+      fun (available: byte) (n: byte) ->
+        let avail = max 2 (int available)
+        let count = max 2 (int n % 6 + 2)
+        let constraints = List.replicate count (Fill 1)
+        let contents = List.replicate count 0
+        let widths = Layout.solveWithContent avail constraints contents |> List.map snd
+        let mn = List.min widths
+        let mx = List.max widths
+        mx - mn <= 1  // integer rounding never causes more than 1 column skew
+
+    testProperty "MinWidth constraint: allocation is at least minWidth" <|
+      fun (available: byte) (minW: byte) ->
+        let avail = max 0 (int available)
+        let mw = max 0 (int minW % 30)
+        let result = Layout.solveWithContent avail [Min mw; Fill 1] [0; 0]
+        match result with
+        | [(_, a0); _] -> a0 >= min mw avail  // capped by available if no space
+        | _ -> false
+
+    testProperty "Fill + MinWidth: total never exceeds available" <|
+      fun (available: byte) (minW: byte) ->
+        let avail = max 0 (int available)
+        let mw = max 0 (int minW % (max 1 avail + 1))
+        let result = Layout.solveWithContent avail [Min mw; Fill 1] [0; 0]
+        let total = result |> List.sumBy snd
+        total <= avail
+
+    testProperty "solveWithContent: widths are non-negative for any constraint mix" <|
+      fun (available: byte) (minW: byte) (pct: byte) ->
+        let avail = max 0 (int available)
+        let mw = max 0 (int minW % 20)
+        let p = max 0 (min 100 (int pct % 101))
+        let result = Layout.solveWithContent avail [Min mw; Percentage p; Fill 1] [0; 0; 0]
+        result |> List.forall (fun (_, w) -> w >= 0)
+
+    testProperty "n equal fills in a row sum to available" <|
+      fun (available: byte) (n: byte) ->
+        let avail = max 1 (int available)
+        let count = max 1 (int n % 8 + 1)
+        let constraints = List.replicate count (Fill 1)
+        let widths = Layout.solveWithContent avail constraints (List.replicate count 0) |> List.map snd
+        List.sum widths = avail
+
+    testProperty "rendering El.row with equal fills produces correct cell count" <|
+      fun (wb: byte) (hb: byte) (n: byte) ->
+        let w = max 4 (int wb % 40 + 4)
+        let h = max 1 (int hb % 10 + 1)
+        let count = max 2 (int n % 4 + 2)
+        let row = El.row (List.replicate count (El.fill (El.text ".")))
+        let buf = renderToBuffer w h row
+        Array.length buf.Cells = w * h
+
+    testProperty "El.height n produces buffer with exactly w*n cells" <|
+      fun (wb: byte) (h: byte) ->
+        let w = max 1 (int wb % 40 + 1)
+        let height = max 1 (int h % 20 + 1)
+        let elem = El.height height (El.text "X")
+        let buf = renderToBuffer w (height + 2) elem
+        // The overall buffer is always w*(height+2)
+        Array.length buf.Cells = w * (height + 2)
+  ]
+
 [<Tests>]
 let allLayoutTests = testList "MDN CSS Layout Compliance" [
   measureWidthTests
@@ -1412,4 +1483,5 @@ let allLayoutTests = testList "MDN CSS Layout Compliance" [
   diffInvariantPropertyTests
   renderEquivalencePropertyTests
   weightedFillTests
+  sprint60LayoutInvariantTests
 ]

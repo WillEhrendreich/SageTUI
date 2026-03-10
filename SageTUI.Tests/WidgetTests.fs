@@ -2322,12 +2322,12 @@ let textInputSurrogateTests = testList "TextInput surrogate pair handling" [
   }
 ]
 
-// ── TextInput property tests (Sprint 59) ──────────────────────────────────────
+// ── TextInput property tests (Sprint 60) ──────────────────────────────────────
 
 /// Operations applied by property-based TextInput tests.
-/// Only printable ASCII chars are generated to avoid surrogate/control-char edge cases.
+/// Includes selection-extension and word-movement ops to cover the full interactive path.
 type TextOp =
-  | TInsert     of char
+  | TInsert         of char
   | TDeleteBack
   | TDeleteFwd
   | TMoveLeft
@@ -2336,6 +2336,16 @@ type TextOp =
   | TClearSel
   | TMoveToStart
   | TMoveToEnd
+  | TSelectLeft       // Shift+Left: extend selection one char left
+  | TSelectRight      // Shift+Right: extend selection one char right
+  | TSelectWordLeft   // Shift+Ctrl+Left: extend selection one word left
+  | TSelectWordRight  // Shift+Ctrl+Right: extend selection one word right
+  | TDeleteWordLeft   // Ctrl+Backspace: delete word left
+
+/// Shrinker for TextOp: simplify TInsert chars toward 'a'; constants don't shrink.
+let private shrinkTextOp = function
+  | TInsert c when c > 'a' -> seq { yield TInsert 'a' }
+  | _ -> Seq.empty
 
 type TextOpArb =
   static member TextOp() : Arbitrary<TextOp> =
@@ -2351,20 +2361,30 @@ type TextOpArb =
         1, Gen.constant TClearSel
         1, Gen.constant TMoveToStart
         1, Gen.constant TMoveToEnd
+        2, Gen.constant TSelectLeft
+        2, Gen.constant TSelectRight
+        1, Gen.constant TSelectWordLeft
+        1, Gen.constant TSelectWordRight
+        1, Gen.constant TDeleteWordLeft
       ]
-    Arb.fromGen gen
+    Arb.fromGenShrink(gen, shrinkTextOp)
 
 let private applyTextOp (op: TextOp) (m: TextInputModel) : TextInputModel =
   match op with
-  | TInsert c    -> TextInput.insert c m
-  | TDeleteBack  -> TextInput.deleteBackward m
-  | TDeleteFwd   -> TextInput.deleteForward m
-  | TMoveLeft    -> TextInput.moveCursorLeft m
-  | TMoveRight   -> TextInput.moveCursorRight m
-  | TSelectAll   -> TextInput.selectAll m
-  | TClearSel    -> TextInput.clearSelection m
-  | TMoveToStart -> TextInput.moveToStart m
-  | TMoveToEnd   -> TextInput.moveToEnd m
+  | TInsert c        -> TextInput.insert c m
+  | TDeleteBack      -> TextInput.deleteBackward m
+  | TDeleteFwd       -> TextInput.deleteForward m
+  | TMoveLeft        -> TextInput.moveCursorLeft m
+  | TMoveRight       -> TextInput.moveCursorRight m
+  | TSelectAll       -> TextInput.selectAll m
+  | TClearSel        -> TextInput.clearSelection m
+  | TMoveToStart     -> TextInput.moveToStart m
+  | TMoveToEnd       -> TextInput.moveToEnd m
+  | TSelectLeft      -> TextInput.selectLeft m
+  | TSelectRight     -> TextInput.selectRight m
+  | TSelectWordLeft  -> TextInput.selectWordLeft m
+  | TSelectWordRight -> TextInput.selectWordRight m
+  | TDeleteWordLeft  -> TextInput.deleteWordLeft m
 
 let private tiPropCfg = { FsCheckConfig.defaultConfig with maxTest = 500; arbitrary = [ typeof<TextOpArb> ] }
 
@@ -2400,9 +2420,12 @@ let textInputPropTests = testList "TextInput property invariants" [
       | None         -> TextInput.getSelected m = ""
       | Some (lo,hi) -> (TextInput.getSelected m).Length = hi - lo
 
-  testPropertyWithConfig tiPropCfg "deleteBackward on empty is identity" <|
-    fun () ->
-      TextInput.deleteBackward TextInput.empty = TextInput.empty
+  testPropertyWithConfig tiPropCfg "deleteBackward on any empty-text state is a no-op" <|
+    fun (ops: TextOp list) ->
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty ops
+      match m.Text.Length with
+      | 0 -> TextInput.deleteBackward m = m
+      | _ -> true  // non-empty: not testing this path here
 
   testPropertyWithConfig tiPropCfg "insert one char increases text length by 1 when no selection" <|
     fun (ops: TextOp list) ->
@@ -2436,9 +2459,26 @@ let textInputPropTests = testList "TextInput property invariants" [
         match m2.Text.Length with
         | 0 -> TextInput.selectionRange m2 = None
         | n -> TextInput.selectionRange m2 = Some (0, n)
+
+  testPropertyWithConfig tiPropCfg "selection invariants hold after extend-select operations" <|
+    fun (ops: TextOp list) ->
+      // Specifically exercises TSelectLeft/Right/Word paths — the panel noted these were missing.
+      // Runs the same cursor/anchor/selectionRange invariants after a selection-heavy sequence.
+      let selectHeavy = [ TInsert 'a'; TInsert 'b'; TInsert 'c'; TSelectLeft; TSelectLeft; TSelectRight ]
+      let m = List.fold (fun m op -> applyTextOp op m) TextInput.empty (selectHeavy @ ops)
+      let cursorOk = m.Cursor >= 0 && m.Cursor <= m.Text.Length
+      let anchorOk =
+        match m.SelectionAnchor with
+        | None   -> true
+        | Some a -> a >= 0 && a <= m.Text.Length
+      let rangeOk =
+        match TextInput.selectionRange m with
+        | None         -> true
+        | Some (lo,hi) -> lo < hi && lo >= 0 && hi <= m.Text.Length
+      cursorOk && anchorOk && rangeOk
 ]
 
-// ── VirtualList property tests (Sprint 59) ────────────────────────────────────
+// ── VirtualList property tests (Sprint 60) ────────────────────────────────────
 
 /// Navigation operations for property-based VirtualList testing.
 type VNavOp = VNavUp | VNavDown | VNavPageUp | VNavPageDown | VNavFirst | VNavLast
@@ -2454,8 +2494,8 @@ let private applyVNavOp (m: VirtualListModel<int>) (op: VNavOp) : VirtualListMod
 
 let virtualListPropTests = testList "VirtualList property invariants" [
   testProperty "selectedIndex always in [0, n-1] for non-empty after nav" <|
-    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) ->
-      let m = List.fold applyVNavOp (VirtualList.ofArray 5 items) ops
+    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) (PositiveInt vp) ->
+      let m = List.fold applyVNavOp (VirtualList.ofArray (max 1 vp) items) ops
       match m.SelectedIndex with
       | None   -> false  // non-empty list must always have a selection
       | Some i -> i >= 0 && i < items.Length
@@ -2466,45 +2506,45 @@ let virtualListPropTests = testList "VirtualList property invariants" [
       m.SelectedIndex = None
 
   testProperty "scrollOffset is always non-negative" <|
-    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) ->
-      let m = List.fold applyVNavOp (VirtualList.ofArray 5 items) ops
+    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) (PositiveInt vp) ->
+      let m = List.fold applyVNavOp (VirtualList.ofArray (max 1 vp) items) ops
       m.ScrollOffset >= 0
 
   testProperty "selectedIndex is always visible in viewport" <|
-    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) ->
-      let m = List.fold applyVNavOp (VirtualList.ofArray 5 items) ops
+    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) (PositiveInt vp) ->
+      let m = List.fold applyVNavOp (VirtualList.ofArray (max 1 vp) items) ops
       match m.SelectedIndex with
       | None   -> true
       | Some i -> i >= m.ScrollOffset && i < m.ScrollOffset + m.ViewportHeight
 
   testProperty "selectFirst gives SelectedIndex = Some 0 for non-empty" <|
-    fun (NonEmptyArray (items: int[])) ->
-      let m = VirtualList.ofArray 5 items |> VirtualList.selectFirst
+    fun (NonEmptyArray (items: int[])) (PositiveInt vp) ->
+      let m = VirtualList.ofArray (max 1 vp) items |> VirtualList.selectFirst
       m.SelectedIndex = Some 0
 
   testProperty "selectLast gives last index for non-empty" <|
-    fun (NonEmptyArray (items: int[])) ->
-      let m = VirtualList.ofArray 5 items |> VirtualList.selectLast
+    fun (NonEmptyArray (items: int[])) (PositiveInt vp) ->
+      let m = VirtualList.ofArray (max 1 vp) items |> VirtualList.selectLast
       m.SelectedIndex = Some (items.Length - 1)
 
   testProperty "pageDown never moves selection past last item" <|
-    fun (NonEmptyArray (items: int[])) ->
-      let m = VirtualList.ofArray 5 items |> VirtualList.pageDown
+    fun (NonEmptyArray (items: int[])) (PositiveInt vp) ->
+      let m = VirtualList.ofArray (max 1 vp) items |> VirtualList.pageDown
       match m.SelectedIndex with
       | None   -> true
       | Some i -> i <= items.Length - 1
 
   testProperty "pageUp never moves selection before first item" <|
-    fun (NonEmptyArray (items: int[])) ->
-      let m = VirtualList.ofArray 5 items |> VirtualList.pageUp
+    fun (NonEmptyArray (items: int[])) (PositiveInt vp) ->
+      let m = VirtualList.ofArray (max 1 vp) items |> VirtualList.pageUp
       match m.SelectedIndex with
       | None   -> true
       | Some i -> i >= 0
 
   testProperty "resize: selectedIndex remains visible after viewport change" <|
-    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) (PositiveInt h) ->
-      let m = List.fold applyVNavOp (VirtualList.ofArray 5 items) ops
-      let m2 = VirtualList.resize h m
+    fun (NonEmptyArray (items: int[])) (ops: VNavOp list) (PositiveInt vp) (PositiveInt newVp) ->
+      let m = List.fold applyVNavOp (VirtualList.ofArray (max 1 vp) items) ops
+      let m2 = VirtualList.resize newVp m
       match m2.SelectedIndex with
       | None   -> true
       | Some i -> i >= m2.ScrollOffset && i < m2.ScrollOffset + m2.ViewportHeight

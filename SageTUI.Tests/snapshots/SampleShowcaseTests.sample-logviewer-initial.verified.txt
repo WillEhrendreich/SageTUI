@@ -1,0 +1,32 @@
+﻿  LogViewer           - sample 15                   Tab          /          j/k           Enter           Esc           
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│/                        filter by message, source, or level...                         20/20                         │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 12:00:00.001    INF                                   App        Application started                                 │
+│ 12:00:00.012    DBG                            Config     Loaded config from /etc/app.yaml                           │
+│ 12:00:00.045    INF                        DB         Connected to PostgreSQL at localhost:5432                      │
+│ 12:00:01.120    DBG                               HTTP       GET /health -> 200 OK (2ms)                             │
+│ 12:00:02.340    INF                               Worker     Scheduled 3 background jobs                             │
+│ 12:00:03.001    WRN                    Cache      Cache miss rate above 40% - consider pre-warming                   │
+│ 12:00:03.550    DBG                          HTTP       POST /api/events -> 201 Created (8ms)                        │
+│ 12:00:04.900    ERR                    DB         Query timeout after 5000ms: SELECT * FROM events                   │
+│ 12:00:04.910    WRN                           DB         Retrying failed query (attempt 1/3)                         │
+│ 12:00:05.120    INF                                  DB         Query retry succeeded                                │
+│ 12:00:06.200    DBG                            HTTP       GET /api/metrics -> 200 OK (1ms)                           │
+│ 12:00:07.001    FTL               Worker     Unhandled exception in job processor - shutting down worker             │
+│ 12:00:07.010    ERR                 Worker     Job 'email-send-queue' failed: SMTP connection refused                │
+│ 12:00:08.500    INF                              Worker     Worker restarted after crash                             │
+│ 12:00:09.000    DBG                               Auth       Token validated for user 42                             │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                                                      │
+│  INF                                               App  -  12:00:00.001                                              │
+│ Application started                                                                                                  │
+│ Press Enter to copy this entry to clipboard.                                                                         │
+│                                                                                                                      │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                                                                                        

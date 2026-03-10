@@ -8269,3 +8269,58 @@ let sprint59Tests =
   testList "Sprint 59" [
     sprint59CmdSafeTests
   ]
+
+// ── Sprint 60: Cmd monoid laws ─────────────────────────────────────────────────
+
+/// Run a Cmd synchronously and collect all messages that would be dispatched.
+/// Handles Batch (recursively), DirectMsg, and Delay(0, msg); ignores async/cancel/quit.
+let private collectSyncMsgs (cmd: Cmd<'a>) : 'a list =
+  let collected = ResizeArray<'a>()
+  let rec run = function
+    | NoCmd -> ()
+    | Batch cmds -> cmds |> List.iter run
+    | DirectMsg m -> collected.Add(m)
+    | Delay(0, m) -> collected.Add(m)
+    | _ -> ()
+  run cmd
+  collected |> Seq.toList
+
+let sprint60CmdMonoidTests = testList "Cmd monoid laws (Sprint 60)" [
+  testProperty "left identity: batch [none; x] dispatches same messages as x" <|
+    fun (msgs: int list) ->
+      let x = Cmd.batch (msgs |> List.map Cmd.ofMsg)
+      collectSyncMsgs (Cmd.batch [Cmd.none; x]) = collectSyncMsgs x
+
+  testProperty "right identity: batch [x; none] dispatches same messages as x" <|
+    fun (msgs: int list) ->
+      let x = Cmd.batch (msgs |> List.map Cmd.ofMsg)
+      collectSyncMsgs (Cmd.batch [x; Cmd.none]) = collectSyncMsgs x
+
+  testProperty "associativity: batch [[a;b];c] = batch [a;[b;c]]" <|
+    fun (a: int list) (b: int list) (c: int list) ->
+      let ca = Cmd.batch (a |> List.map Cmd.ofMsg)
+      let cb = Cmd.batch (b |> List.map Cmd.ofMsg)
+      let cc = Cmd.batch (c |> List.map Cmd.ofMsg)
+      let left  = collectSyncMsgs (Cmd.batch [Cmd.batch [ca; cb]; cc])
+      let right = collectSyncMsgs (Cmd.batch [ca; Cmd.batch [cb; cc]])
+      left = right
+
+  testCase "Cmd.none dispatches zero messages" <| fun () ->
+    collectSyncMsgs (Cmd.none : Cmd<int>)
+    |> Expect.isEmpty "NoCmd dispatches nothing"
+
+  testCase "Cmd.batch [] dispatches zero messages" <| fun () ->
+    collectSyncMsgs (Cmd.batch [] : Cmd<int>)
+    |> Expect.isEmpty "empty batch dispatches nothing"
+
+  testCase "Cmd.ofMsg dispatches exactly one message" <| fun () ->
+    let msgs = collectSyncMsgs (Cmd.ofMsg 99)
+    msgs |> Expect.hasLength "exactly one message" 1
+    msgs |> Expect.contains "contains 99" 99
+]
+
+[<Tests>]
+let sprint60Tests =
+  testList "Sprint 60" [
+    sprint60CmdMonoidTests
+  ]
