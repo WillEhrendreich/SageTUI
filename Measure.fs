@@ -40,6 +40,7 @@ module Measure =
     | ResponsiveH breakpoints ->
       breakpoints |> List.tryHead |> Option.map (snd >> measureWidth) |> Option.defaultValue 0
     | Scroll(_, child) -> measureWidth child
+    | Filled _ -> 0 // fills available space; no intrinsic width
 
   let rec measureHeight (elem: Element) : int =
     match elem with
@@ -74,6 +75,7 @@ module Measure =
     | ResponsiveH breakpoints ->
       breakpoints |> List.tryHead |> Option.map (snd >> measureHeight) |> Option.defaultValue 0
     | Scroll(_, child) -> measureHeight child
+    | Filled _ -> 0 // fills available space; no intrinsic height
 
   /// Measure content sizes for children in a Row context (width dimension).
   let childWidths (children: Element list) : int list =

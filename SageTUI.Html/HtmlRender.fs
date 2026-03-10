@@ -136,6 +136,10 @@ module HtmlRender =
       Elem.div
         [ Attr.style "overflow:hidden" ]
         [ render child ]
+    | Filled style ->
+      // HTML: render as a div with the fill style; inset:0 makes it cover its container
+      let css = "position:absolute;inset:0;" + styleToCss style
+      Elem.div [ Attr.style css ] []
 
   /// Render Element to HTML string
   let renderToString (el: Element) : string =

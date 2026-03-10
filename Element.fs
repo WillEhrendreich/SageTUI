@@ -79,6 +79,9 @@ type Element =
   /// Use with El.height to set the viewport size; the child renders at its natural (full) height
   /// into an offscreen buffer, then the viewport slice is copied into the target buffer.
   | Scroll of offset: int * child: Element
+  /// Fills the entire layout area with spaces using the given style (merged with inherited).
+  /// Use for modal backdrops, colored panels, or any solid background fill.
+  | Filled of Style
 
 /// Column width distribution for El.grid.
 type GridColumns =
@@ -341,6 +344,19 @@ module El =
   let scroll (offset: int) (child: Element) : Element =
     Scroll(offset, child)
 
+  /// Fill the entire layout area with spaces using the given style.
+  /// Use as a backdrop layer in `El.overlay` for modal dialogs.
+  let filledStyle (style: Style) : Element = Filled style
+
+  /// Fill the entire layout area with spaces with the given background color.
+  /// Idiom: `El.overlay [ El.filledBg Color.Black; modal ]`
+  let filledBg (color: Color) : Element =
+    Filled { Style.empty with Bg = Some color }
+
+  /// Fill the entire layout area with spaces with the given foreground color.
+  let filledFg (color: Color) : Element =
+    Filled { Style.empty with Fg = Some color }
+
   /// Memoize a view function: returns cached Element when input equals the previous input.
   /// Declare at module level to persist the cache across renders.
   /// Use at module level: `let lazyCounter = El.lazy' Counter.view`
@@ -438,6 +454,7 @@ module El =
         label "RespH" (ResponsiveH(breakpoints |> List.map (fun (minH, child) -> (minH, dbg (depth + 1) child))))
       | Scroll(off, child) ->
         label (sprintf "Scroll:%d" off) (Scroll(off, dbg (depth + 1) child))
+      | Filled _ -> label "Filled" elem
     dbg 0 elem
 
   /// Lay children out in a grid of `cols` columns.

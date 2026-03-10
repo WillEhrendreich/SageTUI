@@ -140,3 +140,13 @@ module Render =
           let srcRow = safeOffset + row
           for col = 0 to area.Width - 1 do
             Buffer.set (area.X + col) (area.Y + row) (Buffer.get col srcRow vBuf) buf
+
+      | Filled localStyle ->
+        let resolved = Style.merge inheritedStyle localStyle
+        let fg = resolved.Fg |> Option.map PackedColor.pack |> Option.defaultValue 0
+        let bg = resolved.Bg |> Option.map PackedColor.pack |> Option.defaultValue 0
+        let attrs = resolved.Attrs.Value
+        let spaceRune = int (System.Text.Rune ' ').Value
+        for row = area.Y to area.Y + area.Height - 1 do
+          for col = area.X to area.X + area.Width - 1 do
+            Buffer.set col row { Rune = spaceRune; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us } buf

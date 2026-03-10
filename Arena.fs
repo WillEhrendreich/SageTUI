@@ -285,6 +285,12 @@ module Arena =
       arena.Nodes.[idx] <- mkNode 17uy 0UL 0us 0uy 0s ci -1 offset 0
       h
 
+    | Filled style ->
+      let h = FrameArena.allocNode arena
+      let (NodeHandle idx) = h
+      arena.Nodes.[idx] <- mkNode 18uy (packStylePair style) style.Attrs.Value 0uy 0s -1 -1 0 0
+      h
+
   and lowerChildren (arena: FrameArena) (children: Element list) : int =
     match children with
     | [] -> -1

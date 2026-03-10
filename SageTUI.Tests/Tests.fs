@@ -5792,3 +5792,124 @@ let sprint48Tests =
   testList "Sprint 48" [
     sprint48PackedColorTests
   ]
+
+// ═══════════════════════════════════════════════════════════════════════
+// SPRINT 49: Filled element + Modal backdrop fix + VirtualList mouse
+// ═══════════════════════════════════════════════════════════════════════
+
+let private renderElem49 w h elem =
+  let area = { X = 0; Y = 0; Width = w; Height = h }
+  let buf = Buffer.create w h
+  Render.render area Style.empty buf elem
+  buf
+
+let private arenaRender49 w h elem =
+  let area = { X = 0; Y = 0; Width = w; Height = h }
+  let arenaBuf = Buffer.create w h
+  let arena = FrameArena.create 256 1024 64
+  let root = Arena.lower arena elem
+  ArenaRender.renderRoot arena root area arenaBuf
+  arenaBuf
+
+let sprint49FilledTests = testList "Filled element" [
+  testCase "filledBg fills all cells with background color in 10x3 area" <| fun () ->
+    let color = Color.Named(BaseColor.Blue, Intensity.Normal)
+    let packed = PackedColor.pack color
+    let buf = renderElem49 10 3 (El.filledBg color)
+    buf.Cells
+    |> Array.forall (fun c -> c.Bg = packed && c.Rune = int (System.Text.Rune ' ').Value)
+    |> Expect.isTrue "every cell has blue bg and space rune"
+
+  testCase "filledFg fills all cells with foreground color" <| fun () ->
+    let color = Color.Named(BaseColor.Red, Intensity.Bright)
+    let packed = PackedColor.pack color
+    let buf = renderElem49 5 2 (El.filledFg color)
+    buf.Cells
+    |> Array.forall (fun c -> c.Fg = packed)
+    |> Expect.isTrue "every cell has red fg"
+
+  testCase "Filled with empty style renders spaces with no color" <| fun () ->
+    let buf = renderElem49 4 2 (El.filledStyle Style.empty)
+    buf.Cells
+    |> Array.forall (fun c -> c.Bg = 0 && c.Fg = 0 && c.Rune = int (System.Text.Rune ' ').Value)
+    |> Expect.isTrue "all cells are default-colored spaces"
+
+  testCase "Filled inherits parent bg when local style has no bg" <| fun () ->
+    let parentBg = Color.Named(BaseColor.Green, Intensity.Normal)
+    let packed = PackedColor.pack parentBg
+    let elem =
+      Styled({ Style.empty with Bg = Some parentBg }, El.filledStyle Style.empty)
+    let buf = renderElem49 5 2 elem
+    buf.Cells
+    |> Array.forall (fun c -> c.Bg = packed)
+    |> Expect.isTrue "all cells inherit parent bg"
+
+  testCase "Filled local bg overrides parent bg" <| fun () ->
+    let parentBg = Color.Named(BaseColor.Green, Intensity.Normal)
+    let localBg  = Color.Named(BaseColor.Red, Intensity.Normal)
+    let packed = PackedColor.pack localBg
+    let elem =
+      Styled({ Style.empty with Bg = Some parentBg }, El.filledBg localBg)
+    let buf = renderElem49 5 2 elem
+    buf.Cells
+    |> Array.forall (fun c -> c.Bg = packed)
+    |> Expect.isTrue "local bg overrides parent bg"
+
+  testCase "Filled with bold attrs sets attrs on all cells" <| fun () ->
+    let style = { Style.empty with Attrs = TextAttrs.bold }
+    let buf = renderElem49 3 2 (Filled style)
+    buf.Cells
+    |> Array.forall (fun c -> c.Attrs = TextAttrs.bold.Value)
+    |> Expect.isTrue "all cells have bold attrs"
+
+  testCase "Filled zero-area renders nothing — no crash" <| fun () ->
+    let area = { X = 0; Y = 0; Width = 0; Height = 0 }
+    let buf = Buffer.create 5 5
+    Render.render area Style.empty buf (El.filledBg (Color.Named(BaseColor.Black, Intensity.Normal)))
+    buf.Cells |> Array.forall (fun c -> c.Bg = 0) |> Expect.isTrue "no cells written"
+
+  testCase "Arena parity: filledBg" <| fun () ->
+    let elem = El.filledBg (Color.Named(BaseColor.Cyan, Intensity.Normal))
+    let tree  = renderElem49 8 4 elem
+    let arena = arenaRender49 8 4 elem
+    arena.Cells |> Expect.sequenceEqual "cells match" tree.Cells
+
+  testCase "Arena parity: Filled inheriting parent style" <| fun () ->
+    let parentFg = Color.Named(BaseColor.White, Intensity.Bright)
+    let fillBg   = Color.Named(BaseColor.Magenta, Intensity.Normal)
+    let elem = Styled({ Style.empty with Fg = Some parentFg }, El.filledBg fillBg)
+    let tree  = renderElem49 6 3 elem
+    let arena = arenaRender49 6 3 elem
+    arena.Cells |> Expect.sequenceEqual "cells match" tree.Cells
+
+  testCase "Arena parity: Filled with attrs" <| fun () ->
+    let elem = Filled { Style.empty with Attrs = TextAttrs.italic }
+    let tree  = renderElem49 4 3 elem
+    let arena = arenaRender49 4 3 elem
+    arena.Cells |> Expect.sequenceEqual "cells match" tree.Cells
+
+  testCase "Modal.view backdrop fills entire area after fix" <| fun () ->
+    let color = Color.Named(BaseColor.Black, Intensity.Normal)
+    let packed = PackedColor.pack color
+    let elem = Modal.simple (El.text "test")
+    let buf = renderElem49 20 10 elem
+    // The backdrop should fill all cells not covered by the modal content
+    // At minimum, the corners (0,0) should have the backdrop color
+    (buf.Cells.[0].Bg = packed) |> Expect.isTrue "top-left cell has backdrop bg"
+    (buf.Cells.[19].Bg = packed) |> Expect.isTrue "top-right cell has backdrop bg"
+
+  testCase "El.overlay with filledBg as backdrop fills all non-content cells" <| fun () ->
+    let bgColor = Color.Rgb(50uy, 50uy, 50uy)
+    let bgPacked = PackedColor.pack bgColor
+    let elem = El.overlay [ El.filledBg bgColor; El.text "Hi" ]
+    let buf = renderElem49 10 1 elem
+    // "Hi" covers col 0-1, rest (2-9) should have bgColor
+    for col in 2 .. 9 do
+      buf.Cells.[col].Bg |> Expect.equal (sprintf "col %d has bg" col) bgPacked
+]
+
+[<Tests>]
+let sprint49Tests =
+  testList "Sprint 49" [
+    sprint49FilledTests
+  ]

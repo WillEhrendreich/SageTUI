@@ -133,6 +133,7 @@ module ArenaRender =
       match node.FirstChild with
       | -1 -> 0
       | ci -> measureWidth arena ci
+    | 18uy -> 0 // Filled — no intrinsic width; fills available space
     | _ -> 0
 
   /// Measure intrinsic height of an arena node.
@@ -203,6 +204,7 @@ module ArenaRender =
       match node.FirstChild with
       | -1 -> 0
       | ci -> measureHeight arena ci
+    | 18uy -> 0 // Filled — no intrinsic height; fills available space
     | _ -> 0
 
   let rec render (arena: FrameArena) (nodeIdx: int) (area: Area) (inheritedFg: int) (inheritedBg: int) (inheritedAttrs: uint16) (buf: Buffer) =
@@ -630,6 +632,21 @@ module ArenaRender =
             let srcRow = safeOffset + row
             for col = 0 to area.Width - 1 do
               Buffer.set (area.X + col) (area.Y + row) (Buffer.get col srcRow vBuf) buf
+
+      | 18uy -> // Filled — fill entire area with styled spaces
+        let fg =
+          match Arena.unpackStyleFg node.StylePacked with
+          | 0 -> inheritedFg
+          | v -> v
+        let bg =
+          match Arena.unpackStyleBg node.StylePacked with
+          | 0 -> inheritedBg
+          | v -> v
+        let attrs = node.AttrsPacked ||| inheritedAttrs
+        let spaceRune = int (System.Text.Rune ' ').Value
+        for row = area.Y to area.Y + area.Height - 1 do
+          for col = area.X to area.X + area.Width - 1 do
+            Buffer.set col row { Rune = spaceRune; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us } buf
 
       | _ -> ()
 

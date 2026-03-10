@@ -1703,6 +1703,40 @@ let virtualListTests = testList "VirtualList" [
     | Row [Column _; _] -> ()  // shape exists, not checking exact structure
     | _ -> failtest "expected Row [listColumn; scrollbarColumn]"
   }
+  // ── mouse wheel routing (Sprint 49) ─────────────────────────────────────
+  test "handleEvent ScrollUp calls selectPrev" {
+    let m = { VirtualList.ofArray 5 [| 0 .. 9 |] with SelectedIndex = Some 5 }
+    let event = MouseInput { Button = MouseButton.ScrollUp; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    let result = VirtualList.handleEvent event m
+    result.SelectedIndex |> Expect.equal "moved up one" (Some 4)
+  }
+  test "handleEvent ScrollDown calls selectNext" {
+    let m = { VirtualList.ofArray 5 [| 0 .. 9 |] with SelectedIndex = Some 3 }
+    let event = MouseInput { Button = MouseButton.ScrollDown; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    let result = VirtualList.handleEvent event m
+    result.SelectedIndex |> Expect.equal "moved down one" (Some 4)
+  }
+  test "handleEvent ScrollUp at top stays at item 0" {
+    let m = VirtualList.ofArray 5 [| 0 .. 9 |]  // SelectedIndex = Some 0
+    let event = MouseInput { Button = MouseButton.ScrollUp; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    let result = VirtualList.handleEvent event m
+    result.SelectedIndex |> Expect.equal "stays at 0" (Some 0)
+  }
+  test "handleEvent ScrollDown at bottom stays at last item" {
+    let m = { VirtualList.ofArray 5 [| 0 .. 9 |] with SelectedIndex = Some 9 }
+    let event = MouseInput { Button = MouseButton.ScrollDown; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    let result = VirtualList.handleEvent event m
+    result.SelectedIndex |> Expect.equal "stays at 9" (Some 9)
+  }
+  test "handleEvent ScrollDown updates scroll offset to keep selection visible" {
+    let m = VirtualList.ofArray 3 [| 0 .. 9 |]  // viewport=3, sel=0
+    let event = MouseInput { Button = MouseButton.ScrollDown; X = 0; Y = 0; Modifiers = Modifiers.None; Phase = Pressed }
+    // Scroll down through several items — scroll offset must catch up
+    let m' = Seq.fold (fun acc _ -> VirtualList.handleEvent event acc) m (seq { 0..5 })
+    let sel = m'.SelectedIndex |> Option.defaultValue -1
+    (sel >= m'.ScrollOffset && sel < m'.ScrollOffset + m'.ViewportHeight)
+    |> Expect.isTrue "selection stays visible after multiple scrolls"
+  }
 ]
 
 

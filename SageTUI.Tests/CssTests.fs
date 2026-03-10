@@ -26,6 +26,7 @@ let rec countLeaves (el: Element) =
   | Element.ResponsiveH bps ->
     bps |> List.tryHead |> Option.map (snd >> countLeaves) |> Option.defaultValue 0
   | Element.Scroll (_, c) -> countLeaves c
+  | Element.Filled _ -> 0
 
 let isRow el = match el with Element.Row _ -> true | _ -> false
 let isCol el = match el with Element.Column _ -> true | _ -> false

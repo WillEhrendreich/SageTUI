@@ -860,7 +860,7 @@ module VirtualList =
       let offset = max 0 m.ScrollOffset
       El.row [ listContent; renderScrollbar total vh offset ]
 
-  /// Handle keyboard events for navigation: Up/Down/PageUp/PageDown/Home/End.
+  /// Handle keyboard and mouse events for navigation: Up/Down/PageUp/PageDown/Home/End/ScrollWheel.
   /// Returns the updated model, or the same model for unhandled events.
   let handleEvent (event: TerminalEvent) (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     match event with
@@ -870,6 +870,8 @@ module VirtualList =
     | KeyPressed(Key.PageDown, _) -> pageDown m
     | KeyPressed(Key.Home,     _) -> selectFirst m
     | KeyPressed(Key.End,      _) -> selectLast m
+    | MouseInput { Button = ScrollUp }   -> selectPrev m
+    | MouseInput { Button = ScrollDown } -> selectNext m
     | _ -> m
 
 // ── VirtualTable ─────────────────────────────────────────────────────────────
@@ -1013,7 +1015,7 @@ module Modal =
     match config.Backdrop with
     | Some color ->
       El.overlay [
-        El.text " " |> El.bg color |> El.fill
+        El.filledBg color
         inner
       ]
     | None -> inner
