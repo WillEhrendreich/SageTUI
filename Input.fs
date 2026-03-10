@@ -29,6 +29,11 @@ module InputHelpers =
     | Key.Char r when r = Text.Rune expected -> Some ()
     | _ -> None
 
+  /// Convenience constructor: wraps a char literal into Key.Char.
+  /// `Key.char 'q'` is equivalent to `Key.Char (Text.Rune 'q')`.
+  /// Prefer this over `Key.Char (Text.Rune 'q')` in user code for brevity.
+  let inline keyChar (c: char) : Key = Key.Char (Text.Rune c)
+
 type MouseButton= LeftButton | RightButton | MiddleButton | ScrollUp | ScrollDown
 
 /// Whether the mouse button went down (Pressed), came up (Released), or was held

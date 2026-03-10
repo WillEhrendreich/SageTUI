@@ -1,25 +1,27 @@
 namespace SageTUI
 
 open System
+open System.ComponentModel
 open System.Threading
 
 /// A command to be executed by the runtime. Commands produce messages asynchronously.
 type Cmd<'msg> =
   | NoCmd
   | Batch of Cmd<'msg> list
-  | OfAsync of (('msg -> unit) -> Async<unit>)
-  | OfCancellableAsync of id: string * (CancellationToken -> ('msg -> unit) -> Async<unit>)
-  | CancelSub of string
+  | [<EditorBrowsable(EditorBrowsableState.Never)>] OfAsync of (('msg -> unit) -> Async<unit>)
+  | [<EditorBrowsable(EditorBrowsableState.Never)>] OfCancellableAsync of id: string * (CancellationToken -> ('msg -> unit) -> Async<unit>)
+  /// Use Cmd.cancel to cancel a running async by id.
+  | [<EditorBrowsable(EditorBrowsableState.Never)>] CancelSub of string
   | Delay of milliseconds: int * 'msg
   /// Dispatch a message synchronously — processed in the same drain loop before the next render.
   /// Unlike Delay(0, msg), DirectMsg does not schedule an async task; it enqueues directly.
-  | DirectMsg of 'msg
+  | [<EditorBrowsable(EditorBrowsableState.Never)>] DirectMsg of 'msg
   /// Quit the application with the given exit code (0 = success).
   | Quit of exitCode: int
   /// Write a raw ANSI/escape sequence through the terminal backend.
   /// Written before the next frame flush. Use only for valid ANSI sequences
   /// (e.g., OSC 52 clipboard write). Arbitrary text will corrupt the display.
-  | TerminalOutput of string
+  | [<EditorBrowsable(EditorBrowsableState.Never)>] TerminalOutput of string
 
 /// Command constructors and combinators.
 module Cmd =

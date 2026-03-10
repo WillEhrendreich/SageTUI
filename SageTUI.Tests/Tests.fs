@@ -9959,3 +9959,61 @@ let sprint66Tests =
     sprint66TestHarnessScrollTests
     sprint66SelectMouseTests
   ]
+
+// ── Sprint 67: NuGet readiness, Key.char helper, API ergonomics ──────────────
+
+let sprint67KeyCharTests =
+  testList "Key.char helper" [
+
+    test "keyChar 'q' equals Key.Char (Text.Rune 'q')" {
+      keyChar 'q' |> Expect.equal "should equal Key.Char rune" (Key.Char (Text.Rune 'q'))
+    }
+
+    test "keyChar 'a' equals Key.Char (Text.Rune 'a')" {
+      keyChar 'a' |> Expect.equal "should equal Key.Char rune a" (Key.Char (Text.Rune 'a'))
+    }
+
+    test "keyChar ' ' equals Key.Char (Text.Rune ' ')" {
+      keyChar ' ' |> Expect.equal "space" (Key.Char (Text.Rune ' '))
+    }
+
+    test "keyChar 'q' is distinct from Key.Char (Text.Rune 'w')" {
+      keyChar 'q' |> Expect.notEqual "not w" (Key.Char (Text.Rune 'w'))
+    }
+
+    test "KeyChar active pattern matches keyChar-constructed key" {
+      let key = keyChar 'q'
+      match key with
+      | KeyChar 'q' -> ()
+      | _ -> failtest "KeyChar pattern should match keyChar 'q'"
+    }
+
+    test "KeyChar active pattern does NOT match different char" {
+      let key = keyChar 'q'
+      match key with
+      | KeyChar 'w' -> failtest "should not match 'w'"
+      | _ -> ()
+    }
+
+    test "Keys.bind works with keyChar" {
+      let bindings = Keys.bind [ keyChar 'q', 99 ]
+      match bindings with
+      | KeySub handler ->
+        let result = handler (keyChar 'q', Modifiers.None)
+        result |> Expect.equal "should find 99" (Some 99)
+      | _ -> failtest "expected KeySub"
+    }
+
+    testProperty "keyChar roundtrips through Key.Char for BMP chars" <| fun (c: char) ->
+      // Only test printable BMP characters (Text.Rune construction can fail for surrogates)
+      if System.Char.IsSurrogate c then ()
+      else
+        let k = keyChar c
+        k |> Expect.equal "roundtrip" (Key.Char (Text.Rune c))
+  ]
+
+[<Tests>]
+let sprint67Tests =
+  testList "Sprint 67" [
+    sprint67KeyCharTests
+  ]

@@ -75,7 +75,7 @@ let view model =
     |> El.padAll 1
     |> El.bordered Rounded
 
-let keyBindings = Keys.bind [ Key.Char 'q', Quit; Key.Escape, Quit ]
+let keyBindings = Keys.bind [ keyChar 'q', Quit; Key.Escape, Quit ]
 
 let program : Program<Model, Msg> = {
     Init      = init
@@ -219,7 +219,7 @@ let view model =
 
 // ── Subscriptions ─────────────────────────────────────────────────────────────
 
-let quitBinding = Keys.bind [ Key.Char 'q', Quit; Key.Escape, Quit ]
+let quitBinding = Keys.bind [ keyChar 'q', Quit; Key.Escape, Quit ]
 
 let program : Program<Model, Msg> = {
     Init      = init
@@ -366,7 +366,7 @@ Each `Sub` variant has a different handler signature:
 
 ```fsharp
 Subscribe = fun model ->
-    [ Keys.bind [ Key.Char 'q', Quit ]              // specific key bindings
+    [ Keys.bind [ keyChar 'q', Quit ]              // specific key bindings
       Sub.KeySub(fun (k, mods) -> Some (Key(k,mods))) // all keypresses; return None to ignore
       Sub.TimerSub("tick", TimeSpan.FromMilliseconds(1000.), fun () -> Tick) // every 1000 ms
       Sub.ResizeSub(fun (w, h) -> Some (Resize(w, h))) ]   // terminal resize (return None to ignore

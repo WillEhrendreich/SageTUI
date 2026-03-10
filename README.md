@@ -1,8 +1,12 @@
 # SageTUI
 
+[![NuGet](https://img.shields.io/nuget/v/SageTUI)](https://www.nuget.org/packages/SageTUI) [![CI](https://github.com/WillEhrendreich/SageTUI/actions/workflows/ci.yml/badge.svg)](https://github.com/WillEhrendreich/SageTUI/actions/workflows/ci.yml)
+
 **Build beautiful terminal UIs in F# with zero ceremony.**
 
-Elm Architecture • SIMD rendering • 2,622 tests • **< 32 B/frame on idle** • Core package has zero external dependencies
+Elm Architecture • SIMD rendering • 2,630 tests • **< 32 B/frame on idle** • Core package has zero external dependencies
+
+📦 [NuGet](https://www.nuget.org/packages/SageTUI) • 📖 [Getting Started](docs/getting-started.md) • 🖼️ [Widget Gallery](GALLERY.md) • 🔄 [Migration Guide](MIGRATION.md)
 
 ## See It In Action
 

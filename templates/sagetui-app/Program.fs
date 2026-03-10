@@ -29,9 +29,9 @@ let view count =
 // Wire it all together
 let keyBindings =
   Keys.bind [
-    Key.Char (System.Text.Rune 'j'), Increment
-    Key.Char (System.Text.Rune 'k'), Decrement
-    Key.Char (System.Text.Rune 'q'), Quit
+    keyChar 'j', Increment
+    keyChar 'k', Decrement
+    keyChar 'q', Quit
     Key.Escape, Quit
   ]
 

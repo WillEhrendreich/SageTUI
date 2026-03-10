@@ -56,7 +56,39 @@ jobs:
         run: dotnet fsi docs/tutorial-verify.fsx
 
       - name: Pack
-        run: dotnet pack SageTUI.Library.fsproj --no-build -o ./artifacts
+        run: |
+          dotnet pack SageTUI.Library.fsproj --no-build -o ./artifacts
+          dotnet pack SageTUI.Templates.fsproj -o ./artifacts
+
+      - name: Template smoke test
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          SMOKE_DIR=$(mktemp -d)
+          LOCAL_FEED=$(mktemp -d)
+          cp ./artifacts/*.nupkg "$LOCAL_FEED/"
+          export DOTNET_CLI_HOME=$(mktemp -d)
+
+          cat > "$SMOKE_DIR/NuGet.Config" << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local-feed" value="LOCAL_FEED_PLACEHOLDER" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+          </configuration>
+          EOF
+          sed -i "s|LOCAL_FEED_PLACEHOLDER|$LOCAL_FEED|" "$SMOKE_DIR/NuGet.Config"
+
+          TEMPLATE_PKG=$(ls "$LOCAL_FEED"/SageTUI.Templates.*.nupkg | head -1)
+          dotnet new install "$TEMPLATE_PKG"
+          cd "$SMOKE_DIR"
+          dotnet new sagetui -n SmokeApp
+          cd SmokeApp
+          dotnet restore SmokeApp.fsproj --configfile "$SMOKE_DIR/NuGet.Config"
+          dotnet build SmokeApp.fsproj --no-restore
+          echo "✅ Template smoke test passed"
 
       - name: Upload NuGet package
         uses: actions/upload-artifact@v4
