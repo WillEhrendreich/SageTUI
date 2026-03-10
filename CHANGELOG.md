@@ -5,7 +5,7 @@ All notable changes to SageTUI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] - 2025-01-01
 
 ### Breaking Changes
 
@@ -98,17 +98,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - NuGet publish workflow (`.github/workflows/nuget-publish.yml`): triggered on `v*` tags; builds release, runs tests, packs with tag version, pushes to NuGet.org via `NUGET_API_KEY` secret.
   - `RepositoryUrl` and `PackageProjectUrl` corrected to `https://github.com/WillEhrendreich/SageTUI`.
   - `scratch.fsx` added at repo root — interactive SageFs validation script for iterating on transition logic.
+  - `benchmark-regression` job permissions hardened: write token is never present in PR contexts.
 
-
-  `benchmark-regression` job, ensuring the write token is never present in PR contexts.
 - `undo` algebraic laws (Laws 1–6): generator-first `SingleLineContent` arbitrary eliminates
   `Arb.filter` shrinking defect; Laws 5 and 6 correctly guard for no-op edits.
 
-
-
-Initial public release.
-
-### Added
+### Added (initial public release baseline)
 
 **Core Architecture**
 - Elm Architecture (TEA) runtime with `init`, `update`, `view`, `subscribe`

@@ -164,9 +164,9 @@ type LargeBufferDiffBenchmarks() =
     Buffer.diff front backTenPct |> ignore
 
 [<EntryPoint>]
-let main _argv =
-  BenchmarkRunner.Run<BufferDiffBenchmarks>() |> ignore
-  BenchmarkRunner.Run<RenderBenchmarks>() |> ignore
-  BenchmarkRunner.Run<LayoutBenchmarks>() |> ignore
-  BenchmarkRunner.Run<LargeBufferDiffBenchmarks>() |> ignore
+let main argv =
+  BenchmarkSwitcher
+    .FromAssembly(typeof<BufferDiffBenchmarks>.Assembly)
+    .Run(argv)
+  |> ignore
   0

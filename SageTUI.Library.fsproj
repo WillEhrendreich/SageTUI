@@ -15,7 +15,7 @@
     <PackageTags>fsharp;tui;terminal;elm-architecture;tea;mvu;functional;simd;layout;cli;widgets</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>0.9.0: Complete Elm Architecture (TEA/MVU) with 17+ widgets, SIMD-accelerated double-buffered rendering, flexbox layout engine, Program.OnError error boundaries, Sub.map coverage across all 11 subscription variants, VirtualList, FuzzyFinder, Viewport, Chart, Toast, theme system, template package, and 2,544 tests.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.9.0: Complete Elm Architecture (TEA/MVU) with 17+ widgets, SIMD-accelerated double-buffered rendering, flexbox layout engine, Program.OnError error boundaries, Sub.map coverage across all 11 subscription variants, VirtualList, FuzzyFinder, Viewport, Chart, Toast, theme system, template package, drain overflow protection, TestHarness with virtual time + click simulation, and 2,551 tests.</PackageReleaseNotes>
     <RepositoryUrl>https://github.com/WillEhrendreich/SageTUI</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/WillEhrendreich/SageTUI</PackageProjectUrl>

@@ -111,7 +111,8 @@ jobs:
 
       - name: Verify benchmark output exists
         run: |
-          if [ ! -f "./bench-out/results/SageTUI.Benchmarks-report-full-compressed.json" ]; then
+          BENCH_FILE="./bench-out/results/SageTUI.Benchmarks.BufferDiffBenchmarks-report-full-compressed.json"
+          if [ ! -f "$BENCH_FILE" ]; then
             echo "ERROR: Benchmark JSON not found at expected path."
             echo "Files found:"
             find ./bench-out -name "*.json" | head -20
@@ -122,7 +123,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results-${{ github.sha }}
-          path: ./bench-out/results/SageTUI.Benchmarks-report-full-compressed.json
+          path: ./bench-out/results/SageTUI.Benchmarks.BufferDiffBenchmarks-report-full-compressed.json
           if-no-files-found: error
 
       # Read-only comparison against stored gh-pages baseline.
@@ -131,7 +132,7 @@ jobs:
         uses: benchmark-action/github-action-benchmark@v1
         with:
           tool: 'benchmarkdotnet'
-          output-file-path: ./bench-out/results/SageTUI.Benchmarks-report-full-compressed.json
+          output-file-path: ./bench-out/results/SageTUI.Benchmarks.BufferDiffBenchmarks-report-full-compressed.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # Alert when any benchmark is 1.5x slower than baseline (meaningful regression)
           alert-threshold: '150%'
@@ -165,7 +166,7 @@ jobs:
         uses: benchmark-action/github-action-benchmark@v1
         with:
           tool: 'benchmarkdotnet'
-          output-file-path: ./bench-out/results/SageTUI.Benchmarks-report-full-compressed.json
+          output-file-path: ./bench-out/results/SageTUI.Benchmarks.BufferDiffBenchmarks-report-full-compressed.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           alert-threshold: '150%'
           comment-on-alert: false

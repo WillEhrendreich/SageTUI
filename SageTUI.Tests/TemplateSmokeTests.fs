@@ -86,7 +86,7 @@ let templateSmokeTests =
       |> Expect.stringContains "template should include the starter counter UI" "SageTUI Counter"
 
       File.ReadAllText(projectPath)
-      |> Expect.stringContains "template should rename the project to the requested app name" "<PackageReference Include=\"SageTUI\" Version=\"0.1.0\" />"
+      |> Expect.stringContains "template should rename the project to the requested app name" "<PackageReference Include=\"SageTUI\" Version=\"0.9.0\" />"
 
       restoreAndBuildGeneratedApp workspace appDir
   ]

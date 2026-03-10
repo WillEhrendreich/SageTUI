@@ -369,9 +369,86 @@ SageTUI uses the [Elm Architecture](https://guide.elm-lang.org/architecture/) (T
 - **Cmd** — side effects (async tasks, quit signal). `Cmd.none` means "no side effect"
 - **Sub** — ongoing event sources. `Keys.bind` for keyboard, `TimerSub` for polling
 
+## Testing
+
+SageTUI ships a first-class testing module (`Testing.fs`) so you can unit-test your programs without a real terminal.
+
+### Simulate keystrokes and inspect model/render
+
+```fsharp
+open SageTUI.Testing
+
+let app =
+  TestHarness.init myProgram 80 24
+  |> TestHarness.pressKey Key.Enter
+  |> TestHarness.pressKey (Key.Char 'j')
+  |> TestHarness.typeText "hello"
+
+// Assert on model
+app |> TuiExpect.modelSatisfies "item selected" (fun m -> m.Selected = 1)
+
+// Assert on rendered output
+app |> TuiExpect.viewContains "label visible" "hello"
+app |> TuiExpect.viewNotContains "error gone" "Error"
+```
+
+### Framed failure output
+
+`TuiExpect` prints a framed box on failure for immediate readability:
+
+```
+╔══════════════════════════════════════╗
+║ viewContains: label visible          ║
+║ Expected substring: "hello"          ║
+║ Rendered output (80×24):             ║
+║  > Hello, World!                     ║
+╚══════════════════════════════════════╝
+```
+
+### Direct element rendering (no program needed)
+
+```fsharp
+let lines = TestHarness.renderElement 40 3 (El.text "Hello" |> El.bordered Rounded)
+lines.[0] |> Expect.stringContains "top border" "╭"
+```
+
+### Virtual time — no Thread.Sleep
+
+`TestHarness.advanceTime` fully drains causal delay chains:
+
+```fsharp
+let app =
+  TestHarness.init timerProgram 80 24
+  |> TestHarness.advanceTime 1000  // fires all Cmd.Delay(≤1000ms, ...) chains
+app |> TuiExpect.viewContains "tick fired" "Tick: 1"
+```
+
+### Type text, focus, send messages
+
+```fsharp
+let app =
+  TestHarness.init formProgram 80 24
+  |> TestHarness.typeText "Alice"
+  |> TestHarness.focusNext
+  |> TestHarness.typeText "30"
+  |> TestHarness.sendMsg Submit
+
+app |> TuiExpect.modelSatisfies "name captured" (fun m -> m.Name = "Alice")
+```
+
+### Click hit-testing via arena hit map
+
+```fsharp
+let app =
+  TestHarness.init counterProgram 80 24
+  |> TestHarness.clickAt 5 3   // col 5, row 3 — resolves via arena hit map
+
+app |> TuiExpect.modelSatisfies "button clicked" (fun m -> m.Count = 1)
+```
+
 ## Support & Stability
 
-- **Package version:** 0.1.0
+- **Package version:** 0.9.0
 - **Target framework:** .NET 10.0
 - **API status:** pre-1.0; expect iterative changes while the surface area settles
 - **Core package:** `SageTUI`
