@@ -45,6 +45,10 @@ type TestApp<'model, 'msg> = {
   PendingDelays: PendingDelay<'msg> list
   /// Monotonic counter for assigning Seq to new PendingDelays entries.
   DelaySeq: int
+  /// Async commands (OfAsync, OfCancellableAsync) returned by Init or Update.
+  /// Not executed automatically — run them explicitly with TestHarness.runCapturedAsync,
+  /// or inspect with TestHarness.capturedCmds. Clear with TestHarness.clearCapturedCmds.
+  CapturedAsyncCmds: Cmd<'msg> list
 }
 
 /// Testing utilities for SageTUI programs. No real terminal required.
@@ -58,40 +62,43 @@ type TestApp<'model, 'msg> = {
 /// presence with Cmd.hasAsync in unit tests of Update.
 module TestHarness =
 
-  // Process commands synchronously. Handles Quit, Delay(0,msg), Batch, and
-  // Delay(n>0,msg) — which is enqueued rather than dropped.
-  // Returns (model, hasQuit, exitCode, newPendingDelays, nextSeq).
+  // Process commands synchronously. Handles Quit, Delay(0,msg), Batch, DirectMsg,
+  // and Delay(n>0,msg) — which is enqueued rather than dropped.
+  // OfAsync and OfCancellableAsync are collected into capturedAsync.
+  // Returns (model, hasQuit, exitCode, newPendingDelays, capturedAsync, nextSeq).
   let private processCmd
     (program: Program<'model, 'msg>)
     (effectiveNow: TimeSpan)
     (seqStart: int)
     (model: 'model)
     (cmd: Cmd<'msg>)
-    : 'model * bool * int option * PendingDelay<'msg> list * int =
-    let rec loop seqN model cmd =
+    : 'model * bool * int option * PendingDelay<'msg> list * Cmd<'msg> list * int =
+    let rec loop seqN model cmd asyncAcc =
       match cmd with
-      | Quit code -> model, true, Some code, [], seqN
+      | Quit code -> model, true, Some code, [], asyncAcc, seqN
       | Delay(0, msg) ->
         let newModel, nextCmd = program.Update msg model
-        loop seqN newModel nextCmd
+        loop seqN newModel nextCmd asyncAcc
       | DirectMsg msg ->
         let newModel, nextCmd = program.Update msg model
-        loop seqN newModel nextCmd
+        loop seqN newModel nextCmd asyncAcc
       | Delay(n, msg) ->
         let delay = { FireAt = effectiveNow + TimeSpan.FromMilliseconds(float n); Seq = seqN; Message = msg }
-        model, false, None, [ delay ], seqN + 1
+        model, false, None, [ delay ], asyncAcc, seqN + 1
+      | OfAsync _ | OfCancellableAsync _ ->
+        model, false, None, [], asyncAcc @ [ cmd ], seqN
       | Batch cmds ->
         cmds
         |> List.fold
-          (fun (m, q, ec, delays, sn) c ->
+          (fun (m, q, ec, delays, asynAcc2, sn) c ->
             match q with
-            | true -> m, true, ec, delays, sn
+            | true -> m, true, ec, delays, asynAcc2, sn
             | false ->
-              let m', q', ec', newDelays, sn' = loop sn m c
-              m', q', ec', delays @ newDelays, sn')
-          (model, false, None, [], seqN)
-      | _ -> model, false, None, [], seqN
-    loop seqStart model cmd
+              let m', q', ec', newDelays, newAsync, sn' = loop sn m c asynAcc2
+              m', q', ec', delays @ newDelays, newAsync, sn')
+          (model, false, None, [], asyncAcc, seqN)
+      | _ -> model, false, None, [], asyncAcc, seqN
+    loop seqStart model cmd []
 
   // Apply a list of messages in order, stopping on quit.
   // effectiveNow is used as the base time for computing child delay fire times.
@@ -100,23 +107,24 @@ module TestHarness =
     (app: TestApp<'model, 'msg>)
     (msgs: 'msg list)
     : TestApp<'model, 'msg> =
-    let model, hasQuit, exitCode, newDelays, seqN =
+    let model, hasQuit, exitCode, newDelays, capturedAsync, seqN =
       msgs
       |> List.fold
-        (fun (m, q, ec, delays, sn) msg ->
+        (fun (m, q, ec, delays, asyncAcc, sn) msg ->
           match q with
-          | true -> m, true, ec, delays, sn
+          | true -> m, true, ec, delays, asyncAcc, sn
           | false ->
             let newModel, cmd = app.Program.Update msg m
-            let newModel', quit, ec', cmdDelays, sn' =
+            let newModel', quit, ec', cmdDelays, newAsync, sn' =
               processCmd app.Program effectiveNow sn newModel cmd
-            newModel', quit, ec', delays @ cmdDelays, sn')
-        (app.Model, app.HasQuit, app.ExitCode, [], app.DelaySeq)
+            newModel', quit, ec', delays @ cmdDelays, asyncAcc @ newAsync, sn')
+        (app.Model, app.HasQuit, app.ExitCode, [], [], app.DelaySeq)
     { app with
         Model = model
         HasQuit = hasQuit
         ExitCode = exitCode
         PendingDelays = app.PendingDelays @ newDelays
+        CapturedAsyncCmds = app.CapturedAsyncCmds @ capturedAsync
         DelaySeq = seqN }
 
   /// Initialize a test app from a program. Runs Init and processes any synchronous commands.
@@ -133,14 +141,16 @@ module TestHarness =
       TimerNextFire = Map.empty
       PendingDelays = []
       DelaySeq = 0
+      CapturedAsyncCmds = []
     }
-    let model', hasQuit, exitCode, pendingDelays, seqN =
+    let model', hasQuit, exitCode, pendingDelays, capturedAsync, seqN =
       processCmd program TimeSpan.Zero 0 model cmd
     { app0 with
         Model = model'
         HasQuit = hasQuit
         ExitCode = exitCode
         PendingDelays = pendingDelays
+        CapturedAsyncCmds = capturedAsync
         DelaySeq = seqN }
 
   /// Simulate pressing a key (no modifier).
@@ -428,6 +438,45 @@ module TestHarness =
   /// Send multiple messages in order, equivalent to chaining sendMsg calls.
   let sendMsgs (msgs: 'msg list) (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
     List.fold (fun a m -> sendMsg m a) app msgs
+
+  /// Returns the list of OfAsync / OfCancellableAsync commands that were returned by
+  /// Init or Update but not yet executed. Use runCapturedAsync to execute them.
+  let capturedCmds (app: TestApp<'model, 'msg>) : Cmd<'msg> list =
+    app.CapturedAsyncCmds
+
+  /// Remove all captured async commands from the test app without running them.
+  let clearCapturedCmds (app: TestApp<'model, 'msg>) : TestApp<'model, 'msg> =
+    { app with CapturedAsyncCmds = [] }
+
+  /// Run all captured async commands (OfAsync / OfCancellableAsync) synchronously,
+  /// dispatching any resulting messages through Update, and return the updated TestApp.
+  ///
+  /// Captured async cmds are cleared before execution. Any new async cmds produced
+  /// by Update in response to dispatched messages are captured for the next round.
+  ///
+  /// Example:
+  ///   let app = TestHarness.init 80 24 program          // Init returns OfAsync
+  ///   let! app2 = TestHarness.runCapturedAsync app       // runs the async, dispatches result
+  ///   app2.Model |> Expect.equal "loaded" expectedModel
+  let runCapturedAsync (app: TestApp<'model, 'msg>) : Async<TestApp<'model, 'msg>> =
+    async {
+      let toRun = app.CapturedAsyncCmds
+      let app' = { app with CapturedAsyncCmds = [] }
+      let mutable current = app'
+      for cmd in toRun do
+        match cmd with
+        | OfAsync run ->
+          let msgs = System.Collections.Generic.List<'msg>()
+          do! run (fun msg -> msgs.Add(msg))
+          current <- applyMsgs current.VirtualTime current (List.ofSeq msgs)
+        | OfCancellableAsync(_, run) ->
+          use cts = new System.Threading.CancellationTokenSource()
+          let msgs = System.Collections.Generic.List<'msg>()
+          do! run cts.Token (fun msg -> msgs.Add(msg))
+          current <- applyMsgs current.VirtualTime current (List.ofSeq msgs)
+        | _ -> ()
+      return current
+    }
 
 /// Assertion helpers for SageTUI test programs.
 ///

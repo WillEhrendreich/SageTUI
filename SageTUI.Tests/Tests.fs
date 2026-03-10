@@ -10182,6 +10182,90 @@ let sprint68KeysBindLazyTests =
     }
   ]
 
+let sprint68TestHarnessAsyncTests =
+  testList "Sprint 68: TestHarness.capturedCmds and runCapturedAsync" [
+    test "TestHarness.init captures OfAsync cmds from Init in CapturedAsyncCmds" {
+      let program : Program<int, string> = {
+        Init      = fun () -> 0, OfAsync (fun dispatch -> async { dispatch "loaded" })
+        Update    = fun msg m -> m + 1, Cmd.none
+        View      = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError   = CrashOnError
+      }
+      let app = TestHarness.init 80 24 program
+      app.CapturedAsyncCmds |> Expect.hasLength "one async captured" 1
+    }
+
+    test "TestHarness.capturedCmds returns the list of captured async cmds" {
+      let program : Program<int, string> = {
+        Init      = fun () -> 0, Batch [ OfAsync (fun d -> async { d "a" }); OfAsync (fun d -> async { d "b" }) ]
+        Update    = fun msg m -> m, Cmd.none
+        View      = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError   = CrashOnError
+      }
+      let app = TestHarness.init 80 24 program
+      TestHarness.capturedCmds app |> Expect.hasLength "two async captured" 2
+    }
+
+    testAsync "TestHarness.runCapturedAsync executes async cmds and dispatches results" {
+      let program : Program<int, int> = {
+        Init      = fun () -> 0, OfAsync (fun dispatch -> async { dispatch 42 })
+        Update    = fun msg m -> m + msg, Cmd.none
+        View      = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError   = CrashOnError
+      }
+      let app = TestHarness.init 80 24 program
+      let! app2 = TestHarness.runCapturedAsync app
+      app2.Model |> Expect.equal "async dispatched 42" 42
+    }
+
+    testAsync "TestHarness.runCapturedAsync with chained async (async dispatch → another async)" {
+      let program : Program<int, int> = {
+        Init      = fun () -> 0, OfAsync (fun dispatch -> async { dispatch 1 })
+        Update    = fun msg m ->
+          m + msg, OfAsync (fun dispatch -> async { dispatch (msg * 10) })
+        View      = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError   = CrashOnError
+      }
+      let app = TestHarness.init 80 24 program
+      // Run first wave: dispatches 1, produces another async
+      let! app2 = TestHarness.runCapturedAsync app
+      app2.Model |> Expect.equal "after first run" 1
+      // Run second wave: dispatches 10
+      let! app3 = TestHarness.runCapturedAsync app2
+      app3.Model |> Expect.equal "after second run" 11
+    }
+
+    test "TestHarness.clearCapturedCmds removes pending async cmds" {
+      let program : Program<int, string> = {
+        Init      = fun () -> 0, OfAsync (fun d -> async { d "never" })
+        Update    = fun msg m -> m, Cmd.none
+        View      = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError   = CrashOnError
+      }
+      let app = TestHarness.init 80 24 program
+      app.CapturedAsyncCmds |> Expect.hasLength "has captured" 1
+      let cleared = TestHarness.clearCapturedCmds app
+      cleared.CapturedAsyncCmds |> Expect.isEmpty "cleared"
+    }
+
+    test "TestHarness.sendMsg captures async cmds returned by Update" {
+      let program : Program<int, int> = {
+        Init      = fun () -> 0, Cmd.none
+        Update    = fun msg m -> m + msg, OfAsync (fun d -> async { d 99 })
+        View      = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError   = CrashOnError
+      }
+      let app = TestHarness.init 80 24 program |> TestHarness.sendMsg 1
+      app.CapturedAsyncCmds |> Expect.hasLength "async from Update captured" 1
+    }
+  ]
+
 let sprint68CmdAsyncTests =
   testList "Sprint 68: Cmd.fromAsync and Cmd.fromTask" [
     test "Cmd.fromAsync wraps Async in Cmd" {
@@ -10255,6 +10339,7 @@ let sprint68Tests =
   testList "Sprint 68" [
     sprint68ErrorPolicyTests
     sprint68KeysBindLazyTests
+    sprint68TestHarnessAsyncTests
     sprint68CmdAsyncTests
     sprint68UnsafeRenameTests
   ]

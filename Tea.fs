@@ -402,37 +402,43 @@ and FocusDirection =
 /// Key binding helpers for zero-ceremony keyboard subscriptions.
 module Keys =
   /// Create a KeySub from a list of key-to-message bindings.
-  /// Unmatched keys are ignored.
+  /// Unmatched keys are ignored. The lookup dictionary is built lazily on first use.
   ///
-  /// IMPORTANT — call at module/let level, NOT inside the Subscribe lambda:
-  ///   let keyBindings = Keys.bind [ Key.Char (Text.Rune 'q'), Quit ]           // ✅ allocated once
+  /// BEST PRACTICE — call at module/let level to share one allocation across all frames:
+  ///   let keyBindings = Keys.bind [ Key.Char (Text.Rune 'q'), Quit ]           // ✅ one allocation
   ///   Subscribe = fun _ -> [ keyBindings ]
   ///
-  /// Calling Keys.bind inside Subscribe allocates a new Dictionary on every model update:
-  ///   Subscribe = fun _ -> [ Keys.bind [ Key.Char (Text.Rune 'q'), Quit ] ]    // ⚠️ allocs every update
+  /// Calling Keys.bind inside Subscribe creates a new Sub closure on every model update.
+  /// With lazy initialization the Dictionary itself is still built only once per closure,
+  /// but the closure allocation still occurs. Prefer module-level bindings for zero-alloc
+  /// Subscribe lambdas on hot paths.
   let bind (bindings: (Key * 'msg) list) : Sub<'msg> =
-    let lookup = System.Collections.Generic.Dictionary(bindings.Length)
-    for (k, msg) in bindings do
-      lookup[k] <- msg
+    let lazyLookup =
+      System.Lazy<System.Collections.Generic.Dictionary<Key,'msg>>(fun () ->
+        let d = System.Collections.Generic.Dictionary(bindings.Length)
+        for (k, msg) in bindings do d[k] <- msg
+        d)
     KeySub(fun (k, _mods) ->
-      match lookup.TryGetValue(k) with
+      match lazyLookup.Value.TryGetValue(k) with
       | true, msg -> Some msg
       | false, _ -> None)
 
   /// Create a KeySub from key+modifier bindings. Uses O(1) Dictionary lookup.
+  /// The lookup dictionary is built lazily on first use.
   ///
-  /// IMPORTANT — call at module/let level, NOT inside the Subscribe lambda:
-  ///   let keyBindings = Keys.bindWithMods [ (Key.Char (Text.Rune 's'), Modifiers.Ctrl), Save ]  // ✅ allocated once
+  /// BEST PRACTICE — call at module/let level to share one allocation across all frames:
+  ///   let keyBindings = Keys.bindWithMods [ (Key.Char (Text.Rune 's'), Modifiers.Ctrl), Save ]  // ✅ one allocation
   ///   Subscribe = fun _ -> [ keyBindings ]
   ///
-  /// Calling Keys.bindWithMods inside Subscribe allocates a new Dictionary on every model update:
-  ///   Subscribe = fun _ -> [ Keys.bindWithMods [...] ]   // ⚠️ allocs every update
+  /// Calling Keys.bindWithMods inside Subscribe creates a new Sub closure on every model update.
   let bindWithMods (bindings: ((Key * Modifiers) * 'msg) list) : Sub<'msg> =
-    let lookup = System.Collections.Generic.Dictionary(bindings.Length)
-    for ((k, m), msg) in bindings do
-      lookup[(k, m)] <- msg
+    let lazyLookup =
+      System.Lazy<System.Collections.Generic.Dictionary<Key * Modifiers,'msg>>(fun () ->
+        let d = System.Collections.Generic.Dictionary(bindings.Length)
+        for ((k, m), msg) in bindings do d[(k, m)] <- msg
+        d)
     KeySub(fun (k, mods) ->
-      match lookup.TryGetValue((k, mods)) with
+      match lazyLookup.Value.TryGetValue((k, mods)) with
       | true, msg -> Some msg
       | false, _ -> None)
 
