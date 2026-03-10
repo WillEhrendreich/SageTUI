@@ -9140,8 +9140,227 @@ let sprint64DrainLimitTests =
 
   ]
 
+// -------------------------------------------------------
+// Sprint 64 — AppConfig.DebugLayout
+// -------------------------------------------------------
+
+let sprint64DebugLayoutTests =
+  testList "AppConfig.DebugLayout" [
+
+    test "defaults.DebugLayout is false" {
+      AppConfig.defaults.DebugLayout |> Expect.isFalse "default should be false"
+    }
+
+    test "AppConfig with DebugLayout=true round-trips through with expression" {
+      let cfg = { AppConfig.defaults with DebugLayout = true }
+      cfg.DebugLayout |> Expect.isTrue "DebugLayout should be true"
+    }
+
+    test "DebugLayout=true: rendered output contains box-drawing chars" {
+      let events = [ KeyPressed(Key.Escape, Modifiers.None) ]
+      let backend, getOutput = TestBackend.create 20 5 events
+      let program : Program<unit, Key> =
+        { Init      = fun () -> (), NoCmd
+          Update    = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+          View      = fun () -> El.text "hi"
+          Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
+          OnError   = None }
+      let cfg = { AppConfig.defaults with DebugLayout = true }
+      App.runWith cfg backend program
+      let out = getOutput()
+      // El.debugLayout wraps with colored borders — box-drawing chars must appear
+      out |> Expect.stringContains "debug border chars present" "─"
+    }
+
+    test "DebugLayout=false: no debug border chars added" {
+      let events = [ KeyPressed(Key.Escape, Modifiers.None) ]
+      let backend, getOutput = TestBackend.create 20 5 events
+      let program : Program<unit, Key> =
+        { Init      = fun () -> (), NoCmd
+          Update    = fun k () -> match k with Key.Escape -> (), Quit 0 | _ -> (), NoCmd
+          View      = fun () -> El.text "hi"
+          Subscribe = fun _ -> [ KeySub (fun (k, _) -> Some k) ]
+          OnError   = None }
+      let cfg = { AppConfig.defaults with DebugLayout = false }
+      App.runWith cfg backend program
+      let out = getOutput()
+      // Without debugLayout, "hi" appears and no box-drawing border chars
+      out |> Expect.stringContains "text renders normally" "hi"
+      (out.Contains "─") |> Expect.isFalse "no debug border chars"
+    }
+
+  ]
+
+// -------------------------------------------------------
+// Sprint 64 — Program.combine
+// -------------------------------------------------------
+
+type private P1Msg = Inc | DecA
+type private P2Msg = DoubleIt | ResetB
+
+let private combineTestP1 : Program<int, P1Msg> =
+  { Init      = fun () -> 0, NoCmd
+    Update    = fun msg m ->
+                  match msg with
+                  | Inc  -> m + 1, NoCmd
+                  | DecA -> m - 1, NoCmd
+    View      = fun m -> El.text (sprintf "A:%d" m)
+    Subscribe = fun _ -> []
+    OnError   = None }
+
+let private combineTestP2 : Program<int, P2Msg> =
+  { Init      = fun () -> 10, NoCmd
+    Update    = fun msg m ->
+                  match msg with
+                  | DoubleIt -> m * 2, NoCmd
+                  | ResetB   -> 0, NoCmd
+    View      = fun m -> El.text (sprintf "B:%d" m)
+    Subscribe = fun _ -> []
+    OnError   = None }
+
+let sprint64ProgramCombineTests =
+  testList "Program.combine" [
+
+    test "Init returns tuple of both initial models" {
+      let combined = Program.combine (fun a b -> El.row [a; b]) combineTestP1 combineTestP2
+      let (m1, m2), _ = combined.Init()
+      m1 |> Expect.equal "p1 init" 0
+      m2 |> Expect.equal "p2 init" 10
+    }
+
+    test "Choice1Of2 routes to p1.Update" {
+      let combined = Program.combine (fun a b -> El.row [a; b]) combineTestP1 combineTestP2
+      let (initModel, _) = combined.Init()
+      let (m1', m2'), _ = combined.Update (Choice1Of2 Inc) initModel
+      m1' |> Expect.equal "p1 incremented" 1
+      m2' |> Expect.equal "p2 unchanged" 10
+    }
+
+    test "Choice2Of2 routes to p2.Update" {
+      let combined = Program.combine (fun a b -> El.row [a; b]) combineTestP1 combineTestP2
+      let (initModel, _) = combined.Init()
+      let (m1', m2'), _ = combined.Update (Choice2Of2 DoubleIt) initModel
+      m1' |> Expect.equal "p1 unchanged" 0
+      m2' |> Expect.equal "p2 doubled" 20
+    }
+
+    test "View calls viewCompose with both sub-views" {
+      let mutable views = []
+      let compose a b = views <- [a; b]; El.row [a; b]
+      let combined = Program.combine compose combineTestP1 combineTestP2
+      let (initModel, _) = combined.Init()
+      let _ = combined.View initModel
+      views |> Expect.hasLength "compose called with 2 elements" 2
+    }
+
+    test "Init batches both init commands via Cmd.map" {
+      // If p1.Init returns a command, it should be mapped through Choice1Of2
+      let p1WithCmd : Program<int, P1Msg> =
+        { combineTestP1 with Init = fun () -> 0, DirectMsg Inc }
+      let combined = Program.combine (fun a b -> El.row [a; b]) p1WithCmd combineTestP2
+      let _, cmd = combined.Init()
+      match cmd with
+      | Batch cmds ->
+        cmds |> Expect.hasLength "batch has both cmds" 2
+      | _ -> failtest "expected Batch"
+    }
+
+    test "multiple Choice1Of2 updates accumulate correctly" {
+      let combined = Program.combine (fun a b -> El.row [a; b]) combineTestP1 combineTestP2
+      let model0, _ = combined.Init()
+      let model1, _ = combined.Update (Choice1Of2 Inc) model0
+      let model2, _ = combined.Update (Choice1Of2 Inc) model1
+      let model3, _ = combined.Update (Choice1Of2 DecA) model2
+      let (m1, m2) = model3
+      m1 |> Expect.equal "p1 = 0+1+1-1=1" 1
+      m2 |> Expect.equal "p2 unchanged" 10
+    }
+
+  ]
+
+// -------------------------------------------------------
+// Sprint 64 — Cmd.saveBytes / Cmd.loadBytes
+// -------------------------------------------------------
+
+let sprint64SaveBytesTests =
+  testList "Cmd.saveBytes and Cmd.loadBytes" [
+
+    test "Cmd.appDataDir returns non-empty string for test app name" {
+      let dir = Cmd.appDataDir "SageTUI.Test"
+      dir |> Expect.isNotEmpty "appDataDir should return non-empty path"
+    }
+
+    test "Cmd.appDataDir contains the app name" {
+      let dir = Cmd.appDataDir "MyTestApp"
+      dir |> Expect.stringContains "should contain app name" "MyTestApp"
+    }
+
+    test "Cmd.saveBytes returns OfAsync command" {
+      let cmd = Cmd.saveBytes "SageTUI.Test" "key" [||] (fun () -> ()) (fun _ -> ())
+      match cmd with
+      | OfAsync _ -> ()
+      | _ -> failtest "expected OfAsync"
+    }
+
+    test "Cmd.loadBytes returns OfAsync command" {
+      let cmd = Cmd.loadBytes "SageTUI.Test" "key" (fun _ -> ()) (fun _ -> ())
+      match cmd with
+      | OfAsync _ -> ()
+      | _ -> failtest "expected OfAsync"
+    }
+
+    testTask "saveBytes + loadBytes round-trip" {
+      let appName = sprintf "SageTUI.TestRoundtrip.%s" (System.Guid.NewGuid().ToString("N").[..7])
+      let data = [| 10uy; 20uy; 30uy; 42uy; 255uy |]
+      let mutable saveOk = false
+      let mutable loadResult : byte[] option = None
+
+      let saveCmd = Cmd.saveBytes appName "roundtrip" data (fun () -> true) (fun _ -> false)
+      let loadCmd = Cmd.loadBytes appName "roundtrip" id (fun _ -> None)
+
+      match saveCmd with
+      | OfAsync f ->
+        do! f (fun ok -> saveOk <- ok)
+      | _ -> failtest "expected OfAsync for save"
+
+      saveOk |> Expect.isTrue "save should succeed"
+
+      match loadCmd with
+      | OfAsync f ->
+        do! f (fun result -> loadResult <- result)
+      | _ -> failtest "expected OfAsync for load"
+
+      loadResult |> Expect.equal "loaded data matches saved data" (Some data)
+
+      // Cleanup
+      try
+        let dir = Cmd.appDataDir appName
+        if System.IO.Directory.Exists(dir) then
+          System.IO.Directory.Delete(dir, true)
+      with _ -> ()
+    }
+
+    testTask "loadBytes returns None for missing key" {
+      let appName = sprintf "SageTUI.TestMissing.%s" (System.Guid.NewGuid().ToString("N").[..7])
+      let mutable loadResult : byte[] option = Some [||]  // wrong init — should become None
+
+      let loadCmd = Cmd.loadBytes appName "nonexistent" id (fun _ -> None)
+      match loadCmd with
+      | OfAsync f ->
+        do! f (fun result -> loadResult <- result)
+      | _ -> failtest "expected OfAsync for load"
+
+      loadResult |> Expect.equal "missing key returns None" None
+    }
+
+  ]
+
+
 [<Tests>]
 let sprint64Tests =
   testList "Sprint 64" [
     sprint64DrainLimitTests
+    sprint64DebugLayoutTests
+    sprint64ProgramCombineTests
+    sprint64SaveBytesTests
   ]

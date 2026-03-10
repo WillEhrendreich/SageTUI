@@ -18,7 +18,12 @@ type AppConfig =
     /// Receives a pre-formatted log line with timestamp, message, and stack trace.
     /// Defaults to appending to "sagetui-errors.log" in the working directory.
     /// Override to integrate with your application's structured logging infrastructure.
-    LogSink: string -> unit }
+    LogSink: string -> unit
+    /// When true, wraps every rendered Element tree with El.debugLayout before rendering.
+    /// Draws depth-cycling colored borders (Cyan/Magenta/Yellow/Green/Red/Blue) around
+    /// every layout node. Use during development to visualise how layout constraints nest.
+    /// Default: false.
+    DebugLayout: bool }
 
 module AppConfig =
   let private defaultLogSink (msg: string) =
@@ -29,7 +34,8 @@ module AppConfig =
       ArenaChars = 65536
       ArenaLayout = 4096
       MaxDrainMessages = 10_000
-      LogSink = defaultLogSink }
+      LogSink = defaultLogSink
+      DebugLayout = false }
 
 module App =
   let private isTruthyEnvVar (value: string option) =
@@ -399,7 +405,8 @@ module App =
         | false -> ()
         | true ->
 
-          let elem = program.View model
+          let rawElem = program.View model
+          let elem = match config.DebugLayout with true -> El.debugLayout rawElem | false -> rawElem
   
           // Reconcile keyed elements for transitions. Exits use the previous frame's
           // keyed areas; enters use the current frame's keyed areas after rendering.
@@ -940,7 +947,8 @@ module App =
         match shouldRender with
         | false -> ()
         | true ->
-          let elem = program.View model
+          let rawElem = program.View model
+          let elem = match config.DebugLayout with true -> El.debugLayout rawElem | false -> rawElem
           FrameArena.reset arena
           let rootHandle = Arena.lower arena elem
 

@@ -213,6 +213,66 @@ module Cmd =
       do! System.Threading.Tasks.Task.Delay(delayMs, ct) |> Async.AwaitTask
       dispatch msg })
 
+  /// Returns the platform-appropriate application data directory for the given app name.
+  /// - Windows:  `%APPDATA%\{appName}`
+  /// - macOS:    `~/Library/Application Support/{appName}`
+  /// - Linux:    `$XDG_DATA_HOME/{appName}` or `~/.local/share/{appName}`
+  let appDataDir (appName: string) : string =
+    let home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+    if Runtime.InteropServices.RuntimeInformation.IsOSPlatform(Runtime.InteropServices.OSPlatform.Windows) then
+      IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), appName)
+    elif Runtime.InteropServices.RuntimeInformation.IsOSPlatform(Runtime.InteropServices.OSPlatform.OSX) then
+      IO.Path.Combine(home, "Library", "Application Support", appName)
+    else
+      let xdg = Environment.GetEnvironmentVariable("XDG_DATA_HOME")
+      let base' =
+        match String.IsNullOrEmpty(xdg) with
+        | false -> xdg
+        | true  -> IO.Path.Combine(home, ".local", "share")
+      IO.Path.Combine(base', appName)
+
+  /// Persist raw bytes to `{appDataDir appName}/{key}.bin` asynchronously.
+  /// Creates the directory if it doesn't exist.
+  /// Dispatches `onDone ()` on success, `onError exn` on failure.
+  let saveBytes
+    (appName: string)
+    (key: string)
+    (data: byte array)
+    (onDone: unit -> 'msg)
+    (onError: exn -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        try
+          let dir = appDataDir appName
+          IO.Directory.CreateDirectory(dir) |> ignore
+          let path = IO.Path.Combine(dir, key + ".bin")
+          do! IO.File.WriteAllBytesAsync(path, data) |> Async.AwaitTask
+          dispatch (onDone ())
+        with ex ->
+          dispatch (onError ex)
+      })
+
+  /// Load raw bytes from `{appDataDir appName}/{key}.bin` asynchronously.
+  /// Dispatches `onLoaded (Some bytes)` if the file exists, `onLoaded None` if it doesn't.
+  /// Dispatches `onError exn` on I/O failure (other than file-not-found).
+  let loadBytes
+    (appName: string)
+    (key: string)
+    (onLoaded: byte array option -> 'msg)
+    (onError: exn -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        try
+          let path = IO.Path.Combine(appDataDir appName, key + ".bin")
+          match IO.File.Exists(path) with
+          | false -> dispatch (onLoaded None)
+          | true  ->
+            let! data = IO.File.ReadAllBytesAsync(path) |> Async.AwaitTask
+            dispatch (onLoaded (Some data))
+        with ex ->
+          dispatch (onError ex)
+      })
+
 /// Per-frame render timing measurements. All values are in milliseconds.
 /// Available via FrameTimingsSub — subscribe to receive one record per frame.
 type FrameTimings = {
@@ -661,6 +721,44 @@ module Program =
   ///   let program = { ... } |> Program.withOnError (fun ex -> Some (ErrorOccurred ex.Message))
   let withOnError (handler: exn -> 'msg option) (program: Program<'model, 'msg>) : Program<'model, 'msg> =
     { program with OnError = Some handler }
+
+  /// Combine two independent programs into a single program whose model is a tuple and
+  /// whose message type is `Choice<'msg1,'msg2>`.
+  ///
+  /// `viewCompose` receives both sub-views and must produce a single `Element`
+  /// (typically `El.row [view1; view2]` or `El.column [view1; view2]`).
+  ///
+  /// Example:
+  /// ```fsharp
+  /// let combined =
+  ///   Program.combine
+  ///     (fun v1 v2 -> El.row [v1 |> El.fill; v2 |> El.fill])
+  ///     counterProgram
+  ///     timerProgram
+  /// ```
+  let combine
+    (viewCompose: Element -> Element -> Element)
+    (p1: Program<'m1, 'msg1>)
+    (p2: Program<'m2, 'msg2>)
+    : Program<'m1 * 'm2, Choice<'msg1, 'msg2>> =
+    { Init = fun () ->
+        let m1, cmd1 = p1.Init()
+        let m2, cmd2 = p2.Init()
+        (m1, m2), Batch [ Cmd.map Choice1Of2 cmd1; Cmd.map Choice2Of2 cmd2 ]
+      Update = fun msg (m1, m2) ->
+        match msg with
+        | Choice1Of2 msg1 ->
+          let m1', c = p1.Update msg1 m1
+          (m1', m2), Cmd.map Choice1Of2 c
+        | Choice2Of2 msg2 ->
+          let m2', c = p2.Update msg2 m2
+          (m1, m2'), Cmd.map Choice2Of2 c
+      View = fun (m1, m2) ->
+        viewCompose (p1.View m1) (p2.View m2)
+      Subscribe = fun (m1, m2) ->
+        [ yield! p1.Subscribe m1 |> List.map (Sub.map Choice1Of2)
+          yield! p2.Subscribe m2 |> List.map (Sub.map Choice2Of2) ]
+      OnError = None }
 
 /// A vocabulary type for asynchronous data loading states.
 /// The most commonly reinvented type in F# async applications — provided here so
