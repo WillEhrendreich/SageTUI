@@ -175,6 +175,22 @@ module Cmd =
     | Batch cmds -> cmds |> List.collect extractDelays
     | _ -> []
 
+  /// Debounce a message: wait `delayMs` milliseconds, then dispatch `msg`.
+  /// If a new `Cmd.debounce` with the **same id** is issued before the delay
+  /// completes, the previous pending dispatch is cancelled and the timer restarts.
+  ///
+  /// This is powered by `OfCancellableAsync` — App.run cancels any running
+  /// async with the same id before starting the new one, giving cancel-and-restart
+  /// semantics for free.
+  ///
+  /// Typical use: debounce a search filter on fast keystroke input.
+  ///   | SearchChanged q ->
+  ///       { model with Query = q }, Cmd.debounce "search" 300 (Search q)
+  let debounce (id: string) (delayMs: int) (msg: 'msg) : Cmd<'msg> =
+    OfCancellableAsync(id, fun ct dispatch -> async {
+      do! System.Threading.Tasks.Task.Delay(delayMs, ct) |> Async.AwaitTask
+      dispatch msg })
+
 /// Per-frame render timing measurements. All values are in milliseconds.
 /// Available via FrameTimingsSub — subscribe to receive one record per frame.
 type FrameTimings = {
@@ -382,6 +398,40 @@ module Sub =
         match lookup.TryGetValue(k) with
         | true, msg -> Some msg
         | false, _  -> None)
+
+  /// Rate-limit a subscription to fire at most once per `intervalMs` milliseconds.
+  ///
+  /// For option-returning Subs (KeySub, MouseSub, ClickSub, DragSub,
+  /// TerminalFocusSub, PasteSub, FocusSub, ResizeSub): the inner handler is only
+  /// called when enough time has elapsed since the last message was produced.
+  /// The timer only advances when the inner handler returns `Some` — returning
+  /// `None` does not consume the throttle window.
+  ///
+  /// TimerSub, CustomSub, and FrameTimingsSub pass through unchanged (they are
+  /// already rate-limited or operate asynchronously).
+  ///
+  /// Example: throttle resize to at most once per 100ms
+  ///   Sub.throttle 100 (ResizeSub(fun (w,h) -> Some (Resized(w,h))))
+  let throttle (intervalMs: int) (sub: Sub<'msg>) : Sub<'msg> =
+    let lastFiredAt = ref System.DateTime.MinValue
+    let tryFire (handler: unit -> 'msg option) =
+      let now = System.DateTime.UtcNow
+      match (now - !lastFiredAt).TotalMilliseconds >= float intervalMs with
+      | false -> None
+      | true  ->
+        match handler () with
+        | None        -> None
+        | Some m      -> lastFiredAt := now; Some m
+    match sub with
+    | KeySub f           -> KeySub           (fun x -> tryFire (fun () -> f x))
+    | MouseSub f         -> MouseSub         (fun x -> tryFire (fun () -> f x))
+    | ClickSub f         -> ClickSub         (fun x -> tryFire (fun () -> f x))
+    | DragSub f          -> DragSub          (fun x -> tryFire (fun () -> f x))
+    | TerminalFocusSub f -> TerminalFocusSub (fun x -> tryFire (fun () -> f x))
+    | PasteSub f         -> PasteSub         (fun x -> tryFire (fun () -> f x))
+    | FocusSub f         -> FocusSub         (fun x -> tryFire (fun () -> f x))
+    | ResizeSub f        -> ResizeSub        (fun x -> tryFire (fun () -> f x))
+    | TimerSub _ | CustomSub _ | FrameTimingsSub _ -> sub
 
 /// Generic undo/redo wrapper for any model type.
 /// Wrap your model in `UndoableModel` and use `Undoable.commit` in Update

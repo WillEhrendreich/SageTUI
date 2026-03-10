@@ -658,6 +658,70 @@ module TableColumn =
   let asFill (col: TableColumn<'a>) : TableColumn<'a> =
     { col with Fill = true }
 
+/// Interactive state for a table with cursor navigation and multi-row selection.
+/// Works with `Table.viewState` for rendering.
+type TableState = {
+  /// Index of the row currently under the cursor.
+  Cursor: int
+  /// Set of selected row indices.
+  Selected: Set<int>
+  /// Total number of rows in the underlying data.
+  RowCount: int
+}
+
+/// Functions for managing `TableState` — cursor movement, multi-select, and keyboard handling.
+module TableState =
+  /// Create an empty `TableState` for a table with `rowCount` rows.
+  let empty (rowCount: int) : TableState =
+    { Cursor = 0; Selected = Set.empty; RowCount = rowCount }
+
+  /// Sync RowCount (e.g. after the data changes) and clamp cursor.
+  let withRowCount (rowCount: int) (state: TableState) : TableState =
+    let cursor = min state.Cursor (max 0 (rowCount - 1))
+    { state with RowCount = rowCount; Cursor = cursor }
+
+  /// Move the cursor up one row, clamped at 0.
+  let moveCursorUp (state: TableState) : TableState =
+    { state with Cursor = max 0 (state.Cursor - 1) }
+
+  /// Move the cursor down one row, clamped at RowCount - 1.
+  let moveCursorDown (state: TableState) : TableState =
+    { state with Cursor = min (state.RowCount - 1) (state.Cursor + 1) }
+
+  /// Toggle selection of the row under the cursor.
+  let toggleSelect (state: TableState) : TableState =
+    let selected =
+      match Set.contains state.Cursor state.Selected with
+      | true  -> Set.remove state.Cursor state.Selected
+      | false -> Set.add    state.Cursor state.Selected
+    { state with Selected = selected }
+
+  /// Select all rows.
+  let selectAll (state: TableState) : TableState =
+    let all = Set.ofSeq { 0 .. state.RowCount - 1 }
+    { state with Selected = all }
+
+  /// Clear all row selections.
+  let clearSelection (state: TableState) : TableState =
+    { state with Selected = Set.empty }
+
+  /// Handle a key press and return the updated state.
+  ///   j / ↓         — cursor down
+  ///   k / ↑         — cursor up
+  ///   Space         — toggle selection of cursor row
+  ///   Ctrl+A        — select all
+  ///   Escape        — clear selection
+  let handleKey (key: Key) (mods: Modifiers) (state: TableState) : TableState =
+    match key, mods with
+    | Key.Up,    _                                               -> moveCursorUp    state
+    | Key.Down,  _                                               -> moveCursorDown  state
+    | Key.Char r, _ when r = System.Text.Rune 'j'               -> moveCursorDown  state
+    | Key.Char r, _ when r = System.Text.Rune 'k'               -> moveCursorUp    state
+    | Key.Char r, _ when r = System.Text.Rune ' '               -> toggleSelect    state
+    | Key.Char r, Modifiers.Ctrl when r = System.Text.Rune 'a'  -> selectAll       state
+    | Key.Escape, _                                              -> clearSelection  state
+    | _                                                          -> state
+
 module Table =
   /// Render a table with a header row, a separator, and data rows.
   /// `selectedRow` highlights the row at that index with a blue background.
@@ -693,6 +757,43 @@ module Table =
         | _ -> rowEl)
     El.column (header :: separator :: dataRows)
 
+  /// Render a table with full cursor-navigation and multi-row selection driven by a `TableState`.
+  ///
+  /// Row highlight priority:
+  ///   1. **Cursor row** → Blue background (even if also selected)
+  ///   2. **Selected (non-cursor)** → Cyan background
+  ///   3. Normal row → default style
+  ///
+  /// NOTE: Renders all rows. For thousands of items use VirtualTable.
+  let viewState (columns: TableColumn<'a> list) (rows: 'a list) (state: TableState) =
+    let inline applyWidth (col: TableColumn<'a>) el =
+      match col.Fill with
+      | true  -> El.fill el
+      | false -> El.width col.Width el
+    let header =
+      columns
+      |> List.map (fun col ->
+        El.text col.Header |> El.bold |> applyWidth col)
+      |> El.row
+    let separator =
+      columns
+      |> List.map (fun col ->
+        match col.Fill with
+        | true  -> El.fill (El.text "")
+        | false -> El.text (System.String('─', col.Width)) |> El.width col.Width)
+      |> El.row
+    let dataRows =
+      rows
+      |> List.mapi (fun i row ->
+        let rowEl =
+          columns
+          |> List.map (fun col -> col.Render row |> applyWidth col)
+          |> El.row
+        match i = state.Cursor, Set.contains i state.Selected with
+        | true,  _     -> rowEl |> El.bg (Color.Named(BaseColor.Blue, Intensity.Normal))
+        | false, true  -> rowEl |> El.bg (Color.Named(BaseColor.Cyan, Intensity.Normal))
+        | false, false -> rowEl)
+    El.column (header :: separator :: dataRows)
 // ── VirtualList ───────────────────────────────────────────────────────────────
 // A stateful virtualizing list widget. Only renders the visible window of rows,
 // enabling efficient display of thousands of items.

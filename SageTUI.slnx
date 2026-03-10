@@ -25,6 +25,9 @@
     <Project Path="samples/12-FocusRing/FocusRing.fsproj" />
   </Folder>
   <Project Path="SageTUI.Benchmarks/SageTUI.Benchmarks.fsproj" />
+  <Folder Name="/samples/14-ProcessManager/">
+    <Project Path="samples/14-ProcessManager/ProcessManager.fsproj" />
+  </Folder>
   <Project Path="SageTUI.Html/SageTUI.Html.fsproj" />
   <Project Path="SageTUI.Library.fsproj" />
   <Project Path="SageTUI.Tests\SageTUI.Tests.fsproj" />
