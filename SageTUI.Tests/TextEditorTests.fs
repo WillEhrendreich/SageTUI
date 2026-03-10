@@ -783,6 +783,53 @@ let undoLawTests =
           TextEditor.content um_undo2.Present = c
   ]
 
+// ── TEUndo/TERedo footgun guard ───────────────────────────────────────────────
+// TEUndo and TERedo are only meaningful with updateWithUndo; passing them to
+// the plain update function is a programming error that must raise, not silently
+// no-op (since the caller would never discover the bug).
+
+let undoRedoGuardTests = testList "TextEditor.update TEUndo/TERedo guard" [
+  test "update TEUndo throws InvalidOperationException" {
+    let m = mk "hello"
+    let mutable caught = None
+    try TextEditor.update TEUndo m |> ignore
+    with :? System.InvalidOperationException as ex -> caught <- Some ex
+    caught |> Expect.isSome "should throw InvalidOperationException"
+    caught.Value.Message |> Expect.stringContains "message should mention updateWithUndo" "updateWithUndo"
+  }
+
+  test "update TERedo throws InvalidOperationException" {
+    let m = mk "hello"
+    let mutable caught = None
+    try TextEditor.update TERedo m |> ignore
+    with :? System.InvalidOperationException as ex -> caught <- Some ex
+    caught |> Expect.isSome "should throw InvalidOperationException"
+    caught.Value.Message |> Expect.stringContains "message should mention updateWithUndo" "updateWithUndo"
+  }
+
+  test "updateWithUndo TEUndo still works correctly" {
+    let um = TextEditor.withUndo (mk "hello")
+    let um' = TextEditor.updateWithUndo (TEInsertChar '!') um
+    let um'' = TextEditor.updateWithUndo TEUndo um'
+    um''.Present.Lines.[0] |> Expect.equal "undo restored" "hello"
+  }
+
+  test "updateWithUndo TERedo still works correctly" {
+    let um = TextEditor.withUndo { mk "hello" with Col = 5 }
+    let um' = TextEditor.updateWithUndo (TEInsertChar '!') um
+                |> TextEditor.updateWithUndo TEUndo
+    let um'' = TextEditor.updateWithUndo TERedo um'
+    um''.Present.Lines.[0] |> Expect.equal "redo restored" "hello!"
+  }
+
+  test "TEUndo at empty history is identity (updateWithUndo)" {
+    let um = TextEditor.withUndo (mk "hello")
+    let um' = TextEditor.updateWithUndo TEUndo um
+    um'.Present.Lines.[0] |> Expect.equal "unchanged" "hello"
+    Undoable.canUndo um' |> Expect.isFalse "no history to undo"
+  }
+]
+
 [<Tests>]
 let allTextEditorTests = testList "TextEditor" [
   initTests
@@ -799,5 +846,6 @@ let allTextEditorTests = testList "TextEditor" [
   viewTests
   propertyTests
   undoLawTests
+  undoRedoGuardTests
 ]
 

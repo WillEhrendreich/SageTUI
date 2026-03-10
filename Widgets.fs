@@ -1905,8 +1905,8 @@ module TextEditor =
       { m' with Row = lastRow; Col = m'.Lines.[lastRow].Length; SelectionAnchor = Some (0, 0) }
     | TECopy  -> m'  // caller reads selectedText m
     | TECut   -> m'  // selection already deleted above
-    | TEUndo  -> m'  // no-op in stateless update; use TextEditor.updateWithUndo for history
-    | TERedo  -> m'  // no-op in stateless update; use TextEditor.updateWithUndo for history
+    | TEUndo  -> invalidOp "TEUndo cannot be processed by TextEditor.update — wrap the model in TextEditor.withUndo and use TextEditor.updateWithUndo instead"
+    | TERedo  -> invalidOp "TERedo cannot be processed by TextEditor.update — wrap the model in TextEditor.withUndo and use TextEditor.updateWithUndo instead"
     | TEPaste text ->
       let toInsert = text.Split('\n')
       match toInsert with

@@ -68,26 +68,37 @@ type Model = {
 
 // ─── Git helpers ──────────────────────────────────────────────────────────────
 
-let runProcess (exe: string) (args: string) : Result<string, string> =
-  try
-    let psi =
-      ProcessStartInfo(
-        exe, args,
-        RedirectStandardOutput = true,
-        RedirectStandardError  = true,
-        UseShellExecute        = false,
-        CreateNoWindow         = true)
-    use p = new Process()
-    p.StartInfo <- psi
-    p.Start() |> ignore
-    let stdout = p.StandardOutput.ReadToEnd()
-    let stderr = p.StandardError.ReadToEnd()
-    p.WaitForExit()
-    match p.ExitCode with
-    | 0 -> Ok stdout
-    | c -> Error (sprintf "exit %d: %s" c stderr)
-  with ex ->
-    Error ex.Message
+/// Run a process and collect stdout+stderr concurrently to avoid the classic
+/// deadlock: if a process writes >4KB to stderr before finishing stdout,
+/// sequential ReadToEnd() calls block each other forever.
+let runProcessAsync (exe: string) (args: string) : Async<Result<string, string>> =
+  async {
+    try
+      let psi =
+        ProcessStartInfo(
+          exe, args,
+          RedirectStandardOutput = true,
+          RedirectStandardError  = true,
+          UseShellExecute        = false,
+          CreateNoWindow         = true)
+      use p = new Process()
+      p.StartInfo <- psi
+      p.Start() |> ignore
+      // Read both streams concurrently — prevents deadlock when process writes
+      // large stderr before finishing stdout (e.g., verbose git hooks).
+      let stdoutTask = p.StandardOutput.ReadToEndAsync()
+      let stderrTask = p.StandardError.ReadToEndAsync()
+      let! _ = Async.AwaitTask (System.Threading.Tasks.Task.WhenAll(stdoutTask, stderrTask))
+      p.WaitForExit()
+      let stdout = stdoutTask.Result
+      let stderr = stderrTask.Result
+      return
+        match p.ExitCode with
+        | 0 -> Ok stdout
+        | c -> Error (sprintf "exit %d: %s" c stderr)
+    with ex ->
+      return Error ex.Message
+  }
 
 let parseCommits (raw: string) : Commit list =
   raw.Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -102,21 +113,21 @@ let parseCommits (raw: string) : Commit list =
 let loadCommitsAsync (dispatch: Msg -> unit) =
   async {
     do! Async.SwitchToThreadPool()
-    let result =
-      match runProcess "git" "log --format=%H|%an|%ad|%s --date=short -n 2000" with
+    let! result = runProcessAsync "git" "log --format=%H|%an|%ad|%s --date=short -n 2000"
+    dispatch (
+      match result with
       | Ok raw    -> CommitsLoaded (parseCommits raw)
-      | Error msg -> CommitsFailed msg
-    dispatch result
+      | Error msg -> CommitsFailed msg)
   }
 
 let loadDiffAsync (hash: string) (dispatch: Msg -> unit) =
   async {
     do! Async.SwitchToThreadPool()
-    let result =
-      match runProcess "git" (sprintf "show --stat %s" hash) with
+    let! result = runProcessAsync "git" (sprintf "show --stat %s" hash)
+    dispatch (
+      match result with
       | Ok raw    -> DiffLoaded (hash, raw.Split('\n'))
-      | Error msg -> DiffFailed (hash, msg)
-    dispatch result
+      | Error msg -> DiffFailed (hash, msg))
   }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -124,7 +135,8 @@ let loadDiffAsync (hash: string) (dispatch: Msg -> unit) =
 let listHeight (totalHeight: int) = max 1 (totalHeight - 3)
 
 let init () =
-  let h = 30
+  let w = try Console.WindowWidth  with _ -> 80
+  let h = try Console.WindowHeight with _ -> 30
   let model = {
     All          = []
     Commits      = VirtualList.ofArray (listHeight h) [||]
@@ -135,7 +147,7 @@ let init () =
     ShowGc       = true
     Gen0Baseline = GC.CollectionCount(0)
     Gen0Delta    = 0
-    Width        = 80
+    Width        = w
     Height       = h
   }
   model, Cmd.ofAsync loadCommitsAsync
@@ -203,7 +215,12 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     selectCurrent model
 
   | DiffScrollUp   -> { model with DiffScroll = max 0 (model.DiffScroll - 1) }, Cmd.none
-  | DiffScrollDown -> { model with DiffScroll = model.DiffScroll + 1 }, Cmd.none
+  | DiffScrollDown ->
+    let maxScroll =
+      match model.DiffState with
+      | Loaded (_, lines) -> max 0 (lines.Length - 1)
+      | _ -> 0
+    { model with DiffScroll = min maxScroll (model.DiffScroll + 1) }, Cmd.none
 
   | FilterQueryKey k ->
     let f' = FuzzyFinder.update (FFQueryKey k) model.Filter
@@ -275,8 +292,10 @@ let viewDiffPane (state: DiffState) (scroll: int) : Element =
 
   | Loaded (_, lines) ->
     let startIdx = min scroll (max 0 (lines.Length - 1))
-    let visible = lines |> Array.skip startIdx
-    El.column (visible |> Array.toList |> List.map El.text)
+    // Build element list directly from a sub-range — avoids three intermediate collections
+    // (Array.skip, Array.toList, List.map) that would accumulate gen0 garbage every frame.
+    let count = lines.Length - startIdx
+    El.column [ for i in startIdx .. startIdx + count - 1 -> El.text lines.[i] ]
 
 let viewGcOverlay (delta: int) : Element =
   let color = match delta with 0 -> Color.Named(Green, Normal) | _ -> Color.Named(Yellow, Bright)
