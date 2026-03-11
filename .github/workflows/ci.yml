@@ -31,16 +31,16 @@ jobs:
         run: dotnet restore SageTUI.slnx && dotnet restore SageTUI.Library.fsproj
 
       - name: Build
-        run: dotnet build SageTUI.slnx --no-restore
+        run: dotnet build SageTUI.slnx --no-restore -c Release
 
       - name: Test
-        run: dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -- --summary-location
+        run: dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -c Release -- --summary-location
 
       - name: Verify README test count matches actual
         if: matrix.os == 'ubuntu-latest'
         run: |
           # Extract actual test count from the test binary (runs fast, just lists tests)
-          ACTUAL=$(dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -- --list-tests 2>/dev/null | wc -l)
+          ACTUAL=$(dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -c Release -- --list-tests 2>/dev/null | wc -l)
           # Extract the count from the README h1 line: "N,NNN tests"
           README=$(grep -oP '\d[\d,]*(?= tests)' README.md | head -1 | tr -d ',')
           echo "Actual test count: $ACTUAL"
@@ -56,7 +56,7 @@ jobs:
 
       - name: Pack
         run: |
-          dotnet pack SageTUI.Library.fsproj --no-build -o ./artifacts
+          dotnet pack SageTUI.Library.fsproj --no-build -c Release -o ./artifacts
           dotnet pack SageTUI.Templates.fsproj -o ./artifacts
 
       - name: Template smoke test

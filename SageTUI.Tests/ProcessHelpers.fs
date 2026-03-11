@@ -253,12 +253,19 @@ let waitUntilOutputContains
   (session: PtySession)
   : Task =
   task {
+    // Use CreateSnapshot().GetScreenText() to read the actual rendered terminal screen.
+    // The workload log stores parsed ANSI tokens (e.g. "Text(Count:) Cursor(1,8) Text(0)")
+    // so string literals like "Count: 0" do not appear verbatim in the log — the space
+    // at column 7 is an existing blank cell, never written as a token.
+    let getScreenText () =
+      use snapshot = session.Terminal.CreateSnapshot()
+      snapshot.GetScreenText()
+
     let startedAt = DateTime.UtcNow
     let mutable found = false
 
     while not found && DateTime.UtcNow - startedAt < timeout do
-      let content = readAllTextShared session.OutputLogPath
-      found <- content.Contains(needle, StringComparison.Ordinal)
+      found <- (getScreenText ()).Contains(needle, StringComparison.Ordinal)
 
       if not found then
         let delay =
@@ -268,13 +275,13 @@ let waitUntilOutputContains
         do! Task.Delay(delay)
 
     if not found then
-      let content = readAllTextShared session.OutputLogPath
+      let screenText = getScreenText ()
       failtestf
-        "Timed out after %O waiting for output log to contain \"%s\".\nLog: %s\n\nCaptured output:\n%s"
+        "Timed out after %O waiting for screen to contain \"%s\".\nLog: %s\n\nScreen content:\n%s"
         timeout
         needle
         session.OutputLogPath
-        content
+        screenText
   }
 
 let waitForExit

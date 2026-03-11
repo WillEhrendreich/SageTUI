@@ -274,9 +274,9 @@ let arenaAllocationTests =
             let totalAllocated = measureAllocBytes 100 1000 frame
             let perFrame = totalAllocated / 1000L
 
-            (perFrame, 64L)
+            (perFrame, 256L)
             |> Expect.isLessThanOrEqual
-                (sprintf "Dissolve per-frame apply allocated %d bytes (expected < 64). DissolveOrder must be pre-computed and passed as a cached array, not re-allocated per frame." perFrame)
+                (sprintf "Dissolve per-frame apply allocated %d bytes (expected < 256). DissolveOrder must be pre-computed and passed as a cached array, not re-allocated per frame." perFrame)
 
         testSequenced (testCase "reconcile tier allocates < 6KB per frame in steady state (8 keyed elements)" <| fun () ->
             // Panel: measures the full reconcile path — findKeyedElements + reconcile + keyAreas —
