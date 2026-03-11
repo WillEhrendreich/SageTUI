@@ -11561,7 +11561,9 @@ let private runSubWithActions (sub: Sub<string>) (actions: unit -> unit) (waitMs
     let messages = System.Collections.Concurrent.ConcurrentBag<string>()
     use cts = new System.Threading.CancellationTokenSource()
     Async.Start(start messages.Add cts.Token, cts.Token)
-    System.Threading.Thread.Sleep(250) // allow FSW to start — macOS FSEvents needs more time
+    // 500ms startup sleep: macOS FSEvents requires more startup time; Windows CI thread-pool
+    // contention can delay async startup beyond 250ms when many tests run in parallel.
+    System.Threading.Thread.Sleep(500)
     actions()
     System.Threading.Thread.Sleep(waitMs)
     cts.Cancel()
@@ -11586,7 +11588,7 @@ let sprint72FileWatchTests =
               for i in 1..5 do
                 System.IO.File.WriteAllText(path, $"content {i}")
                 System.Threading.Thread.Sleep(5))
-            700
+            1500  // macOS FSEvents: 600ms latency + 150ms debounce + buffer
         msgs |> Expect.hasLength "exactly one message after burst" 1
       finally
         System.IO.File.Delete(path)
@@ -11598,7 +11600,7 @@ let sprint72FileWatchTests =
         let msgs =
           runSubWithActions sub
             (fun () -> System.IO.File.WriteAllText(path, "changed"))
-            600
+            1000  // allow 600ms FSEvents/Windows latency + 50ms debounce + buffer
         msgs |> Expect.hasLength "one message" 1
         msgs[0] |> Expect.equal "full path dispatched" path
         System.IO.Path.IsPathRooted(msgs[0]) |> Expect.isTrue "path should be rooted"
@@ -11613,7 +11615,7 @@ let sprint72FileWatchTests =
           let dispatched = ref 0
           use cts = new System.Threading.CancellationTokenSource()
           Async.Start(start (fun _ -> System.Threading.Interlocked.Increment(dispatched) |> ignore) cts.Token, cts.Token)
-          System.Threading.Thread.Sleep(250) // allow FSW to start
+          System.Threading.Thread.Sleep(500) // allow FSW to start — 500ms for CI thread-pool contention
           System.IO.File.WriteAllText(path, "trigger")
           System.Threading.Thread.Sleep(50)
           cts.Cancel()
@@ -11650,7 +11652,7 @@ let sprint72FileWatchTests =
         let msgs =
           runSubWithActions sub
             (fun () -> System.IO.File.WriteAllText(newFile, "hello"))
-            700
+            1500  // macOS FSEvents: 600ms latency + 100ms debounce + buffer
         msgs |> Expect.isNonEmpty "at least one message for directory creation"
       finally
         System.IO.Directory.Delete(dir, true)
@@ -11673,9 +11675,9 @@ let sprint72FileWatchTests =
           let received = System.Collections.Concurrent.ConcurrentBag<string>()
           use cts = new System.Threading.CancellationTokenSource()
           Async.Start(start received.Add cts.Token, cts.Token)
-          System.Threading.Thread.Sleep(250) // allow FSW to start
+          System.Threading.Thread.Sleep(500) // allow FSW to start — 500ms for CI thread-pool contention
           System.IO.File.WriteAllText(path, "trigger")
-          System.Threading.Thread.Sleep(600)
+          System.Threading.Thread.Sleep(1000) // allow 600ms FSEvents/Windows latency + 50ms debounce + buffer
           cts.Cancel()
           System.Threading.Thread.Sleep(50)
           let msgs = received |> Seq.toList
