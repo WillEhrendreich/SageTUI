@@ -232,10 +232,14 @@ module ArenaRender =
 
       | 2uy -> // Row — uses LayoutScratch, zero managed allocation for common case
         let n = countChildren arena node.FirstChild
-        let ls = arena.LayoutScratch
         let lp = arena.LayoutPos
-        if lp + n + n + n > ls.Length then
-          failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n + n) lp ls.Length)
+        if lp + n + n + n > arena.LayoutScratch.Length then
+          let needed = lp + n + n + n
+          let newLen = max (arena.LayoutScratch.Length * 2) needed
+          let newScratch = Array.zeroCreate newLen
+          Array.blit arena.LayoutScratch 0 newScratch 0 lp
+          arena.LayoutScratch <- newScratch
+        let ls = arena.LayoutScratch  // re-fetch after potential grow
         let cnBase = lp        // n slots: child node indices
         let szBase = lp + n   // n slots: sizes (negative = Fill with encoded content)
         let wzBase = lp + n + n // n slots: fill weights (0 for non-fill)
@@ -300,10 +304,14 @@ module ArenaRender =
 
       | 3uy -> // Column — uses LayoutScratch, zero managed allocation for common case
         let n = countChildren arena node.FirstChild
-        let ls = arena.LayoutScratch
         let lp = arena.LayoutPos
-        if lp + n + n + n > ls.Length then
-          failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n + n) lp ls.Length)
+        if lp + n + n + n > arena.LayoutScratch.Length then
+          let needed = lp + n + n + n
+          let newLen = max (arena.LayoutScratch.Length * 2) needed
+          let newScratch = Array.zeroCreate newLen
+          Array.blit arena.LayoutScratch 0 newScratch 0 lp
+          arena.LayoutScratch <- newScratch
+        let ls = arena.LayoutScratch  // re-fetch after potential grow
         let cnBase = lp
         let szBase = lp + n
         let wzBase = lp + n + n
@@ -438,10 +446,14 @@ module ArenaRender =
         match childNode.Kind with
         | 2uy -> // Row inside Gapped — uses LayoutScratch
           let n = countChildren arena childNode.FirstChild
-          let ls = arena.LayoutScratch
           let lp = arena.LayoutPos
-          if lp + n + n + n > ls.Length then
-            failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n + n) lp ls.Length)
+          if lp + n + n + n > arena.LayoutScratch.Length then
+            let needed = lp + n + n + n
+            let newLen = max (arena.LayoutScratch.Length * 2) needed
+            let newScratch = Array.zeroCreate newLen
+            Array.blit arena.LayoutScratch 0 newScratch 0 lp
+            arena.LayoutScratch <- newScratch
+          let ls = arena.LayoutScratch  // re-fetch after potential grow
           let cnBase = lp
           let szBase = lp + n
           let wzBase = lp + n + n
@@ -508,10 +520,14 @@ module ArenaRender =
             offset <- offset + sz
         | 3uy -> // Column inside Gapped — uses LayoutScratch
           let n = countChildren arena childNode.FirstChild
-          let ls = arena.LayoutScratch
           let lp = arena.LayoutPos
-          if lp + n + n + n > ls.Length then
-            failwith (sprintf "FrameArena LayoutScratch overflow: need %d slots at pos %d but capacity is %d. Increase maxLayoutScratch in FrameArena.create." (n + n + n) lp ls.Length)
+          if lp + n + n + n > arena.LayoutScratch.Length then
+            let needed = lp + n + n + n
+            let newLen = max (arena.LayoutScratch.Length * 2) needed
+            let newScratch = Array.zeroCreate newLen
+            Array.blit arena.LayoutScratch 0 newScratch 0 lp
+            arena.LayoutScratch <- newScratch
+          let ls = arena.LayoutScratch  // re-fetch after potential grow
           let cnBase = lp
           let szBase = lp + n
           let wzBase = lp + n + n

@@ -816,14 +816,14 @@ let arenaInfraTests = testList "FrameArena infra" [
     NodeHandle.value h1 |> Expect.equal "h1" 1
     a.NodeCount |> Expect.equal "count2" 2
 
-  testCase "allocNode overflow throws" <| fun () ->
+  testCase "allocNode auto-grows on overflow (does not throw)" <| fun () ->
     let a = FrameArena.create 2 100 50
     FrameArena.allocNode a |> ignore
     FrameArena.allocNode a |> ignore
-    let threw =
-      try FrameArena.allocNode a |> ignore; false
-      with _ -> true
-    threw |> Expect.isTrue "should throw on overflow"
+    // Third allocation exceeds initial capacity 2 — must auto-grow, not throw
+    let h = FrameArena.allocNode a
+    NodeHandle.value h |> Expect.equal "third handle is 2" 2
+    (a.Nodes.Length, 4) |> Expect.isGreaterThanOrEqual "capacity grew to >= 4"
 
   testCase "allocText copies text" <| fun () ->
     let a = FrameArena.create 10 100 50

@@ -26,11 +26,11 @@ module NodeHandle =
 type HitEntry = { X: int; Y: int; Width: int; Height: int; KeyStart: int; KeyLen: int }
 
 type FrameArena =
-  { Nodes: ElementNode array
+  { mutable Nodes: ElementNode array
     mutable NodeCount: int
-    TextBuf: char array
+    mutable TextBuf: char array
     mutable TextPos: int
-    LayoutScratch: int array
+    mutable LayoutScratch: int array
     mutable LayoutPos: int
     mutable Generation: int
     CanvasDraws: System.Collections.Generic.List<CanvasConfig>
@@ -79,18 +79,20 @@ module FrameArena =
 
   let allocNode (arena: FrameArena) =
     if arena.NodeCount >= arena.Nodes.Length then
-      failwith (sprintf "FrameArena overflow: %d nodes exceeds capacity %d"
-        arena.NodeCount arena.Nodes.Length)
+      let newNodes = Array.zeroCreate (arena.Nodes.Length * 2)
+      Array.blit arena.Nodes 0 newNodes 0 arena.Nodes.Length
+      arena.Nodes <- newNodes
     let idx = arena.NodeCount
     arena.NodeCount <- arena.NodeCount + 1
     NodeHandle idx
 
   let allocText (text: string) arena =
     if arena.TextPos + text.Length > arena.TextBuf.Length then
-      failwith (sprintf
-        "FrameArena text overflow: tried to write %d chars at position %d but capacity is %d. \
-         Increase AppConfig.ArenaChars (current: %d) in your AppConfig."
-        text.Length arena.TextPos arena.TextBuf.Length arena.TextBuf.Length)
+      let needed = arena.TextPos + text.Length
+      let newLen = max (arena.TextBuf.Length * 2) needed
+      let newBuf = Array.zeroCreate newLen
+      Array.blit arena.TextBuf 0 newBuf 0 arena.TextPos
+      arena.TextBuf <- newBuf
     let start = arena.TextPos
     text.CopyTo(0, arena.TextBuf, start, text.Length)
     arena.TextPos <- arena.TextPos + text.Length

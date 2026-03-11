@@ -4,7 +4,7 @@
 
 **Build beautiful terminal UIs in F# with zero ceremony.**
 
-Elm Architecture • SIMD rendering • 2,769 tests • **< 32 B/frame on idle** • Core package has zero external dependencies
+Elm Architecture • SIMD rendering • 2,772 tests • **< 32 B/frame on idle** • Core package has zero external dependencies
 
 📦 [NuGet](https://www.nuget.org/packages/SageTUI) • 📖 [Getting Started](docs/getting-started.md) • 🖼️ [Widget Gallery](GALLERY.md) • 🔄 [Migration Guide](MIGRATION.md)
 

@@ -182,11 +182,10 @@ let arenaAllocationTests =
                 "PeakLayout must equal LayoutPos of the previous frame"
                 layoutPosBefore
 
-        testCase "LayoutScratch overflow raises a diagnostic error" <| fun () ->
+        testCase "LayoutScratch auto-grows when capacity exceeded during render" <| fun () ->
             // Create an arena with a tiny LayoutScratch that cannot fit even a small row.
-            // This verifies the guard fires with an actionable message rather than silently
-            // overwriting array memory or throwing an IndexOutOfRangeException.
-            let tinyArena = FrameArena.create 4096 65536 1 // 1-slot scratch: cannot hold a 2-child row
+            // With auto-grow, the arena should expand automatically and rendering should succeed.
+            let tinyArena = FrameArena.create 4096 65536 1 // 1-slot scratch: needs auto-grow for 2-child row
             let buf  = Buffer.create 80 24
             let area = { X = 0; Y = 0; Width = 80; Height = 24 }
             let twoChildRow =
@@ -194,16 +193,13 @@ let arenaAllocationTests =
 
             FrameArena.reset tinyArena
             let root = Arena.lower tinyArena twoChildRow
-            let throws =
-                try
-                    ArenaRender.renderRoot tinyArena root area buf
-                    false
-                with ex ->
-                    ex.Message.Contains("LayoutScratch overflow")
+            // Must not throw — auto-grows LayoutScratch as needed
+            ArenaRender.renderRoot tinyArena root area buf
 
-            throws
-            |> Expect.isTrue
-                "LayoutScratch overflow must throw with a diagnostic message containing 'LayoutScratch overflow', not IndexOutOfRangeException"
+            let stats = FrameArena.stats tinyArena
+            (stats.LayoutCapacity, 1)
+            |> Expect.isGreaterThan
+                "LayoutScratch auto-grew beyond initial 1-slot capacity to fit 2-child row"
 
         testCase "keyAreas always reflects current-frame position (regression: stale prevKeyAreas for staying elements)" <| fun () ->
             // Regression test for Sprint 24 fix. Scenario: a keyed element is present in
@@ -389,3 +385,101 @@ let arenaAllocationTests =
             // Verify prevKeyAreas after frame 3 is the 'last known position' an exit transition would use
             prevKeyAreas.["panel"].X |> Expect.equal "exit transition would use X=40 (correct last-known position)" 40
     ]
+
+// ── Arena auto-grow tests ──────────────────────────────────────────────────────
+
+[<Tests>]
+let arenaAutoGrowTests =
+  testList "Arena.auto-grow" [
+
+    test "allocNode auto-grows: exceeding capacity does not throw" {
+      let arena = FrameArena.create 2 128 64
+      // Allocate 3 nodes into a 2-node arena — must not throw
+      let h0 = FrameArena.allocNode arena
+      let h1 = FrameArena.allocNode arena
+      let h2 = FrameArena.allocNode arena  // ← overflow: would failwith before auto-grow
+      NodeHandle.value h0 |> Expect.equal "first handle is 0" 0
+      NodeHandle.value h1 |> Expect.equal "second handle is 1" 1
+      NodeHandle.value h2 |> Expect.equal "third handle is 2" 2
+    }
+
+    test "allocNode auto-grows: capacity at least doubles after overflow" {
+      let arena = FrameArena.create 4 128 64
+      // Fill to capacity then overflow
+      for _ in 1 .. 5 do FrameArena.allocNode arena |> ignore
+      let stats = FrameArena.stats arena
+      (stats.NodeCapacity, 8) |> Expect.isGreaterThanOrEqual "capacity must have grown to >= 8"
+    }
+
+    test "allocNode auto-grows: existing node data is preserved" {
+      let arena = FrameArena.create 2 256 64
+      // Write a node, overflow to force grow, check the first node survives
+      let h0 = FrameArena.allocNode arena
+      // Write recognizable data into slot 0
+      arena.Nodes.[NodeHandle.value h0] <- { arena.Nodes.[NodeHandle.value h0] with Kind = 99uy }
+      // This should trigger a grow
+      let _h1 = FrameArena.allocNode arena
+      let _h2 = FrameArena.allocNode arena
+      arena.Nodes.[NodeHandle.value h0].Kind |> Expect.equal "slot 0 Kind still 99 after grow" 99uy
+    }
+
+    test "allocText auto-grows: exceeding text capacity does not throw" {
+      let arena = FrameArena.create 64 8 64  // 8-char text buffer
+      // Allocate a 5-char string, then a 5-char string — second one overflows 8 chars
+      let (s1, l1) = FrameArena.allocText "hello" arena
+      let (s2, l2) = FrameArena.allocText "world" arena  // 5+5=10 > 8 — overflow
+      s1 |> Expect.equal "first text start" 0
+      l1 |> Expect.equal "first text len" 5
+      s2 |> Expect.equal "second text start" 5
+      l2 |> Expect.equal "second text len" 5
+      // Verify the chars were written correctly
+      System.String(arena.TextBuf, 0, 5) |> Expect.equal "first text chars" "hello"
+      System.String(arena.TextBuf, 5, 5) |> Expect.equal "second text chars" "world"
+    }
+
+    test "allocText auto-grows: text capacity at least doubles after overflow" {
+      let arena = FrameArena.create 64 4 64  // 4-char text buffer
+      FrameArena.allocText "ab" arena |> ignore
+      FrameArena.allocText "cde" arena |> ignore  // 2+3=5 > 4 — overflow
+      let stats = FrameArena.stats arena
+      (stats.CharCapacity, 8) |> Expect.isGreaterThanOrEqual "char capacity grew to >= 8"
+    }
+
+    test "allocNode auto-grows: multiple grows work (quadrupling capacity)" {
+      let arena = FrameArena.create 2 256 64
+      // Each pair of allocations past capacity forces a grow; do 3 grows
+      for _ in 1 .. 9 do FrameArena.allocNode arena |> ignore
+      let stats = FrameArena.stats arena
+      // 2 → 4 → 8 → 16: capacity should be >= 16 after 3+ grows
+      (stats.NodeCapacity, 16) |> Expect.isGreaterThanOrEqual "three grows: capacity >= 16"
+      stats.NodeCount    |> Expect.equal "node count is 9" 9
+    }
+
+    test "allocNode auto-grows: PeakNodes tracked correctly across grows" {
+      let arena = FrameArena.create 2 256 64
+      for _ in 1 .. 5 do FrameArena.allocNode arena |> ignore
+      // Reset: should update PeakNodes before clearing NodeCount
+      FrameArena.reset arena
+      let stats = FrameArena.stats arena
+      stats.PeakNodes |> Expect.equal "PeakNodes = 5 after reset" 5
+      stats.NodeCount |> Expect.equal "NodeCount = 0 after reset" 0
+    }
+
+    test "El.lower on large tree auto-grows arena without failwith" {
+      // Create a tiny arena that WILL need to grow for a realistic tree
+      let tinyArena = FrameArena.create 4 64 16
+      // A tree with > 4 nodes should trigger auto-grow in Arena.lower
+      let tree =
+        El.column [
+          El.text "Line 1"
+          El.text "Line 2"
+          El.text "Line 3"
+          El.text "Line 4"
+          El.text "Line 5"
+        ]
+      // Must not throw
+      let _root = Arena.lower tinyArena tree
+      let stats = FrameArena.stats tinyArena
+      (stats.NodeCount, 4) |> Expect.isGreaterThan "nodes used > 4 (auto-grew)"
+    }
+  ]
