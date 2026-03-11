@@ -1069,6 +1069,93 @@ module History =
   let checkpoint (h: HistoryModel<'model>) : HistoryModel<'model> =
     push h h.Present
 
+// ---------------------------------------------------------------------------
+// LogEvent<'model,'msg> — typed lifecycle event for Program.withLogging
+// ---------------------------------------------------------------------------
+
+/// A lifecycle event emitted by `Program.withLogging`.
+///
+/// `[<NoEquality; NoComparison>]` is required because 'model may contain functions.
+[<NoEquality; NoComparison>]
+type LogEvent<'model, 'msg> =
+  /// Fired once when the program initialises, carrying the initial model.
+  | AppStarted    of initialModel: 'model
+  /// Fired after each `Update` call with the message, before/after models, and command count.
+  | MsgDispatched of msg: 'msg * before: 'model * after: 'model * cmdCount: int
+  /// Fired when a new subscription is registered (carries the subscription ID string).
+  | SubAdded      of id: string
+  /// Fired when a subscription is removed.
+  | SubRemoved    of id: string
+  /// Fired when an async command is launched (carries an optional tag).
+  | AsyncStarted  of tag: string
+  /// Fired when an async command completes (carries tag + elapsed milliseconds).
+  | AsyncCompleted of tag: string * elapsedMs: int64
+  /// Fired when the program quits with the given exit code.
+  | AppStopped    of exitCode: int
+
+/// Composable sinks for `Program.withLogging`.
+module Logger =
+
+  /// Sink that prints a human-readable summary to stdout.
+  let console<'model, 'msg> (event: LogEvent<'model, 'msg>) : unit =
+    match event with
+    | AppStarted _              -> printfn "[SageTUI] AppStarted"
+    | MsgDispatched(_, _, _, n) -> printfn "[SageTUI] MsgDispatched (%d cmd(s))" n
+    | SubAdded id               -> printfn "[SageTUI] SubAdded %s" id
+    | SubRemoved id             -> printfn "[SageTUI] SubRemoved %s" id
+    | AsyncStarted tag          -> printfn "[SageTUI] AsyncStarted %s" tag
+    | AsyncCompleted(tag, ms)   -> printfn "[SageTUI] AsyncCompleted %s (%d ms)" tag ms
+    | AppStopped code           -> printfn "[SageTUI] AppStopped %d" code
+
+  /// Sink that accumulates events into a thread-safe list.
+  /// Returns `(sink, getSnapshot)` — call `getSnapshot ()` to retrieve all events so far.
+  let toList<'model, 'msg> () : (LogEvent<'model, 'msg> -> unit) * (unit -> LogEvent<'model, 'msg> list) =
+    let q = System.Collections.Concurrent.ConcurrentQueue<LogEvent<'model, 'msg>>()
+    let sink evt = q.Enqueue evt
+    let snapshot () = q |> Seq.toList
+    sink, snapshot
+
+  /// Sink that fans out a single event to multiple sinks in order.
+  let combine (sinks: (LogEvent<'model, 'msg> -> unit) list) : LogEvent<'model, 'msg> -> unit =
+    fun evt -> for s in sinks do s evt
+
+  /// Sink that only passes events matching `predicate` to `inner`.
+  let filter (predicate: LogEvent<'model, 'msg> -> bool) (inner: LogEvent<'model, 'msg> -> unit) : LogEvent<'model, 'msg> -> unit =
+    fun evt -> match predicate evt with true -> inner evt | false -> ()
+
+// ---------------------------------------------------------------------------
+// PersistenceSpec<'model> — for Program.withPersistence
+// ---------------------------------------------------------------------------
+
+/// Configuration for `Program.withPersistence`.
+type PersistenceSpec<'model> = {
+  /// Absolute path to the persistence file.
+  Path: string
+  /// Convert the model to raw bytes for storage.
+  Serialize: 'model -> byte[]
+  /// Decode bytes to a model. Return `None` to silently fall back to the program's init model.
+  Deserialize: byte[] -> 'model option
+  /// Minimum milliseconds between writes. Use `0` in tests for synchronous writes.
+  WriteThrottleMs: int
+}
+
+/// Helpers for building common `PersistenceSpec` values.
+module Persistence =
+
+  /// Build a `PersistenceSpec` backed by UTF-8 text with caller-provided string functions.
+  /// `throttleMs` defaults to 100 ms in production use. Pass `0` for synchronous test writes.
+  let text<'model>
+    (path: string)
+    (serialize: 'model -> string)
+    (deserialize: string -> 'model option)
+    : PersistenceSpec<'model> =
+    { Path          = path
+      Serialize     = fun m -> Text.Encoding.UTF8.GetBytes(serialize m)
+      Deserialize   = fun b ->
+        try   Text.Encoding.UTF8.GetString(b) |> deserialize
+        with  _ -> None
+      WriteThrottleMs = 100 }
+
 /// Program combinators for component composition.
 module Program =
   /// Transform a component's program to work within a parent program.
@@ -1378,6 +1465,79 @@ module Program =
         | CrashOnError    -> CrashOnError
         | LogAndContinue  -> LogAndContinue
         | RecoverWith f   -> RecoverWith (fun ex -> f ex |> Option.map HistoryMsg.Inner) }
+
+  /// Wrap a program with a structured logger.
+  ///
+  /// `onEvent` is called synchronously after each lifecycle transition.
+  /// For async/subscription events, use `Logger.toList` with a concurrent queue.
+  ///
+  /// Composes with `withHistory`: wrap first with `withHistory`, then `withLogging`.
+  let withLogging
+    (onEvent: LogEvent<'model,'msg> -> unit)
+    (program: Program<'model,'msg>)
+    : Program<'model,'msg> =
+    let countCmds =
+      let rec loop cmd =
+        match cmd with
+        | NoCmd           -> 0
+        | Batch cmds      -> cmds |> List.sumBy loop
+        | _               -> 1
+      loop
+    { Init = fun () ->
+        let model, cmd = program.Init()
+        onEvent (AppStarted model)
+        model, cmd
+      Update = fun msg model ->
+        let newModel, cmd = program.Update msg model
+        onEvent (MsgDispatched(msg, model, newModel, countCmds cmd))
+        newModel, cmd
+      View      = program.View
+      Subscribe = program.Subscribe
+      OnError   = program.OnError }
+
+  /// Wrap a program with transparent model persistence.
+  ///
+  /// On `Init`, loads a previously-saved model from `spec.Path` (silently falls
+  /// back to the program's own init on any error).  After every `Update`, writes
+  /// the new model asynchronously unless `spec.WriteThrottleMs = 0`, in which case
+  /// the write is synchronous (for testing).
+  let withPersistence
+    (spec: PersistenceSpec<'model>)
+    (program: Program<'model,'msg>)
+    : Program<'model,'msg> =
+    let mutable lastWriteUtc = DateTime.MinValue
+    let writeModel (model: 'model) =
+      try
+        let bytes = spec.Serialize model
+        let dir = IO.Path.GetDirectoryName(spec.Path)
+        if not (isNull dir) && not (IO.Directory.Exists(dir)) then
+          IO.Directory.CreateDirectory(dir) |> ignore
+        let tmp = IO.Path.Combine(dir, IO.Path.GetRandomFileName())
+        IO.File.WriteAllBytes(tmp, bytes)
+        IO.File.Move(tmp, spec.Path, overwrite = true)
+      with _ -> ()
+    { Init = fun () ->
+        let defaultModel, cmd = program.Init()
+        let model =
+          try
+            match IO.File.Exists(spec.Path) with
+            | false -> defaultModel
+            | true  -> spec.Deserialize(IO.File.ReadAllBytes(spec.Path)) |> Option.defaultValue defaultModel
+          with _ -> defaultModel
+        model, cmd
+      Update = fun msg model ->
+        let newModel, cmd = program.Update msg model
+        let now = DateTime.UtcNow
+        let elapsed = (now - lastWriteUtc).TotalMilliseconds
+        if elapsed >= float (max 0 spec.WriteThrottleMs) then
+          lastWriteUtc <- now
+          match spec.WriteThrottleMs with
+          | 0 -> writeModel newModel
+          | _ -> async { writeModel newModel } |> Async.Start
+        newModel, cmd
+      View      = program.View
+      Subscribe = program.Subscribe
+      OnError   = program.OnError }
 
 /// A vocabulary type for asynchronous data loading states.
 /// The most commonly reinvented type in F# async applications — provided here so

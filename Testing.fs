@@ -53,6 +53,30 @@ type TestApp<'model, 'msg> = {
 
 /// A single step in a `TestHarness.assertSequence` scenario.
 ///
+/// Controls when an assertSnapshot call is allowed to overwrite the stored baseline.
+[<Struct>]
+type SnapshotUpdateMode =
+  /// Never overwrite — mismatches are always failures. Default.
+  | RejectChanges
+  /// Always overwrite the stored file with the current render.
+  | AlwaysUpdate
+  /// Overwrite only when the named environment variable is set to a non-empty value.
+  | UpdateWhenEnvVar of envVar: string
+
+/// Options for snapshot assertions created by `Step.AssertSnapshotWith`.
+type SnapshotOptions = {
+  /// Directory in which snapshot files are stored.
+  /// `None` uses `<cwd>/__snapshots__`.
+  Directory: string option
+  /// Controls when mismatches overwrite the baseline file.
+  UpdateMode: SnapshotUpdateMode
+  /// When true, ANSI escape sequences are stripped before comparison.
+  StripAnsi: bool
+}
+
+module SnapshotOptions =
+  let defaults = { Directory = None; UpdateMode = RejectChanges; StripAnsi = false }
+
 /// Action steps mutate the app state; assertion steps assert on the rendered view or model.
 /// A failing assertion step raises an exception with the step index (1-based) and, for view
 /// assertions, a framed ASCII render of the current terminal output.
@@ -93,6 +117,12 @@ type Step<'model, 'msg> =
   | ExpectModel of label: string * ('model -> bool)
   /// Assert the program has quit with the given exit code.
   | ExpectQuit of exitCode: int
+  /// Assert and compare the rendered view against a stored snapshot file.
+  /// On first run the file is created and the step passes.
+  /// Subsequent runs compare against the stored file using default options.
+  | AssertSnapshot of name: string
+  /// Like `AssertSnapshot` but with explicit `SnapshotOptions`.
+  | AssertSnapshotWith of name: string * SnapshotOptions
 
 /// Testing utilities for SageTUI programs. No real terminal required.
 ///
@@ -105,7 +135,44 @@ type Step<'model, 'msg> =
 /// presence with Cmd.hasAsync in unit tests of Update.
 module TestHarness =
 
-  // Process commands synchronously. Handles Quit, Delay(0,msg), Batch, DirectMsg,
+  // ── Snapshot helpers ─────────────────────────────────────────────────────────
+
+  let private stripAnsiRe = System.Text.RegularExpressions.Regex("\x1b\\[[0-9;]*[a-zA-Z]")
+
+  let private normaliseSnapshot (s: string) =
+    s.Split('\n') |> Array.map (fun l -> l.TrimEnd()) |> String.concat "\n"
+
+  let private snapshotDir (opts: SnapshotOptions) =
+    match opts.Directory with
+    | Some dir -> dir
+    | None -> System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "__snapshots__")
+
+  let private snapshotPath (dir: string) (name: string) = System.IO.Path.Combine(dir, name + ".verified.txt")
+
+  let private atomicWrite (path: string) (content: string) =
+    let dir = System.IO.Path.GetDirectoryName(path)
+    if not (System.IO.Directory.Exists(dir)) then
+      System.IO.Directory.CreateDirectory(dir) |> ignore
+    let tmp = System.IO.Path.Combine(dir, System.IO.Path.GetRandomFileName())
+    System.IO.File.WriteAllText(tmp, content, System.Text.Encoding.UTF8)
+    System.IO.File.Move(tmp, path, overwrite = true)
+
+  let private diffLines (expected: string) (actual: string) : string =
+    let elines = expected.Split('\n')
+    let alines = actual.Split('\n')
+    let maxLen = max elines.Length alines.Length
+    let sb = System.Text.StringBuilder()
+    for i in 0 .. maxLen - 1 do
+      let e = if i < elines.Length then elines.[i] else ""
+      let a = if i < alines.Length then alines.[i] else ""
+      match e = a with
+      | true  -> sb.AppendLine(sprintf "  %s" e) |> ignore
+      | false ->
+        sb.AppendLine(sprintf "- %s" e) |> ignore
+        sb.AppendLine(sprintf "+ %s" a) |> ignore
+    sb.ToString()
+
+
   // and Delay(n>0,msg) — which is enqueued rather than dropped.
   // OfAsync and OfCancellableAsync are collected into capturedAsync.
   // Returns (model, hasQuit, exitCode, newPendingDelays, capturedAsync, nextSeq).
@@ -567,6 +634,39 @@ module TestHarness =
     | [] -> app
     | _  -> applyMsgs app.VirtualTime app msgs
 
+  let private runSnapshotStep (idx: int) (name: string) (opts: SnapshotOptions) (app: TestApp<'model,'msg>) : (int * string) option =
+    let rawOutput = render app
+    let text =
+      match opts.StripAnsi with
+      | true  -> stripAnsiRe.Replace(rawOutput, "")
+      | false -> rawOutput
+    let normalised = normaliseSnapshot text
+    let dir = snapshotDir opts
+    let path = snapshotPath dir name
+    match System.IO.File.Exists(path) with
+    | false ->
+      atomicWrite path normalised
+      None
+    | true ->
+      let stored = normaliseSnapshot (System.IO.File.ReadAllText(path, System.Text.Encoding.UTF8))
+      match stored = normalised with
+      | true -> None
+      | false ->
+        let shouldUpdate =
+          match opts.UpdateMode with
+          | AlwaysUpdate -> true
+          | UpdateWhenEnvVar ev ->
+            let v = System.Environment.GetEnvironmentVariable(ev)
+            not (isNull v) && v.Length > 0
+          | RejectChanges -> false
+        match shouldUpdate with
+        | true ->
+          atomicWrite path normalised
+          None
+        | false ->
+          let diff = diffLines stored normalised
+          Some (idx, sprintf "step %d: snapshot \"%s\" mismatch:\n%s" idx name diff)
+
   /// Run a list of `Step` actions/assertions against a program, collecting all assertion
   /// failures. Returns `Ok ()` if all steps pass, or `Error [(stepIndex, message)]` if
   /// any assertion steps fail. Action-step exceptions (e.g. unexpected Quit) are still raised.
@@ -650,6 +750,14 @@ module TestHarness =
         | false, _ ->
           let msg = sprintf "step %d: expected program to have quit with code %d but it is still running" idx code
           failures <- failures @ [(idx, msg)]
+      | Step.AssertSnapshot name ->
+        match runSnapshotStep idx name SnapshotOptions.defaults app with
+        | None -> ()
+        | Some failure -> failures <- failures @ [failure]
+      | Step.AssertSnapshotWith(name, opts) ->
+        match runSnapshotStep idx name opts app with
+        | None -> ()
+        | Some failure -> failures <- failures @ [failure]
     match failures with
     | [] -> Ok ()
     | _  -> Error failures
@@ -951,4 +1059,12 @@ let minimalMsgs = [
         do! System.IO.File.WriteAllTextAsync(outputPath, content) |> Async.AwaitTask
         return Some outputPath
     }
+
+  /// Convert a captured log from `Logger.toList` into a replay-ready `Step` list.
+  /// Only `LogEvent.MsgDispatched` entries produce steps — one `Step.SendMsg` per dispatch.
+  /// Pass the resulting list to `TestHarness.assertSequence` on the *original* (non-logged) program.
+  let toReplaySteps (events: LogEvent<'model,'msg> list) : Step<'model,'msg> list =
+    events |> List.choose (function
+      | LogEvent.MsgDispatched(msg, _, _, _) -> Some (Step.SendMsg msg)
+      | _ -> None)
 

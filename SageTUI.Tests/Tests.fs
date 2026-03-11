@@ -12520,3 +12520,365 @@ let sprint74Tests =
     sprint74PasteTests
     sprint74HistoryTests
   ]
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sprint 75: assertSnapshot, withLogging, TableSelection, withPersistence
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let private mkSnapDir () =
+  let dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), sprintf "sagetui-snap-%s" (System.Guid.NewGuid().ToString("N")))
+  System.IO.Directory.CreateDirectory(dir) |> ignore
+  dir
+
+let private counterProgram () =
+  { Init = fun () -> 0, NoCmd
+    Update = fun (msg: int) m -> m + msg, NoCmd
+    View = fun n -> El.text (sprintf "count=%d" n)
+    Subscribe = fun _ -> []
+    OnError = CrashOnError }
+
+// ─── P1: assertSnapshot ───────────────────────────────────────────────────────
+let sprint75SnapshotTests = testList "assertSnapshot" [
+
+  testCase "first run creates file and passes" <| fun () ->
+    let dir = mkSnapDir ()
+    let prog = counterProgram ()
+    let opts = { SnapshotOptions.defaults with Directory = Some dir }
+    TestHarness.assertSequence 20 3 prog [
+      Step.SendMsg 7
+      Step.AssertSnapshotWith("first-run", opts)
+    ]
+    let file = System.IO.Path.Combine(dir, "first-run.verified.txt")
+    file |> System.IO.File.Exists |> Expect.isTrue "snapshot file created"
+    let content = System.IO.File.ReadAllText(file)
+    content |> Expect.stringContains "contains count=7" "count=7"
+    System.IO.Directory.Delete(dir, true)
+
+  testCase "second run with same output passes" <| fun () ->
+    let dir = mkSnapDir ()
+    let prog = counterProgram ()
+    let opts = { SnapshotOptions.defaults with Directory = Some dir }
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 3; Step.AssertSnapshotWith("idempotent", opts) ]
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 3; Step.AssertSnapshotWith("idempotent", opts) ]
+    System.IO.Directory.Delete(dir, true)
+
+  testCase "regression detection raises with diff" <| fun () ->
+    let dir = mkSnapDir ()
+    let mutable content = "original"
+    let prog = {
+      Init = fun () -> 0, NoCmd
+      Update = fun (_: int) m -> m, NoCmd
+      View = fun _ -> El.text content
+      Subscribe = fun _ -> []
+      OnError = CrashOnError }
+    let opts = { SnapshotOptions.defaults with Directory = Some dir }
+    TestHarness.assertSequence 20 3 prog [ Step.AssertSnapshotWith("regression", opts) ]
+    content <- "changed"
+    let raised = try TestHarness.assertSequence 20 3 prog [ Step.AssertSnapshotWith("regression", opts) ]; false with _ -> true
+    raised |> Expect.isTrue "regression raises"
+    System.IO.Directory.Delete(dir, true)
+
+  testCase "AlwaysUpdate overwrites and passes" <| fun () ->
+    let dir = mkSnapDir ()
+    let mutable v = "v1"
+    let prog = {
+      Init = fun () -> 0, NoCmd
+      Update = fun (_: int) m -> m, NoCmd
+      View = fun _ -> El.text v
+      Subscribe = fun _ -> []
+      OnError = CrashOnError }
+    let opts = { SnapshotOptions.defaults with Directory = Some dir; UpdateMode = AlwaysUpdate }
+    TestHarness.assertSequence 20 3 prog [ Step.AssertSnapshotWith("always", opts) ]
+    v <- "v2"
+    TestHarness.assertSequence 20 3 prog [ Step.AssertSnapshotWith("always", opts) ]
+    let snap = System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "always.verified.txt"))
+    snap |> Expect.stringContains "updated to v2" "v2"
+    System.IO.Directory.Delete(dir, true)
+
+  testCase "UpdateWhenEnvVar updates when env var is set" <| fun () ->
+    let dir = mkSnapDir ()
+    let mutable v = "initial"
+    let prog = {
+      Init = fun () -> 0, NoCmd
+      Update = fun (_: int) m -> m, NoCmd
+      View = fun _ -> El.text v
+      Subscribe = fun _ -> []
+      OnError = CrashOnError }
+    let envKey = "SAGETUI_SNAP_TEST_" + System.Guid.NewGuid().ToString("N")
+    let opts = { SnapshotOptions.defaults with Directory = Some dir; UpdateMode = UpdateWhenEnvVar envKey }
+    TestHarness.assertSequence 20 3 prog [ Step.AssertSnapshotWith("envvar", opts) ]
+    v <- "updated"
+    let fails = try TestHarness.assertSequence 20 3 prog [ Step.AssertSnapshotWith("envvar", opts) ]; false with _ -> true
+    fails |> Expect.isTrue "fails without env var"
+    System.Environment.SetEnvironmentVariable(envKey, "1")
+    TestHarness.assertSequence 20 3 prog [ Step.AssertSnapshotWith("envvar", opts) ]
+    System.Environment.SetEnvironmentVariable(envKey, null)
+    let snap = System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "envvar.verified.txt"))
+    snap |> Expect.stringContains "updated snapshot" "updated"
+    System.IO.Directory.Delete(dir, true)
+
+  testCase "StripAnsi removes escape codes before comparing" <| fun () ->
+    let dir = mkSnapDir ()
+    let opts = { SnapshotOptions.defaults with Directory = Some dir; StripAnsi = true }
+    let prog = {
+      Init = fun () -> 0, NoCmd
+      Update = fun (_: int) m -> m, NoCmd
+      View = fun _ -> El.fg (Named(Green, Normal)) (El.text "green text")
+      Subscribe = fun _ -> []
+      OnError = CrashOnError }
+    TestHarness.assertSequence 20 3 prog [ Step.AssertSnapshotWith("strip-ansi", opts) ]
+    let snap = System.IO.File.ReadAllText(System.IO.Path.Combine(dir, "strip-ansi.verified.txt"))
+    snap |> Expect.stringContains "no escape seqs" "green text"
+    snap.Contains("\x1b[") |> Expect.isFalse "no ansi codes in snapshot"
+    System.IO.Directory.Delete(dir, true)
+
+  testCase "AssertSnapshot uses default directory" <| fun () ->
+    let prog = counterProgram ()
+    // Should not throw even without a custom directory
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 1; Step.AssertSnapshot "default-dir-test" ]
+    let snapFile =
+      System.IO.Path.Combine(
+        System.IO.Directory.GetCurrentDirectory(), "__snapshots__", "default-dir-test.verified.txt")
+    snapFile |> System.IO.File.Exists |> Expect.isTrue "default snapshot file created"
+    System.IO.File.Delete(snapFile)
+]
+
+// ─── P2: withLogging ──────────────────────────────────────────────────────────
+let sprint75LoggingTests = testList "withLogging" [
+
+  testCase "withLogging fires AppStarted on init" <| fun () ->
+    let events = System.Collections.Concurrent.ConcurrentQueue<LogEvent<int,int>>()
+    let prog = counterProgram () |> Program.withLogging events.Enqueue
+    let _app = TestHarness.init 20 3 prog
+    events |> Seq.exists (function LogEvent.AppStarted _ -> true | _ -> false)
+    |> Expect.isTrue "AppStarted fired"
+
+  testCase "withLogging fires MsgDispatched on update" <| fun () ->
+    let events = System.Collections.Concurrent.ConcurrentQueue<LogEvent<int,int>>()
+    let prog = counterProgram () |> Program.withLogging events.Enqueue
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 5 ]
+    let dispatched =
+      events |> Seq.tryFind (function LogEvent.MsgDispatched _ -> true | _ -> false)
+    dispatched |> Expect.isSome "MsgDispatched fired"
+    match dispatched with
+    | Some (LogEvent.MsgDispatched(msg, before, after, _)) ->
+        msg    |> Expect.equal "msg=5"    5
+        before |> Expect.equal "before=0" 0
+        after  |> Expect.equal "after=5"  5
+    | _ -> failwith "unexpected"
+
+  testCase "withLogging does not alter model or view" <| fun () ->
+    let prog = counterProgram () |> Program.withLogging ignore
+    TestHarness.assertSequence 20 3 prog [
+      Step.SendMsg 3
+      Step.ExpectView "count=3"
+    ]
+
+  testCase "Logger.toList captures events in order" <| fun () ->
+    let logger, getEvents = Logger.toList ()
+    let prog = counterProgram () |> Program.withLogging logger
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 1; Step.SendMsg 2 ]
+    let evts = getEvents ()
+    evts |> List.length |> (fun n -> (n, 2) |> Expect.isGreaterThan "at least 3 events")
+    evts |> List.exists (function LogEvent.AppStarted _ -> true | _ -> false)
+    |> Expect.isTrue "AppStarted in list"
+
+  testCase "Logger.combine fans out to two sinks" <| fun () ->
+    let aLog = System.Collections.Concurrent.ConcurrentQueue<LogEvent<int,int>>()
+    let bLog = System.Collections.Concurrent.ConcurrentQueue<LogEvent<int,int>>()
+    let combined = Logger.combine [aLog.Enqueue; bLog.Enqueue]
+    let prog = counterProgram () |> Program.withLogging combined
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 10 ]
+    aLog |> Seq.isEmpty |> Expect.isFalse "sink A received events"
+    bLog |> Seq.isEmpty |> Expect.isFalse "sink B received events"
+
+  testCase "Logger.filter only passes matching events" <| fun () ->
+    let log = System.Collections.Concurrent.ConcurrentQueue<LogEvent<int,int>>()
+    let onlyDispatched = Logger.filter (function LogEvent.MsgDispatched _ -> true | _ -> false) log.Enqueue
+    let prog = counterProgram () |> Program.withLogging onlyDispatched
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 1 ]
+    log |> Seq.forall (function LogEvent.MsgDispatched _ -> true | _ -> false)
+    |> Expect.isTrue "only dispatched events"
+
+  testCase "Logger.toReplaySteps round-trips through assertSequence" <| fun () ->
+    let logger, getEvents = Logger.toList<int,int> ()
+    let prog = counterProgram () |> Program.withLogging logger
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 1; Step.SendMsg 2; Step.SendMsg 3 ]
+    let steps = Testing.toReplaySteps (getEvents ())
+    // Replay produces same final model
+    TestHarness.assertSequence 20 3 (counterProgram ()) (steps @ [ Step.ExpectView "count=6" ])
+
+  testCase "withLogging composes with withHistory" <| fun () ->
+    let events = System.Collections.Concurrent.ConcurrentQueue<LogEvent<HistoryModel<int>, HistoryMsg<int>>>()
+    let prog =
+      counterProgram ()
+      |> Program.withHistory 10 (fun _ -> true)
+      |> Program.withLogging events.Enqueue
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg (HistoryMsg.Inner 7) ]
+    events |> Seq.isEmpty |> Expect.isFalse "events captured through withHistory"
+]
+
+// ─── P3: TableSelection ───────────────────────────────────────────────────────
+let sprint75TableSelectionTests = testList "TableSelection" [
+
+  testCase "NoSelection.isSelected returns false for any key" <| fun () ->
+    TableSelection.isSelected "any" TableSelection.NoSelection
+    |> Expect.isFalse "NoSelection always false"
+
+  testCase "SingleRow.isSelected matches only its key" <| fun () ->
+    let sel = TableSelection.SingleRow "a"
+    TableSelection.isSelected "a" sel |> Expect.isTrue "matches a"
+    TableSelection.isSelected "b" sel |> Expect.isFalse "no match b"
+
+  testCase "MultiRows.isSelected is O(log n) via Set" <| fun () ->
+    let sel = TableSelection.MultiRows(set ["a"; "b"; "c"])
+    TableSelection.isSelected "b" sel |> Expect.isTrue "b selected"
+    TableSelection.isSelected "z" sel |> Expect.isFalse "z not selected"
+
+  testCase "toggle on NoSelection produces SingleRow" <| fun () ->
+    TableSelection.toggle "x" TableSelection.NoSelection
+    |> Expect.equal "single" (TableSelection.SingleRow "x")
+
+  testCase "toggle on SingleRow with same key produces NoSelection" <| fun () ->
+    TableSelection.toggle "x" (TableSelection.SingleRow "x")
+    |> Expect.equal "deselect" TableSelection.NoSelection
+
+  testCase "toggle on SingleRow with different key produces MultiRows" <| fun () ->
+    let result = TableSelection.toggle "y" (TableSelection.SingleRow "x")
+    match result with
+    | TableSelection.MultiRows keys -> keys |> Expect.equal "two keys" (set ["x"; "y"])
+    | _ -> failwith "expected MultiRows"
+
+  testCase "toggle reducing MultiRows to 1 element produces SingleRow" <| fun () ->
+    let sel = TableSelection.MultiRows(set ["x"; "y"])
+    let result = TableSelection.toggle "y" sel
+    result |> Expect.equal "downgraded to SingleRow" (TableSelection.SingleRow "x")
+
+  testCase "extendTo updates pivot only" <| fun () ->
+    let sel = TableSelection.RangeRows(anchor = "a", pivot = "b")
+    let result = TableSelection.extendTo "c" sel
+    match result with
+    | TableSelection.RangeRows(anchor, pivot) ->
+        anchor |> Expect.equal "anchor unchanged" "a"
+        pivot  |> Expect.equal "pivot updated"   "c"
+    | _ -> failwith "expected RangeRows"
+
+  testCase "toList expands RangeRows using allKeys order" <| fun () ->
+    let allKeys = ["a"; "b"; "c"; "d"; "e"]
+    let sel = TableSelection.RangeRows(anchor = "b", pivot = "d")
+    let result = TableSelection.toList allKeys sel
+    result |> Expect.equal "b to d inclusive" ["b"; "c"; "d"]
+
+  testCase "toList for SingleRow returns one element" <| fun () ->
+    TableSelection.toList ["a"; "b"; "c"] (TableSelection.SingleRow "b")
+    |> Expect.equal "single" ["b"]
+
+  testCase "toList for NoSelection returns empty" <| fun () ->
+    TableSelection.toList ["a"; "b"] TableSelection.NoSelection
+    |> Expect.equal "empty" []
+
+  testCase "filter removes deselected keys from MultiRows" <| fun () ->
+    let sel = TableSelection.MultiRows(set ["a"; "b"; "c"; "d"])
+    let result = TableSelection.filter (fun k -> k <> "b" && k <> "d") sel
+    match result with
+    | TableSelection.MultiRows keys -> keys |> Expect.equal "filtered" (set ["a"; "c"])
+    | _ -> failwith "expected MultiRows"
+
+  testCase "filter reducing MultiRows to 1 key produces SingleRow" <| fun () ->
+    let sel = TableSelection.MultiRows(set ["a"; "b"])
+    let result = TableSelection.filter (fun k -> k = "a") sel
+    result |> Expect.equal "downgraded" (TableSelection.SingleRow "a")
+
+  testCase "filter producing 0 keys produces NoSelection" <| fun () ->
+    let sel = TableSelection.MultiRows(set ["a"; "b"])
+    let result = TableSelection.filter (fun _ -> false) sel
+    result |> Expect.equal "cleared" TableSelection.NoSelection
+
+  testCase "RangeRows.isSelected returns true for anchor and pivot" <| fun () ->
+    let allKeys = ["a"; "b"; "c"; "d"]
+    let sel = TableSelection.RangeRows(anchor = "b", pivot = "d")
+    // isSelected works WITHOUT allKeys — only O(1) checks
+    TableSelection.isSelected "b" sel |> Expect.isTrue "anchor"
+    TableSelection.isSelected "d" sel |> Expect.isTrue "pivot"
+]
+
+// ─── P4: withPersistence ──────────────────────────────────────────────────────
+let sprint75PersistenceTests = testList "withPersistence" [
+
+  testCase "restore on startup loads persisted model" <| fun () ->
+    let path = System.IO.Path.GetTempFileName()
+    let spec = Persistence.text path string (fun s -> try int s |> Some with _ -> None)
+    System.IO.File.WriteAllText(path, "42")
+    let prog = counterProgram () |> Program.withPersistence spec
+    let app = TestHarness.init 20 3 prog
+    app.Model |> Expect.equal "restored to 42" 42
+    System.IO.File.Delete(path)
+
+  testCase "silent fallback when file is corrupt" <| fun () ->
+    let path = System.IO.Path.GetTempFileName()
+    let spec = Persistence.text path string (fun s -> try int s |> Some with _ -> None)
+    System.IO.File.WriteAllText(path, "not-a-number")
+    let prog = counterProgram () |> Program.withPersistence spec
+    let app = TestHarness.init 20 3 prog
+    app.Model |> Expect.equal "fallback to init" 0
+    System.IO.File.Delete(path)
+
+  testCase "silent fallback when file is missing" <| fun () ->
+    let path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.Guid.NewGuid().ToString("N") + ".txt")
+    let spec = Persistence.text path string (fun s -> try int s |> Some with _ -> None)
+    let prog = counterProgram () |> Program.withPersistence spec
+    let app = TestHarness.init 20 3 prog
+    app.Model |> Expect.equal "fallback to 0" 0
+
+  testCase "atomic write on update (throttleMs=0)" <| fun () ->
+    let path = System.IO.Path.GetTempFileName()
+    let spec = { Persistence.text path string (fun s -> try int s |> Some with _ -> None) with WriteThrottleMs = 0 }
+    let prog = counterProgram () |> Program.withPersistence spec
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 99 ]
+    let written = System.IO.File.ReadAllText(path)
+    written |> Expect.equal "persisted 99" "99"
+    System.IO.File.Delete(path)
+
+  testCase "WriteThrottleMs=0 does synchronous write" <| fun () ->
+    let path = System.IO.Path.GetTempFileName()
+    let spec = { Persistence.text path string (fun s -> try int s |> Some with _ -> None) with WriteThrottleMs = 0 }
+    let prog = counterProgram () |> Program.withPersistence spec
+    TestHarness.assertSequence 20 3 prog [ Step.SendMsg 7; Step.SendMsg 3 ]
+    let written = System.IO.File.ReadAllText(path)
+    written |> Expect.equal "last write = 10" "10"
+    System.IO.File.Delete(path)
+
+  testCase "withPersistence does not alter model or view" <| fun () ->
+    let path = System.IO.Path.GetTempFileName()
+    let spec = { Persistence.text path string (fun s -> try int s |> Some with _ -> None) with WriteThrottleMs = 0 }
+    let prog = counterProgram () |> Program.withPersistence spec
+    TestHarness.assertSequence 20 3 prog [
+      Step.SendMsg 4
+      Step.ExpectView "count=4"
+    ]
+    System.IO.File.Delete(path)
+
+  testCase "composes with withHistory" <| fun () ->
+    let path = System.IO.Path.GetTempFileName()
+    let innerSpec = { Persistence.text path (fun (h: HistoryModel<int>) -> string h.Present) (fun s -> try { Present = int s; Past = []; Future = []; MaxDepth = 10 } |> Some with _ -> None) with WriteThrottleMs = 0 }
+    let prog =
+      counterProgram ()
+      |> Program.withHistory 10 (fun _ -> true)
+      |> Program.withPersistence innerSpec
+    TestHarness.assertSequence 20 3 prog [
+      Step.SendMsg (HistoryMsg.Inner 5)
+      Step.ExpectView "count=5"
+    ]
+    let saved = System.IO.File.ReadAllText(path)
+    saved |> Expect.equal "persisted present=5" "5"
+    System.IO.File.Delete(path)
+]
+
+[<Tests>]
+let sprint75Tests =
+  testList "Sprint 75" [
+    sprint75SnapshotTests
+    sprint75LoggingTests
+    sprint75TableSelectionTests
+    sprint75PersistenceTests
+  ]

@@ -976,6 +976,102 @@ module TableColumn =
   let asFill (col: TableColumn<'a>) : TableColumn<'a> =
     { col with Fill = true }
 
+// ---------------------------------------------------------------------------
+// TableSelection<'key> — typed multi-select algebra for table widgets
+// ---------------------------------------------------------------------------
+
+/// Represents the selection state of a table widget with typed row keys.
+///
+/// - `NoSelection` — nothing selected.
+/// - `SingleRow`   — exactly one row selected.
+/// - `MultiRows`   — two or more rows selected (Set invariant: count >= 2).
+/// - `RangeRows`   — contiguous range defined by anchor and pivot keys.
+[<Struct>]
+type TableSelection<'key when 'key: comparison> =
+  | NoSelection
+  | SingleRow  of key:    'key
+  | MultiRows  of keys:   Set<'key>
+  | RangeRows  of anchor: 'key * pivot: 'key
+
+/// Functions for querying and manipulating `TableSelection<'key>`.
+module TableSelection =
+
+  /// Returns `true` if `key` is in the selection.
+  /// O(1) for `NoSelection`/`SingleRow`/`RangeRows`, O(log n) for `MultiRows`.
+  /// Note: `RangeRows` checks only the anchor and pivot — use `toList` + membership for full range membership.
+  let isSelected (key: 'key) (sel: TableSelection<'key>) : bool =
+    match sel with
+    | NoSelection                      -> false
+    | SingleRow k                      -> k = key
+    | MultiRows ks                     -> Set.contains key ks
+    | RangeRows(anchor, pivot)         -> key = anchor || key = pivot
+
+  /// Toggle membership of `key` in the selection.
+  ///
+  /// - `NoSelection`           → `SingleRow key`
+  /// - `SingleRow k` (same)    → `NoSelection`
+  /// - `SingleRow k` (diff)    → `MultiRows {k, key}` (two items → valid MultiRows)
+  /// - `MultiRows ks` (add)    → `MultiRows (ks + key)`
+  /// - `MultiRows ks` (remove, reduces to 1) → `SingleRow` of remaining key
+  /// - `MultiRows ks` (remove, reduces to 0) → `NoSelection`
+  /// - `RangeRows`             → unchanged (use `extendTo` for range manipulation)
+  let toggle (key: 'key) (sel: TableSelection<'key>) : TableSelection<'key> =
+    match sel with
+    | NoSelection     -> SingleRow key
+    | SingleRow k when k = key -> NoSelection
+    | SingleRow k     -> MultiRows(set [k; key])
+    | MultiRows ks    ->
+        let ks' = if Set.contains key ks then Set.remove key ks else Set.add key ks
+        match Set.count ks' with
+        | 0 -> NoSelection
+        | 1 -> SingleRow(Set.minElement ks')
+        | _ -> MultiRows ks'
+    | RangeRows _ -> sel
+
+  /// Extend a range selection: moves the pivot to `key`, anchor stays fixed.
+  /// If called on a non-range selection, it converts to a range anchored at the current
+  /// selection point (or `key` itself for `NoSelection`).
+  let extendTo (key: 'key) (sel: TableSelection<'key>) : TableSelection<'key> =
+    match sel with
+    | NoSelection     -> RangeRows(anchor = key, pivot = key)
+    | SingleRow k     -> RangeRows(anchor = k, pivot = key)
+    | MultiRows _     -> sel
+    | RangeRows(anchor, _) -> RangeRows(anchor = anchor, pivot = key)
+
+  /// Expand the selection into a list of keys using `allKeys` to resolve `RangeRows` order.
+  ///
+  /// For `RangeRows`, returns all keys between anchor and pivot (inclusive) in the order
+  /// they appear in `allKeys`. For other cases, `allKeys` is ignored.
+  let toList (allKeys: 'key list) (sel: TableSelection<'key>) : 'key list =
+    match sel with
+    | NoSelection       -> []
+    | SingleRow k       -> [k]
+    | MultiRows ks      -> ks |> Set.toList
+    | RangeRows(anchor, pivot) ->
+        let aIdx = allKeys |> List.tryFindIndex ((=) anchor)
+        let pIdx = allKeys |> List.tryFindIndex ((=) pivot)
+        match aIdx, pIdx with
+        | Some a, Some p ->
+            let lo, hi = min a p, max a p
+            allKeys |> List.skip lo |> List.take (hi - lo + 1)
+        | _ -> []
+
+  /// Keep only the keys that satisfy `predicate`.
+  ///
+  /// Automatically downgrades `MultiRows` to `SingleRow` (if 1 remains) or `NoSelection`
+  /// (if 0 remain). `RangeRows` is left unchanged.
+  let filter (predicate: 'key -> bool) (sel: TableSelection<'key>) : TableSelection<'key> =
+    match sel with
+    | NoSelection       -> NoSelection
+    | SingleRow k       -> if predicate k then sel else NoSelection
+    | MultiRows ks      ->
+        let ks' = Set.filter predicate ks
+        match Set.count ks' with
+        | 0 -> NoSelection
+        | 1 -> SingleRow(Set.minElement ks')
+        | _ -> MultiRows ks'
+    | RangeRows _ -> sel
+
 /// Interactive state for a table with cursor navigation and multi-row selection.
 /// Works with `Table.viewState` for rendering.
 type TableState = {
