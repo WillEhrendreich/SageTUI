@@ -14,7 +14,10 @@ let private ensureHex1bCaptureSupported () =
       "Hex1b ConPTY capture is not yet producing snapshots for SageTUI apps on Windows; keep the harness in place but skip this smoke test on Windows."
   | false -> ()
 
-let private counterSpec =
+// Lazy specs: builtProjectExecutable is called at test-run time, not module-load time.
+// If called at module-load time, a FailedException thrown by failtestf gets wrapped in
+// TypeInitializationException, which Expecto reports as "errored" rather than "failed".
+let private makeCounterSpec () =
   { WorkingDirectory = Path.Combine(repoRoot, "examples", "Counter")
     FileName = builtProjectExecutable (Path.Combine("examples", "Counter")) "Counter"
     Arguments = []
@@ -22,9 +25,10 @@ let private counterSpec =
       Map.ofList
         [ "DOTNET_NOLOGO", "1"
           "SAGETUI_DISABLE_ALT_SCREEN", "1"
-          "SAGETUI_DISABLE_RAW_MODE", "1" ] }
+          "SAGETUI_DISABLE_RAW_MODE", "1"
+          "TERM", "xterm-256color" ] }
 
-let private interactiveFormSpec =
+let private makeInteractiveFormSpec () =
   { WorkingDirectory = Path.Combine(repoRoot, "samples", "04-InteractiveForm")
     FileName = builtProjectExecutable (Path.Combine("samples", "04-InteractiveForm")) "InteractiveForm"
     Arguments = []
@@ -32,7 +36,8 @@ let private interactiveFormSpec =
       Map.ofList
         [ "DOTNET_NOLOGO", "1"
           "SAGETUI_DISABLE_ALT_SCREEN", "1"
-          "SAGETUI_DISABLE_RAW_MODE", "1" ] }
+          "SAGETUI_DISABLE_RAW_MODE", "1"
+          "TERM", "xterm-256color" ] }
 
 [<Tests>]
 let hex1bE2ETests =
@@ -41,7 +46,7 @@ let hex1bE2ETests =
       ensureHex1bCaptureSupported ()
 
       let! session =
-        startPtySession 50 12 counterSpec
+        startPtySession 50 12 (makeCounterSpec ())
         |> Async.AwaitTask
 
       use session = session
@@ -73,7 +78,7 @@ let hex1bE2ETests =
       ensureHex1bCaptureSupported ()
 
       let! session =
-        startPtySession 80 24 interactiveFormSpec
+        startPtySession 80 24 (makeInteractiveFormSpec ())
         |> Async.AwaitTask
 
       use session = session

@@ -257,14 +257,27 @@ let waitUntilOutputContains
     // The workload log stores parsed ANSI tokens (e.g. "Text(Count:) Cursor(1,8) Text(0)")
     // so string literals like "Count: 0" do not appear verbatim in the log — the space
     // at column 7 is an existing blank cell, never written as a token.
+    // CreateSnapshot may throw if the PTY process hasn't initialized yet or has already
+    // exited unexpectedly. Returning "" lets the polling loop continue until timeout.
     let getScreenText () =
-      use snapshot = session.Terminal.CreateSnapshot()
-      snapshot.GetScreenText()
+      try
+        use snapshot = session.Terminal.CreateSnapshot()
+        snapshot.GetScreenText()
+      with _ -> ""
 
     let startedAt = DateTime.UtcNow
     let mutable found = false
 
     while not found && DateTime.UtcNow - startedAt < timeout do
+      // If the PTY process faulted (e.g. native library failure), fail fast with the
+      // actual exception rather than timing out with a misleading screen-content error.
+      if session.RunTask.IsFaulted then
+        let inner =
+          match session.RunTask.Exception with
+          | null -> "unknown"
+          | ex -> ex.InnerException |> Option.ofObj |> Option.map (fun e -> e.ToString()) |> Option.defaultValue (ex.ToString())
+        failtestf "PTY process faulted before '%s' appeared on screen.\n%s" needle inner
+
       found <- (getScreenText ()).Contains(needle, StringComparison.Ordinal)
 
       if not found then
