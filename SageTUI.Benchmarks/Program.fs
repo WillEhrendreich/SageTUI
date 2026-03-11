@@ -1,3 +1,5 @@
+namespace SageTUI.Benchmarks
+
 open SageTUI
 open BenchmarkDotNet.Attributes
 open BenchmarkDotNet.Running
@@ -163,10 +165,11 @@ type LargeBufferDiffBenchmarks() =
   member _.DiffLargeTenPct() =
     Buffer.diff front backTenPct |> ignore
 
-[<EntryPoint>]
-let main argv =
-  BenchmarkSwitcher
-    .FromAssembly(typeof<BufferDiffBenchmarks>.Assembly)
-    .Run(argv)
-  |> ignore
-  0
+module Program =
+  [<EntryPoint>]
+  let main argv =
+    BenchmarkSwitcher
+      .FromAssembly(typeof<BufferDiffBenchmarks>.Assembly)
+      .Run(argv)
+    |> ignore
+    0
