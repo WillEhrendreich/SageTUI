@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773262795498,
+  "lastUpdate": 1773266394683,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -288,6 +288,42 @@ window.BENCHMARK_DATA = {
             "value": 2891.2452829996746,
             "unit": "ns",
             "range": "± 18.75810742690998"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "b88a282d9a409de36e75dd4f2137c1755d1ce57e",
+          "message": "docs: update README test count to 2983 for Sprint 77\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-03-11T16:51:19-05:00",
+          "tree_id": "98bdbd3200a6d3f53d00af7179ddaa561345cdf2",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/b88a282d9a409de36e75dd4f2137c1755d1ce57e"
+        },
+        "date": 1773266394161,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 645.3423853654128,
+            "unit": "ns",
+            "range": "± 1.0346390397375556"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2779.2462639441856,
+            "unit": "ns",
+            "range": "± 4.282702519781505"
           }
         ]
       }
