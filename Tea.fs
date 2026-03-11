@@ -995,6 +995,73 @@ module Program =
   let withOnError (handler: exn -> 'msg option) (program: Program<'model, 'msg>) : Program<'model, 'msg> =
     { program with OnError = RecoverWith handler }
 
+  /// Wrap a program with a visual error banner overlay.
+  ///
+  /// When `Update` throws an unhandled exception the banner appears at the top of the
+  /// terminal, showing the exception message. It auto-dismisses after 5 seconds.
+  /// The wrapped model and message types are unchanged.
+  ///
+  /// Unlike `Program.withOnError`, the banner is rendered by the framework — no
+  /// recovery message needs to be added to the application's own message DU.
+  ///
+  /// For a custom display duration, use `Program.withErrorBannerFor`.
+  ///
+  /// Example:
+  ///   let program = { ... } |> Program.withErrorBanner
+  let withErrorBanner (program: Program<'model, 'msg>) : Program<'model, 'msg> =
+    let secs = 5.0
+    // Mutable ref is acceptable here: this is a framework-boundary function called once
+    // at startup, and the ref is closed over by both Update and View closures.
+    let bannerRef : (string * System.DateTime) option ref = ref None
+    { program with
+        Update = fun msg model ->
+          try
+            program.Update msg model
+          with ex ->
+            bannerRef.Value <- Some(ex.Message, System.DateTime.UtcNow)
+            model, NoCmd
+        View = fun model ->
+          let innerView = program.View model
+          match bannerRef.Value with
+          | None -> innerView
+          | Some(errMsg, t) ->
+            if (System.DateTime.UtcNow - t).TotalSeconds >= secs then
+              bannerRef.Value <- None
+              innerView
+            else
+              El.column [
+                El.bg Color.red (El.fg Color.white (El.bold (El.text (sprintf " ⚠  %s  (auto-dismiss in %.0fs) " errMsg (secs - (System.DateTime.UtcNow - t).TotalSeconds)))))
+                innerView
+              ] }
+
+  /// Like `Program.withErrorBanner` but with a configurable display duration in seconds.
+  ///
+  /// Example:
+  ///   let program = { ... } |> Program.withErrorBannerFor 10.0
+  let withErrorBannerFor (displaySeconds: float) (program: Program<'model, 'msg>) : Program<'model, 'msg> =
+    let secs = displaySeconds
+    let bannerRef : (string * System.DateTime) option ref = ref None
+    { program with
+        Update = fun msg model ->
+          try
+            program.Update msg model
+          with ex ->
+            bannerRef.Value <- Some(ex.Message, System.DateTime.UtcNow)
+            model, NoCmd
+        View = fun model ->
+          let innerView = program.View model
+          match bannerRef.Value with
+          | None -> innerView
+          | Some(errMsg, t) ->
+            if (System.DateTime.UtcNow - t).TotalSeconds >= secs then
+              bannerRef.Value <- None
+              innerView
+            else
+              El.column [
+                El.bg Color.red (El.fg Color.white (El.bold (El.text (sprintf " ⚠  %s  (auto-dismiss in %.0fs) " errMsg (secs - (System.DateTime.UtcNow - t).TotalSeconds)))))
+                innerView
+              ] }
+
   /// Install an observer that is called after every `Update` invocation.
   /// `interceptor msg oldModel newModel` receives the message that triggered the update,
   /// the model before the update, and the model after.
@@ -1066,64 +1133,75 @@ module Program =
 /// A vocabulary type for asynchronous data loading states.
 /// The most commonly reinvented type in F# async applications — provided here so
 /// every user doesn't have to define their own `type LoadState`.
-type RemoteData<'a> =
+///
+/// The `'e` type parameter is the error type stored in the `Failed` case.
+/// Use `RemoteDataExn<'a>` for the common case where errors are exceptions.
+type RemoteData<'a, 'e> =
   /// No request has been made yet.
   | Idle
   /// A request is in flight.
   | Loading
   /// Data loaded successfully.
   | Loaded of 'a
-  /// The request failed with an exception.
-  | Failed of exn
+  /// The request failed with an error of type `'e`.
+  | Failed of 'e
+
+/// Convenience alias: `RemoteData` with exceptions as the error type.
+/// Equivalent to the pre-0.10 single-parameter `RemoteData<'a>`.
+type RemoteDataExn<'a> = RemoteData<'a, exn>
+
+/// Convenience alias: `RemoteData` with string messages as the error type.
+type RemoteDataStr<'a> = RemoteData<'a, string>
 
 /// Helpers for working with RemoteData values.
 module RemoteData =
   /// Map a function over a Loaded value. Idle, Loading, and Failed pass through unchanged.
-  let map (f: 'a -> 'b) (rd: RemoteData<'a>) : RemoteData<'b> =
+  let map (f: 'a -> 'b) (rd: RemoteData<'a, 'e>) : RemoteData<'b, 'e> =
     match rd with
     | Idle -> Idle
     | Loading -> Loading
     | Loaded a -> Loaded(f a)
-    | Failed ex -> Failed ex
+    | Failed e -> Failed e
 
   /// Return the loaded value if present, otherwise a default.
-  let defaultValue (def: 'a) (rd: RemoteData<'a>) : 'a =
+  let defaultValue (def: 'a) (rd: RemoteData<'a, 'e>) : 'a =
     match rd with
     | Loaded a -> a
     | _ -> def
 
   /// Return true only when the data is fully loaded.
-  let isLoaded (rd: RemoteData<'a>) : bool =
+  let isLoaded (rd: RemoteData<'a, 'e>) : bool =
     match rd with
     | Loaded _ -> true
     | _ -> false
 
   /// Return true when a request is in flight.
-  let isLoading (rd: RemoteData<'a>) : bool =
+  let isLoading (rd: RemoteData<'a, 'e>) : bool =
     match rd with
     | Loading -> true
     | _ -> false
 
   /// Monadic bind — chain operations on loaded data.
-  let bind (f: 'a -> RemoteData<'b>) (rd: RemoteData<'a>) : RemoteData<'b> =
+  let bind (f: 'a -> RemoteData<'b, 'e>) (rd: RemoteData<'a, 'e>) : RemoteData<'b, 'e> =
     match rd with
     | Idle -> Idle
     | Loading -> Loading
     | Loaded a -> f a
-    | Failed ex -> Failed ex
+    | Failed e -> Failed e
 
-  /// Transform the exception stored in a `Failed` case using a mapping function.
-  /// The mapped string is wrapped in a new `exn` so the `Failed` shape is preserved.
+  /// Transform the error stored in a `Failed` case, potentially changing its type.
   /// All other cases pass through unchanged.
   ///
-  /// Useful for humanizing raw exception messages before passing to a view:
+  /// Useful for converting exceptions to human-readable strings:
   ///   model.Data
   ///   |> RemoteData.mapError (fun e -> sprintf "Failed to load: %s" e.Message)
-  ///   |> Deferred.viewString spinner El.text renderData
-  let mapError (f: exn -> string) (rd: RemoteData<'a>) : RemoteData<'a> =
+  ///   |> Deferred.view spinner (fun msg -> El.text msg) renderData
+  let mapError (f: 'e -> 'e2) (rd: RemoteData<'a, 'e>) : RemoteData<'a, 'e2> =
     match rd with
-    | Failed ex -> Failed(exn(f ex))
-    | other -> other
+    | Idle -> Idle
+    | Loading -> Loading
+    | Loaded a -> Loaded a
+    | Failed e -> Failed(f e)
 
 /// Helpers for the common async data-loading pattern using RemoteData.
 ///
@@ -1140,9 +1218,9 @@ module Deferred =
   /// then dispatches `toMsg (Loaded data)` or `toMsg (Failed ex)` when the async completes.
   ///
   /// Example:
-  ///   type Msg = GotPosts of RemoteData<Post list>
+  ///   type Msg = GotPosts of RemoteDataExn<Post list>
   ///   let load () = Deferred.load (fun () -> Api.getPosts()) GotPosts
-  let load (fetch: unit -> Async<'a>) (toMsg: RemoteData<'a> -> 'msg) : Cmd<'msg> =
+  let load (fetch: unit -> Async<'a>) (toMsg: RemoteData<'a, exn> -> 'msg) : Cmd<'msg> =
     Batch [
       Delay(0, toMsg Loading)
       OfAsync (fun dispatch -> async {
@@ -1155,10 +1233,10 @@ module Deferred =
 
   /// Re-trigger a load (e.g., on "Refresh" button). Semantically equivalent to `load`
   /// but communicates intent: this is a user-initiated reload of already-attempted data.
-  let reload (fetch: unit -> Async<'a>) (toMsg: RemoteData<'a> -> 'msg) : Cmd<'msg> =
+  let reload (fetch: unit -> Async<'a>) (toMsg: RemoteData<'a, exn> -> 'msg) : Cmd<'msg> =
     load fetch toMsg
 
-  /// Standard view pattern for remote data.
+  /// Standard view pattern for remote data loaded with exceptions as errors.
   ///
   /// - While Idle or Loading: renders `loading`
   /// - On failure: renders `error ex`
@@ -1166,7 +1244,7 @@ module Deferred =
   ///
   /// Example:
   ///   Deferred.view spinner errorView renderPosts model.Posts
-  let view (loading: Element) (error: exn -> Element) (render: 'a -> Element) (rd: RemoteData<'a>) : Element =
+  let view (loading: Element) (error: exn -> Element) (render: 'a -> Element) (rd: RemoteData<'a, exn>) : Element =
     match rd with
     | Idle | Loading -> loading
     | Failed ex -> error ex
@@ -1178,10 +1256,19 @@ module Deferred =
   ///
   /// Example:
   ///   Deferred.viewString spinner (fun msg -> El.text ("Error: " + msg)) renderPosts model.Posts
-  let viewString (loading: Element) (error: string -> Element) (render: 'a -> Element) (rd: RemoteData<'a>) : Element =
+  let viewString (loading: Element) (error: string -> Element) (render: 'a -> Element) (rd: RemoteData<'a, exn>) : Element =
     match rd with
     | Idle | Loading -> loading
     | Failed ex -> error ex.Message
+    | Loaded a -> render a
+
+  /// Generic view that works with any error type `'e`.
+  /// Prefer `Deferred.view` (for exn) or `Deferred.viewString` (for exn→Message)
+  /// when loading via `Deferred.load`.
+  let viewWith (loading: Element) (error: 'e -> Element) (render: 'a -> Element) (rd: RemoteData<'a, 'e>) : Element =
+    match rd with
+    | Idle | Loading -> loading
+    | Failed e -> error e
     | Loaded a -> render a
 
 // ---------------------------------------------------------------------------

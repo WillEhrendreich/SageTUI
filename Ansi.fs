@@ -192,6 +192,14 @@ module Presenter =
     let mutable lastBg = 0
     let mutable lastAttrs = 0us
 
+    // Reset style at the start of every frame so carry-over from the
+    // previous frame's last cell doesn't corrupt the first changed cell.
+    if changes.Count > 0 then
+      Ansi.appendResetStyle sb
+      lastFg <- 0
+      lastBg <- 0
+      lastAttrs <- 0us
+
     for idx in changes do
       let x = idx % buf.Width
       let y = idx / buf.Width

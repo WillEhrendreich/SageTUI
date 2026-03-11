@@ -1268,7 +1268,9 @@ let presenterTests = testList "Presenter" [
     let changes = ResizeArray<int>([0; 1])
     let s = Presenter.present changes buf
     let resetCount = s.Split(Ansi.resetStyle).Length - 1
-    resetCount |> Expect.equal "one style set" 1
+    // 1 initial frame reset + 1 for cell 0's non-default style = 2 total.
+    // Cell 1 shares cell 0's style → no additional resets emitted.
+    resetCount |> Expect.equal "initial reset + one style set for both cells" 2
 ]
 
 let mkProfile color =
@@ -3670,10 +3672,10 @@ let arenaRenderTests = testList "ArenaRender parity" [
 
 let remoteDataTests = testList "RemoteData" [
   testCase "Idle is not loaded" <| fun () ->
-    RemoteData.isLoaded (Idle: RemoteData<int>) |> Expect.isFalse "idle is not loaded"
+    RemoteData.isLoaded (Idle: RemoteData<int,exn>) |> Expect.isFalse "idle is not loaded"
 
   testCase "Loading is not loaded" <| fun () ->
-    RemoteData.isLoaded (Loading: RemoteData<int>) |> Expect.isFalse "loading is not loaded"
+    RemoteData.isLoaded (Loading: RemoteData<int,exn>) |> Expect.isFalse "loading is not loaded"
 
   testCase "Loaded is loaded" <| fun () ->
     RemoteData.isLoaded (Loaded 42) |> Expect.isTrue "loaded is loaded"
@@ -3682,18 +3684,18 @@ let remoteDataTests = testList "RemoteData" [
     RemoteData.isLoaded (Failed(exn "boom")) |> Expect.isFalse "failed is not loaded"
 
   testCase "isLoading true only for Loading" <| fun () ->
-    RemoteData.isLoading (Loading: RemoteData<int>) |> Expect.isTrue "loading is loading"
-    RemoteData.isLoading (Idle: RemoteData<int>) |> Expect.isFalse "idle is not loading"
+    RemoteData.isLoading (Loading: RemoteData<int,exn>) |> Expect.isTrue "loading is loading"
+    RemoteData.isLoading (Idle: RemoteData<int,exn>) |> Expect.isFalse "idle is not loading"
     RemoteData.isLoading (Loaded 1) |> Expect.isFalse "loaded is not loading"
 
   testCase "map transforms Loaded value" <| fun () ->
     Loaded 5 |> RemoteData.map ((*) 2) |> Expect.equal "mapped" (Loaded 10)
 
   testCase "map passes through Idle" <| fun () ->
-    (Idle: RemoteData<int>) |> RemoteData.map ((*) 2) |> Expect.equal "idle passthrough" Idle
+    (Idle: RemoteData<int,exn>) |> RemoteData.map ((*) 2) |> Expect.equal "idle passthrough" Idle
 
   testCase "map passes through Loading" <| fun () ->
-    (Loading: RemoteData<int>) |> RemoteData.map ((*) 2) |> Expect.equal "loading passthrough" Loading
+    (Loading: RemoteData<int,exn>) |> RemoteData.map ((*) 2) |> Expect.equal "loading passthrough" Loading
 
   testCase "map passes through Failed" <| fun () ->
     let ex = exn "oops"
@@ -3706,8 +3708,8 @@ let remoteDataTests = testList "RemoteData" [
     Loaded 99 |> RemoteData.defaultValue 0 |> Expect.equal "loaded default" 99
 
   testCase "defaultValue returns default for non-Loaded" <| fun () ->
-    (Idle: RemoteData<int>) |> RemoteData.defaultValue 7 |> Expect.equal "idle default" 7
-    (Loading: RemoteData<int>) |> RemoteData.defaultValue 7 |> Expect.equal "loading default" 7
+    (Idle: RemoteData<int,exn>) |> RemoteData.defaultValue 7 |> Expect.equal "idle default" 7
+    (Loading: RemoteData<int,exn>) |> RemoteData.defaultValue 7 |> Expect.equal "loading default" 7
     Failed(exn "x") |> RemoteData.defaultValue 7 |> Expect.equal "failed default" 7
 
   testCase "bind chains Loaded value" <| fun () ->
@@ -3715,9 +3717,9 @@ let remoteDataTests = testList "RemoteData" [
     |> Expect.equal "bind result" (Loaded 6)
 
   testCase "bind short-circuits on non-Loaded" <| fun () ->
-    (Idle: RemoteData<int>) |> RemoteData.bind (fun _ -> Loaded 99)
+    (Idle: RemoteData<int,exn>) |> RemoteData.bind (fun _ -> Loaded 99)
     |> Expect.equal "idle bind" Idle
-    (Loading: RemoteData<int>) |> RemoteData.bind (fun _ -> Loaded 99)
+    (Loading: RemoteData<int,exn>) |> RemoteData.bind (fun _ -> Loaded 99)
     |> Expect.equal "loading bind" Loading
 ]
 
@@ -3768,7 +3770,7 @@ let deferredTests = testList "Deferred" [
     | _ -> failwith "reload should have same Batch structure as load"
 
   testCase "load async dispatches Loaded on success" <| fun () ->
-    let dispatched = System.Collections.Generic.List<RemoteData<int>>()
+    let dispatched = System.Collections.Generic.List<RemoteData<int,exn>>()
     let cmd = Deferred.load (fun () -> async { return 99 }) id
     match cmd with
     | Batch [_; OfAsync run] ->
@@ -3778,7 +3780,7 @@ let deferredTests = testList "Deferred" [
     | _ -> failwith "expected OfAsync in cmd"
 
   testCase "load async dispatches Failed on exception" <| fun () ->
-    let dispatched = System.Collections.Generic.List<RemoteData<int>>()
+    let dispatched = System.Collections.Generic.List<RemoteData<int,exn>>()
     let ex = exn "fetch failed"
     let cmd = Deferred.load (fun () -> async { return raise ex }) id
     match cmd with
@@ -11194,46 +11196,52 @@ let sprint71ProgramInterceptorTests =
 
 let sprint71RemoteDataMapErrorTests =
   testList "RemoteData.mapError" [
-    test "mapError transforms Failed exception message" {
+    test "mapError transforms Failed — exn to string changes error type" {
       let ex = exn "original error"
-      let result = RemoteData.mapError (fun e -> "Custom: " + e.Message) (Failed ex)
-      match result with
-      | Failed e -> e.Message |> Expect.equal "message transformed" "Custom: original error"
-      | _ -> failtest "expected Failed"
+      let result : RemoteData<int,string> = RemoteData.mapError (fun (e: exn) -> "Custom: " + e.Message) (Failed ex : RemoteData<int,exn>)
+      result |> Expect.equal "transformed" (Failed "Custom: original error")
     }
 
     test "mapError passes through Idle unchanged" {
-      let result : RemoteData<int> = RemoteData.mapError (fun _ -> "x") Idle
+      let result : RemoteData<int,string> = RemoteData.mapError (fun _ -> "x") (Idle: RemoteData<int,exn>)
       result |> Expect.equal "Idle passthrough" Idle
     }
 
     test "mapError passes through Loading unchanged" {
-      let result : RemoteData<int> = RemoteData.mapError (fun _ -> "x") Loading
+      let result : RemoteData<int,string> = RemoteData.mapError (fun _ -> "x") (Loading: RemoteData<int,exn>)
       result |> Expect.equal "Loading passthrough" Loading
     }
 
     test "mapError passes through Loaded value unchanged" {
-      let result = RemoteData.mapError (fun _ -> "x") (Loaded 42)
+      let result : RemoteData<int,string> = RemoteData.mapError (fun _ -> "x") (Loaded 42: RemoteData<int,exn>)
       result |> Expect.equal "Loaded passthrough" (Loaded 42)
     }
 
-    test "mapError with identity-like function preserves message" {
-      let ex = exn "msg"
-      let result = RemoteData.mapError (fun e -> e.Message) (Failed ex)
+    test "mapError identity law: mapError id = same error value" {
+      let result : RemoteData<int,exn> = RemoteData.mapError id (Failed (exn "msg"))
       match result with
-      | Failed e -> e.Message |> Expect.equal "identity preserves" "msg"
+      | Failed e -> e.Message |> Expect.equal "identity preserves message" "msg"
       | _ -> failtest "expected Failed"
     }
 
-    test "mapError wraps transformed string in a new exception" {
+    test "mapError exn-to-string produces string error type" {
       let ex = exn "raw"
-      let result = RemoteData.mapError (fun _ -> "humanized") (Failed ex)
-      match result with
-      | Failed e ->
-        e.Message |> Expect.equal "humanized message" "humanized"
-        // Should not retain the original exception (it's a new one)
-        (e :> obj |> isNull |> not) |> Expect.isTrue "exception is non-null"
-      | _ -> failtest "expected Failed"
+      let result : RemoteData<int,string> = RemoteData.mapError (fun _ -> "humanized") (Failed ex)
+      result |> Expect.equal "humanized string error" (Failed "humanized")
+    }
+
+    test "mapError int-to-bool changes error type" {
+      let result : RemoteData<string,bool> = RemoteData.mapError (fun n -> n > 0) (Failed 42: RemoteData<string,int>)
+      result |> Expect.equal "int to bool" (Failed true)
+    }
+
+    test "mapError composition: f >> g = mapError f >> mapError g" {
+      let rd : RemoteData<int,exn> = Failed (exn "hello")
+      let f (e: exn) = e.Message.Length
+      let g (n: int) = n > 3
+      let composed  = rd |> RemoteData.mapError f |> RemoteData.mapError g
+      let direct    = rd |> RemoteData.mapError (f >> g)
+      composed |> Expect.equal "composition law" direct
     }
   ]
 
@@ -11728,4 +11736,183 @@ let sprint72Tests =
     sprint72WithTimeoutBatchTests
     sprint72StorageAtomicWriteTests
     sprint72FileWatchTests
+  ]
+
+// ── SPRINT 72 PHASE 2 ─────────────────────────────────────────────────────────────────────────────
+// RemoteData<'a,'e> — parametric error type
+// Program.withErrorBanner — visual exception banner overlay
+// ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+let sprint72RemoteDataParametricTests =
+  testList "RemoteData<'a,'e> — parametric error" [
+
+    test "RemoteDataExn<'a> is alias for RemoteData<'a,exn>" {
+      let e = exn "boom"
+      let x : RemoteDataExn<int> = Failed e
+      let y : RemoteData<int,exn> = x
+      // exn uses reference equality — compare the same instance
+      y |> Expect.equal "alias equality" (Failed e : RemoteData<int,exn>)
+      // Verify Failed value round-trips
+      match y with
+      | Failed e -> e.Message |> Expect.equal "message preserved" "boom"
+      | _ -> failtest "expected Failed"
+    }
+
+    test "RemoteDataStr<'a> is alias for RemoteData<'a,string>" {
+      let x : RemoteDataStr<int> = Failed "network error"
+      match x with
+      | Failed s -> s |> Expect.equal "string error" "network error"
+      | _ -> failtest "expected Failed"
+    }
+
+    test "mapError exn-to-string produces RemoteData<'a,string>" {
+      let rd : RemoteData<int,exn> = Failed (exn "raw")
+      let result : RemoteData<int,string> = rd |> RemoteData.mapError _.Message
+      result |> Expect.equal "mapped to string" (Failed "raw")
+    }
+
+    test "mapError int-to-bool changes error domain" {
+      let rd : RemoteData<unit,int> = Failed 42
+      let result : RemoteData<unit,bool> = rd |> RemoteData.mapError (fun n -> n > 0)
+      result |> Expect.equal "int to bool" (Failed true)
+    }
+
+    test "mapError composition law f >> g = mapError f >> mapError g" {
+      let rd : RemoteData<int,exn> = Failed (exn "hello")
+      let f (e: exn) = e.Message.Length
+      let g (n: int) = string n
+      let composed = rd |> RemoteData.mapError f |> RemoteData.mapError g
+      let direct   = rd |> RemoteData.mapError (f >> g)
+      composed |> Expect.equal "composition law" direct
+    }
+
+    test "map is independent of error type" {
+      let rd : RemoteData<int,string> = Loaded 5
+      let result : RemoteData<string,string> = rd |> RemoteData.map string
+      result |> Expect.equal "map Loaded" (Loaded "5")
+    }
+
+    test "bind propagates string error type unchanged" {
+      let rd : RemoteData<int,string> = Failed "oops"
+      let result : RemoteData<string,string> = rd |> RemoteData.bind (fun n -> Loaded(string n))
+      result |> Expect.equal "bind Failed passthrough" (Failed "oops")
+    }
+
+    test "Deferred.viewWith renders generic error type" {
+      let buf = Buffer.create 30 1
+      let rd : RemoteData<int,string> = Failed "custom error"
+      let el = Deferred.viewWith (El.text "loading") (fun s -> El.text ("ERR:" + s)) (fun n -> El.text (string n)) rd
+      Render.render { X=0; Y=0; Width=30; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "viewWith renders string error" "ERR:custom error"
+    }
+
+    test "Deferred.viewWith renders string error for RemoteDataStr" {
+      let rd : RemoteDataStr<int> = Failed "404 Not Found"
+      let el = Deferred.viewWith (El.text "...") (fun s -> El.text s) (fun _ -> El.text "ok") rd
+      match el with
+      | Text(s, _) -> s |> Expect.equal "string error rendered" "404 Not Found"
+      | _ -> failtest "expected Text element"
+    }
+  ]
+
+type BannerMsg = BannerQuit | BannerPoke | BannerBoom
+
+let sprint72WithErrorBannerTests =
+  testList "Program.withErrorBanner" [
+
+    test "Update exceptions are caught and model is preserved" {
+      let mutable updateCount = 0
+      let inner : Program<int, BannerMsg> = {
+        Init = fun () -> 0, NoCmd
+        Update = fun msg model ->
+          match msg with
+          | BannerBoom -> failwith "deliberate crash"
+          | BannerPoke -> updateCount <- updateCount + 1; model + 1, NoCmd
+          | BannerQuit -> model, NoCmd
+        View = fun n -> El.text (string n)
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+      let wrapped = inner |> Program.withErrorBanner
+      let m0, _ = wrapped.Init()
+      // Normal update works
+      let m1, _ = wrapped.Update BannerPoke m0
+      m1 |> Expect.equal "poke increments" 1
+      updateCount |> Expect.equal "update fired" 1
+      // Crashing update: model preserved, no exception thrown
+      let m2, cmd = wrapped.Update BannerBoom m1
+      m2 |> Expect.equal "model preserved after crash" 1
+      match cmd with NoCmd -> () | _ -> failtest "expected NoCmd after crash"
+      // App continues working after exception
+      let m3, _ = wrapped.Update BannerPoke m2
+      m3 |> Expect.equal "poke works after crash" 2
+    }
+
+    test "View shows banner after exception" {
+      let inner : Program<int, BannerMsg> = {
+        Init = fun () -> 0, NoCmd
+        Update = fun msg model ->
+          match msg with
+          | BannerBoom -> failwith "something went wrong"
+          | _ -> model, NoCmd
+        View = fun n -> El.text (sprintf "count=%d" n)
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+      let wrapped = inner |> Program.withErrorBanner
+      let m0, _ = wrapped.Init()
+      // Before exception: no banner
+      let buf0 = Buffer.create 40 3
+      Render.render { X=0; Y=0; Width=40; Height=3 } Style.empty buf0 (wrapped.View m0)
+      let before = Buffer.toString buf0
+      before |> Expect.stringContains "shows inner view before crash" "count=0"
+
+      // Trigger exception
+      let m1, _ = wrapped.Update BannerBoom m0
+      // After exception: banner appears
+      let buf1 = Buffer.create 60 3
+      Render.render { X=0; Y=0; Width=60; Height=3 } Style.empty buf1 (wrapped.View m1)
+      let after = Buffer.toString buf1
+      after |> Expect.stringContains "banner shows error message" "something went wrong"
+      after |> Expect.stringContains "inner view still shown" "count=0"
+    }
+
+    test "withErrorBanner preserves Subscribe passthrough" {
+      let mutable subCalled = false
+      let inner : Program<int, BannerMsg> = {
+        Init = fun () -> 0, NoCmd
+        Update = fun _ m -> m, NoCmd
+        View = fun _ -> El.empty
+        Subscribe = fun _ ->
+          subCalled <- true
+          []
+        OnError = CrashOnError
+      }
+      let wrapped = inner |> Program.withErrorBanner
+      let m0, _ = wrapped.Init()
+      wrapped.Subscribe m0 |> ignore
+      subCalled |> Expect.isTrue "Subscribe passes through to inner"
+    }
+
+    test "withErrorBanner optional displaySeconds parameter" {
+      // Can be called plain (default 5s) or with withErrorBannerFor for custom duration
+      let p1 : Program<int, BannerMsg> = {
+        Init = fun () -> 0, NoCmd
+        Update = fun _ m -> m, NoCmd
+        View = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+      let _ = p1 |> Program.withErrorBanner
+      let _ = p1 |> Program.withErrorBannerFor 3.0
+      let _ = p1 |> Program.withErrorBannerFor 10.0
+      ()  // compilation and call-site shapes are the assertion
+    }
+  ]
+
+[<Tests>]
+let sprint72Phase2Tests =
+  testList "Sprint 72 Phase 2" [
+    sprint72RemoteDataParametricTests
+    sprint72WithErrorBannerTests
   ]

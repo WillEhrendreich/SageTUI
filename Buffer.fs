@@ -39,8 +39,32 @@ module RuneWidth =
         (v <= 0x115F || (v >= 0x2E80 && v <= 0x9FFF) ||
          (v >= 0xAC00 && v <= 0xD7A3) || (v >= 0xF900 && v <= 0xFAFF) ||
          (v >= 0xFE10 && v <= 0xFE6F) || (v >= 0xFF01 && v <= 0xFF60) ||
-         (v >= 0xFFE0 && v <= 0xFFE6) || (v >= 0x20000 && v <= 0x2FFFD) ||
+         (v >= 0xFFE0 && v <= 0xFFE6) ||
+         // Emoji: Miscellaneous Symbols and Pictographs through Extended Pictographic
+         // (covers 📋 U+1F4CB, 🔨 U+1F528, 🔍 U+1F50D, ✋ U+270B, and most common emoji)
+         (v >= 0x1F300 && v <= 0x1FAFF) ||
+         (v >= 0x20000 && v <= 0x2FFFD) ||
          (v >= 0x30000 && v <= 0x3FFFD)) -> 2
+    | _ when
+        // Wide emoji/symbols with East Asian Width = W per Unicode TR11,
+        // in ranges below 0x1F300 not covered by the block above.
+        // These are rendered 2 columns wide in modern terminal emulators.
+        (v >= 0x231A && v <= 0x231B) || (v >= 0x23E9 && v <= 0x23F3) ||
+        (v >= 0x23F8 && v <= 0x23FA) || (v >= 0x25AA && v <= 0x25AB) ||
+        v = 0x25B6 || v = 0x25C0 || (v >= 0x25FB && v <= 0x25FE) ||
+        (v >= 0x2614 && v <= 0x2615) || (v >= 0x2648 && v <= 0x2653) ||
+        v = 0x267F || v = 0x2693 || v = 0x26A1 ||
+        (v >= 0x26AA && v <= 0x26AB) || (v >= 0x26BD && v <= 0x26BE) ||
+        (v >= 0x26C4 && v <= 0x26C5) || v = 0x26CE || v = 0x26D4 ||
+        v = 0x26EA || (v >= 0x26F2 && v <= 0x26F3) || v = 0x26F5 ||
+        v = 0x26FA || v = 0x26FD || v = 0x2702 || v = 0x2705 ||  // ✅
+        (v >= 0x2708 && v <= 0x270D) || v = 0x270F || v = 0x2712 ||
+        v = 0x2714 || v = 0x2716 || v = 0x271D || v = 0x2721 ||
+        v = 0x2728 || (v >= 0x2733 && v <= 0x2734) || v = 0x2744 ||
+        v = 0x2747 || v = 0x274C || v = 0x274E || (v >= 0x2753 && v <= 0x2755) ||
+        v = 0x2757 || (v >= 0x2763 && v <= 0x2764) ||
+        (v >= 0x2795 && v <= 0x2797) || v = 0x27A1 || v = 0x27B0 || v = 0x27BF
+        -> 2
     | _ -> 1
 
 /// Flat 1D buffer. Index = row * width + col.
