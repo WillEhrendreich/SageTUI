@@ -51,6 +51,49 @@ type TestApp<'model, 'msg> = {
   CapturedAsyncCmds: Cmd<'msg> list
 }
 
+/// A single step in a `TestHarness.assertSequence` scenario.
+///
+/// Action steps mutate the app state; assertion steps assert on the rendered view or model.
+/// A failing assertion step raises an exception with the step index (1-based) and, for view
+/// assertions, a framed ASCII render of the current terminal output.
+///
+/// Example:
+///   TestHarness.assertSequence 80 24 myProgram [
+///     Step.SendMsg SearchStarted
+///     Step.ExpectView "Searching…"
+///     Step.TypeText "hello"
+///     Step.ExpectModel("has input", fun m -> m.Query = "hello")
+///     Step.ExpectView "Results for: hello"
+///   ]
+[<RequireQualifiedAccess>]
+type Step<'model, 'msg> =
+  // ── Actions ───────────────────────────────────────────────────────────────────
+  /// Dispatch a message directly through Update.
+  | SendMsg of 'msg
+  /// Simulate a key press (no modifiers).
+  | PressKey of Key
+  /// Simulate a key press with modifiers.
+  | PressKeyWith of Key * Modifiers
+  /// Simulate typing each character in `text` as individual Char key presses.
+  | TypeText of string
+  /// Simulate a bracketed-paste event with `text`.
+  | Paste of string
+  /// Simulate a left-button mouse click at `(col, row)`.
+  | ClickAt of int * int
+  /// Advance virtual time by the given duration, firing any pending Delay commands.
+  | AdvanceTime of TimeSpan
+  /// Run all pending async commands in `CapturedAsyncCmds` synchronously.
+  | RunAsync
+  // ── Assertions ────────────────────────────────────────────────────────────────
+  /// Assert the rendered view contains `needle`.
+  | ExpectView of needle: string
+  /// Assert the rendered view does NOT contain `needle`.
+  | ExpectNoView of needle: string
+  /// Assert the model satisfies `predicate`, with `label` in the failure message.
+  | ExpectModel of label: string * ('model -> bool)
+  /// Assert the program has quit with the given exit code.
+  | ExpectQuit of exitCode: int
+
 /// Testing utilities for SageTUI programs. No real terminal required.
 ///
 /// Design: TestHarness functions route simulated events through your program's
@@ -505,6 +548,136 @@ module TestHarness =
       return messages |> Seq.toList
     }
 
+  /// Simulate a bracketed-paste event, dispatching `text` through any `PasteSub` handlers
+  /// registered in the program's `Subscribe` function.
+  ///
+  /// If no `PasteSub` is registered, the app is returned unchanged.
+  ///
+  /// Example:
+  ///   let app = TestHarness.init 80 3 program |> TestHarness.paste "hello world"
+  ///   app.Model |> Expect.equal "pasted" "hello world"
+  let paste (text: string) (app: TestApp<'model,'msg>) : TestApp<'model,'msg> =
+    let subs = app.Program.Subscribe app.Model
+    let msgs =
+      subs
+      |> List.choose (function
+        | PasteSub handler -> handler text
+        | _ -> None)
+    match msgs with
+    | [] -> app
+    | _  -> applyMsgs app.VirtualTime app msgs
+
+  /// Run a list of `Step` actions/assertions against a program, collecting all assertion
+  /// failures. Returns `Ok ()` if all steps pass, or `Error [(stepIndex, message)]` if
+  /// any assertion steps fail. Action-step exceptions (e.g. unexpected Quit) are still raised.
+  ///
+  /// Use `assertSequence` for fail-fast behaviour (raises on first failure).
+  /// Use `assertSequenceAll` when you want a complete list of failures in one run.
+  ///
+  /// Example:
+  ///   let result = TestHarness.assertSequenceAll 80 3 myProgram [
+  ///     Step.SendMsg 1; Step.ExpectView "1"; Step.SendMsg 2; Step.ExpectView "WRONG"
+  ///   ]
+  ///   // result = Error [(4, "step 4: view did not contain "WRONG"\n\n<framed render>")]
+  let assertSequenceAll
+    (width: int)
+    (height: int)
+    (program: Program<'model,'msg>)
+    (steps: Step<'model,'msg> list)
+    : Result<unit, (int * string) list> =
+    let mutable app = init width height program
+    let mutable failures: (int * string) list = []
+    let frameIt () =
+      let output = render app
+      let lines = output.Split('\n')
+      let top    = "╔" + String.replicate width "═" + "╗"
+      let bottom = "╚" + String.replicate width "═" + "╝"
+      let body   =
+        lines
+        |> Array.map (fun line ->
+          let trimmed = if line.Length > width then line.[..width - 1] else line
+          sprintf "║%s║" (trimmed.PadRight(width)))
+        |> String.concat "\n"
+      sprintf "Rendered output (%dx%d):\n%s\n%s\n%s" width height top body bottom
+    for idx, step in List.indexed steps |> List.map (fun (i, s) -> i + 1, s) do
+      match step with
+      | Step.SendMsg msg ->
+        app <- sendMsg msg app
+      | Step.PressKey key ->
+        app <- pressKey key app
+      | Step.PressKeyWith(key, mods) ->
+        app <- pressKeyWith key mods app
+      | Step.TypeText text ->
+        for ch in text do
+          app <- pressKey (Key.Char (System.Text.Rune ch)) app
+      | Step.Paste text ->
+        app <- paste text app
+      | Step.ClickAt(col, row) ->
+        app <- clickAt col row app
+      | Step.AdvanceTime dt ->
+        app <- advanceTime dt app
+      | Step.RunAsync ->
+        app <- Async.RunSynchronously (runCapturedAsync app)
+      | Step.ExpectView needle ->
+        let output = render app
+        match output.Contains(needle) with
+        | true -> ()
+        | false ->
+          let msg = sprintf "step %d: view did not contain \"%s\"\n\n%s" idx needle (frameIt())
+          failures <- failures @ [(idx, msg)]
+      | Step.ExpectNoView needle ->
+        let output = render app
+        match output.Contains(needle) with
+        | false -> ()
+        | true ->
+          let msg = sprintf "step %d: view unexpectedly contained \"%s\"\n\n%s" idx needle (frameIt())
+          failures <- failures @ [(idx, msg)]
+      | Step.ExpectModel(label, predicate) ->
+        match predicate app.Model with
+        | true -> ()
+        | false ->
+          let msg = sprintf "step %d: model predicate \"%s\" failed" idx label
+          failures <- failures @ [(idx, msg)]
+      | Step.ExpectQuit code ->
+        match app.HasQuit, app.ExitCode with
+        | true, Some ec when ec = code -> ()
+        | true, Some ec ->
+          let msg = sprintf "step %d: expected quit with code %d but got %d" idx code ec
+          failures <- failures @ [(idx, msg)]
+        | true, None ->
+          let msg = sprintf "step %d: program quit but exit code was None; expected %d" idx code
+          failures <- failures @ [(idx, msg)]
+        | false, _ ->
+          let msg = sprintf "step %d: expected program to have quit with code %d but it is still running" idx code
+          failures <- failures @ [(idx, msg)]
+    match failures with
+    | [] -> Ok ()
+    | _  -> Error failures
+
+  /// Run a list of `Step` actions/assertions against a program, raising on the FIRST
+  /// assertion failure. The exception message contains the step index (1-based) and,
+  /// for view assertions, a framed ASCII render of the terminal output at the point of failure.
+  ///
+  /// Use `assertSequenceAll` if you want to collect all failures in one run.
+  ///
+  /// Example:
+  ///   TestHarness.assertSequence 80 24 myProgram [
+  ///     Step.SendMsg SearchStarted
+  ///     Step.ExpectView "Searching…"
+  ///     Step.TypeText "hello"
+  ///     Step.ExpectModel("has input", fun m -> m.Query = "hello")
+  ///   ]
+  let assertSequence
+    (width: int)
+    (height: int)
+    (program: Program<'model,'msg>)
+    (steps: Step<'model,'msg> list)
+    : unit =
+    match assertSequenceAll width height program steps with
+    | Ok ()             -> ()
+    | Error ((_, msg) :: _) -> failwith msg
+    | Error []          -> ()
+
 /// Assertion helpers for SageTUI test programs.
 ///
 /// Functions return unit and throw System.Exception on failure, so they work
@@ -723,7 +896,7 @@ module Testing =
       | Motion   -> TestHarness.dragAt me.X me.Y me.Button app
     | FocusGained           -> app
     | FocusLost             -> app
-    | Pasted _              -> app  // No PasteSub in TestHarness yet
+    | Pasted text           -> TestHarness.paste text app  // Route to PasteSub handlers
 
   /// Replay a recorded session file against a TestApp.
   ///

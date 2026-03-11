@@ -301,6 +301,20 @@ module Cmd =
         computeCache.[id] <- struct(box input, box result)
         dispatch (toMsg result) })
 
+  /// Clear the `computeWhen` process-level cache.
+  ///
+  /// In production code this is never needed — the cache is intentionally
+  /// process-scoped. In tests, call this in test setup/teardown to prevent one
+  /// test's cached result from silently short-circuiting a different test that
+  /// shares the same id.
+  ///
+  /// Example (Expecto):
+  ///   testCase "fresh computation" <| fun () ->
+  ///     Cmd.clearComputeCache ()
+  ///     let cmd = Cmd.computeWhen "my-id" input transform toMsg
+  ///     ...
+  let clearComputeCache () = computeCache.Clear()
+
   /// Race a command against a deadline.If the command dispatches before `timeout`
   /// elapses, that message goes through normally. If the timeout fires first,
   /// `onTimeout` is dispatched instead. Exactly one message is dispatched.
@@ -741,6 +755,18 @@ module Sub =
         | true, msg -> Some msg
         | false, _  -> None)
 
+  /// Subscribe to bracketed-paste events from the terminal.
+  ///
+  /// `handler text` is called when the user pastes text (terminal sends ESC[200~ … ESC[201~).
+  /// Return `Some msg` to dispatch a message, or `None` to ignore the paste.
+  ///
+  /// The runtime enables bracketed-paste mode (?2004h) automatically when a `PasteSub`
+  /// is active. The mode is disabled again when the sub is removed.
+  ///
+  /// Example:
+  ///   Sub.paste (fun text -> Some (TextPasted text))
+  let paste (handler: string -> 'msg option) : Sub<'msg> = PasteSub handler
+
   /// Watch `path` for filesystem changes and dispatch `toMsg fullPath` after a quiet
   /// period of `debounceMs` milliseconds. Handles both file and directory paths.
   ///
@@ -972,6 +998,76 @@ type MappedProgram<'parentModel, 'parentMsg, 'childMsg> = {
   /// Subscribe the child component using the parent model.
   Subscribe: 'parentModel -> Sub<'parentMsg> list
 }
+
+/// The model type for a program wrapped with `Program.withHistory`.
+/// Stores the present model plus undo/redo stacks capped at `MaxDepth`.
+type HistoryModel<'model> = {
+  Present:  'model
+  Past:     'model list
+  Future:   'model list
+  MaxDepth: int
+}
+
+/// Messages for a program wrapped with `Program.withHistory`.
+[<RequireQualifiedAccess>]
+type HistoryMsg<'msg> =
+  /// Wrap an inner message from the original program.
+  | Inner of 'msg
+  /// Undo the last checkpointed change. No-op when the undo stack is empty.
+  | Undo
+  /// Redo the last undone change. No-op when the redo stack is empty.
+  | Redo
+  /// Manually snapshot the current model onto the undo stack without dispatching an inner message.
+  | Checkpoint
+  /// Clear all undo and redo stacks, keeping only the current model.
+  | ClearHistory
+
+/// Pure helper functions for `HistoryModel<'model>`.
+/// These are independent of the Program machinery and can be used directly in tests.
+module History =
+  /// Create a fresh `HistoryModel` wrapping `model` with empty undo/redo stacks.
+  let init (maxDepth: int) (model: 'model) : HistoryModel<'model> =
+    { Present = model; Past = []; Future = []; MaxDepth = maxDepth }
+
+  /// Extract the current model from a HistoryModel.
+  let present (h: HistoryModel<'model>) : 'model = h.Present
+
+  /// True when there is at least one step to undo.
+  let canUndo (h: HistoryModel<'model>) : bool =
+    match h.Past with [] -> false | _ -> true
+
+  /// True when there is at least one step to redo.
+  let canRedo (h: HistoryModel<'model>) : bool =
+    match h.Future with [] -> false | _ -> true
+
+  /// Number of steps available in the undo stack.
+  let undoDepth (h: HistoryModel<'model>) : int = h.Past.Length
+
+  /// Number of steps available in the redo stack.
+  let redoDepth (h: HistoryModel<'model>) : int = h.Future.Length
+
+  /// Internal: push `newPresent` onto the history, capping Past at MaxDepth.
+  /// Always clears Future (branching history discards the redo stack).
+  let push (h: HistoryModel<'model>) (newPresent: 'model) : HistoryModel<'model> =
+    let past = h.Present :: h.Past |> List.truncate h.MaxDepth
+    { h with Present = newPresent; Past = past; Future = [] }
+
+  /// Step backward in history (undo). No-op if Past is empty.
+  let undo (h: HistoryModel<'model>) : HistoryModel<'model> =
+    match h.Past with
+    | []         -> h
+    | prev :: rest -> { h with Present = prev; Past = rest; Future = h.Present :: h.Future }
+
+  /// Step forward in history (redo). No-op if Future is empty.
+  let redo (h: HistoryModel<'model>) : HistoryModel<'model> =
+    match h.Future with
+    | []         -> h
+    | next :: rest -> { h with Present = next; Past = h.Present :: h.Past; Future = rest }
+
+  /// Manually push the current model onto the undo stack without changing Present.
+  /// Useful for explicit checkpoint calls when the auto-checkpoint predicate isn't sufficient.
+  let checkpoint (h: HistoryModel<'model>) : HistoryModel<'model> =
+    push h h.Present
 
 /// Program combinators for component composition.
 module Program =
@@ -1215,6 +1311,73 @@ module Program =
         [ yield! p1.Subscribe m1 |> List.map (Sub.map Choice1Of2)
           yield! p2.Subscribe m2 |> List.map (Sub.map Choice2Of2) ]
       OnError = CrashOnError }
+
+  /// Wrap a program with undo/redo history.
+  ///
+  /// Every inner message for which `shouldCheckpoint msg` returns `true` will:
+  ///   1. snapshot the **pre-update** model onto the undo stack, and
+  ///   2. clear the redo stack (branching history discards the future).
+  ///
+  /// When `shouldCheckpoint` returns `false` the inner model updates normally but no
+  /// snapshot is taken — useful for transient state changes such as cursor movement
+  /// or hover highlights that you don't want cluttering the undo stack.
+  ///
+  /// The wrapped program's model type becomes `HistoryModel<'model>` and its message
+  /// type becomes `HistoryMsg<'msg>`. Wire undo/redo keys in your `Subscribe` function:
+  ///
+  ///   Sub.keys [ (Key.Char (Text.Rune 'z'), Modifiers.Ctrl), HistoryMsg.Undo
+  ///              (Key.Char (Text.Rune 'y'), Modifiers.Ctrl), HistoryMsg.Redo ]
+  ///
+  /// Access the current inner model via `History.present`:
+  ///   TuiExpect.modelSatisfies "undone" (fun h -> (History.present h).Count = 1) app
+  ///
+  /// Note on memory: `'model` values on the past/future stacks are stored by reference.
+  /// If `'model` is fully immutable (as required by correct Elm Architecture usage),
+  /// this is zero-copy structural sharing. Mutable fields in `'model` will not be
+  /// protected by undo.
+  ///
+  /// Example:
+  ///   let app =
+  ///     myProgram
+  ///     |> Program.withHistory 50 (function
+  ///         | ItemAdded _ | ItemDeleted _ | TextEdited _ -> true
+  ///         | _ -> false)
+  let withHistory
+    (maxDepth: int)
+    (shouldCheckpoint: 'msg -> bool)
+    (program: Program<'model, 'msg>)
+    : Program<HistoryModel<'model>, HistoryMsg<'msg>> =
+    { Init = fun () ->
+        let m, cmd = program.Init()
+        History.init maxDepth m, Cmd.map HistoryMsg.Inner cmd
+      Update = fun hmsg hmodel ->
+        match hmsg with
+        | HistoryMsg.Inner msg ->
+          let checkpoint = shouldCheckpoint msg
+          let present = History.present hmodel
+          let newPresent, cmd = program.Update msg present
+          let hmodel' =
+            match checkpoint with
+            | true  -> History.push hmodel newPresent
+            | false -> { hmodel with Present = newPresent }
+          hmodel', Cmd.map HistoryMsg.Inner cmd
+        | HistoryMsg.Undo ->
+          History.undo hmodel, NoCmd
+        | HistoryMsg.Redo ->
+          History.redo hmodel, NoCmd
+        | HistoryMsg.Checkpoint ->
+          History.checkpoint hmodel, NoCmd
+        | HistoryMsg.ClearHistory ->
+          { hmodel with Past = []; Future = [] }, NoCmd
+      View = fun hmodel -> program.View (History.present hmodel)
+      Subscribe = fun hmodel ->
+        program.Subscribe (History.present hmodel)
+        |> List.map (Sub.map HistoryMsg.Inner)
+      OnError =
+        match program.OnError with
+        | CrashOnError    -> CrashOnError
+        | LogAndContinue  -> LogAndContinue
+        | RecoverWith f   -> RecoverWith (fun ex -> f ex |> Option.map HistoryMsg.Inner) }
 
 /// A vocabulary type for asynchronous data loading states.
 /// The most commonly reinvented type in F# async applications — provided here so

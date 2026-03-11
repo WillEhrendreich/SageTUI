@@ -12242,3 +12242,281 @@ let sprint73Tests =
     sprint73CmdComputeTests
     sprint73DevToolsTests
   ]
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SPRINT 74: assertSequence, Sub.paste, Program.withHistory, Cmd.clearComputeCache
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ─── Fix: Cmd.clearComputeCache ───────────────────────────────────────────────
+
+let sprint74CacheFixTests = testList "Cmd.clearComputeCache" [
+  testAsync "cache cleared between tests" {
+    let mutable count = 0
+    let transform x = count <- count + 1; x * 2
+    let cmd1 = Cmd.computeWhen "sprint74-cache-fix" 5 transform id
+    let! _ = TestHarness.runCmdAsync cmd1
+    Cmd.clearComputeCache ()
+    // After clearing, next call recomputes even with same input
+    let cmd2 = Cmd.computeWhen "sprint74-cache-fix" 5 transform id
+    let! _ = TestHarness.runCmdAsync cmd2
+    count |> Expect.equal "computed twice after clear" 2
+  }
+]
+
+// ─── P1: TestHarness.assertSequence ──────────────────────────────────────────
+
+let sprint74AssertSequenceTests = testList "TestHarness.assertSequence" [
+  testCase "passes when all expectations are satisfied" <| fun () ->
+    let program = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg _ -> msg, NoCmd
+      View = fun n -> El.text (sprintf "count=%d" n)
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    TestHarness.assertSequence 80 3 program [
+      Step.SendMsg 1
+      Step.ExpectView "count=1"
+      Step.SendMsg 5
+      Step.ExpectView "count=5"
+      Step.ExpectModel("five", fun m -> m = 5)
+    ]
+
+  testCase "fails with step index on view mismatch" <| fun () ->
+    let program = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg _ -> msg, NoCmd
+      View = fun n -> El.text (sprintf "n=%d" n)
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let mutable errorMsg = ""
+    try
+      TestHarness.assertSequence 80 3 program [
+        Step.SendMsg 42
+        Step.ExpectView "DOES_NOT_EXIST"
+      ]
+    with ex ->
+      errorMsg <- ex.Message
+    errorMsg |> Expect.stringContains "error contains step index" "step 2"
+
+  testCase "ExpectNoView passes when text absent" <| fun () ->
+    let program = {
+      Init = fun () -> "hello", NoCmd
+      Update = fun msg _ -> msg, NoCmd
+      View = fun s -> El.text s
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    TestHarness.assertSequence 80 3 program [
+      Step.ExpectView "hello"
+      Step.ExpectNoView "goodbye"
+    ]
+
+  testCase "AdvanceTime step fires pending delays" <| fun () ->
+    let program = {
+      Init = fun () -> false, NoCmd
+      Update = fun msg _ -> msg, NoCmd
+      View = fun b -> El.text (if b then "done" else "waiting")
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    TestHarness.assertSequence 80 3 program [
+      Step.SendMsg false
+      Step.ExpectView "waiting"
+    ]
+
+  testCase "assertSequenceAll collects multiple failures" <| fun () ->
+    let program = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg _ -> msg, NoCmd
+      View = fun _ -> El.text "fixed"
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let result = TestHarness.assertSequenceAll 80 3 program [
+      Step.ExpectView "WRONG1"
+      Step.SendMsg 1
+      Step.ExpectView "WRONG2"
+    ]
+    match result with
+    | Error failures ->
+      failures.Length |> Expect.equal "two failures" 2
+    | Ok () -> failtest "expected failures"
+]
+
+// ─── P2: Sub.paste + TestHarness.paste + TextInput.handlePaste ───────────────
+
+let sprint74PasteTests = testList "Sub.paste" [
+  testCase "Sub.paste routes Pasted event to handler" <| fun () ->
+    let received = ref ""
+    let program = {
+      Init = fun () -> "", NoCmd
+      Update = fun msg _ -> msg, NoCmd
+      View = fun s -> El.text s
+      Subscribe = fun _ -> [ Sub.paste (fun text -> Some text) ]
+      OnError = CrashOnError
+    }
+    let app = TestHarness.init 80 3 program |> TestHarness.paste "hello world"
+    app.Model |> Expect.equal "pasted text in model" "hello world"
+
+  testCase "TestHarness.paste dispatches through PasteSub handler" <| fun () ->
+    let program = {
+      Init = fun () -> "", NoCmd
+      Update = fun msg _ -> msg, NoCmd
+      View = fun s -> El.text s
+      Subscribe = fun _ -> [ Sub.paste (fun t -> Some (t.ToUpper())) ]
+      OnError = CrashOnError
+    }
+    let app = TestHarness.init 80 3 program |> TestHarness.paste "world"
+    app.Model |> Expect.equal "uppercased" "WORLD"
+
+  testCase "TestHarness.paste does nothing when no PasteSub" <| fun () ->
+    let program = {
+      Init = fun () -> "orig", NoCmd
+      Update = fun msg _ -> msg, NoCmd
+      View = fun s -> El.text s
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let app = TestHarness.init 80 3 program |> TestHarness.paste "ignored"
+    app.Model |> Expect.equal "unchanged" "orig"
+
+  testCase "TextInput.handlePaste inserts text at cursor" <| fun () ->
+    let m = TextInput.ofString "abc" |> TextInput.clamp
+    let m2 = TextInput.handlePaste "XY" m
+    m2.Text |> Expect.equal "inserted at end" "abcXY"
+
+  testCase "TextInput.handlePaste respects maxLength constraint" <| fun () ->
+    let m = { TextInput.ofString "abc" with Cursor = 1 }
+    let m2 = TextInput.handlePasteMaxLength 3 "ZZZZ" m
+    (m2.Text.Length, 3) |> Expect.isLessThanOrEqual "at most maxLength"
+]
+
+// ─── P3: Program.withHistory ──────────────────────────────────────────────────
+
+let sprint74HistoryTests = testList "Program.withHistory" [
+  testCase "History.init wraps model with empty stacks" <| fun () ->
+    let h = History.init 10 42
+    h.Present  |> Expect.equal "present" 42
+    h.Past     |> Expect.equal "past empty" []
+    h.Future   |> Expect.equal "future empty" []
+    h.MaxDepth |> Expect.equal "max depth" 10
+
+  testCase "History.canUndo false on fresh stack" <| fun () ->
+    History.init 10 0 |> History.canUndo |> Expect.isFalse "no undo initially"
+
+  testCase "History.canRedo false on fresh stack" <| fun () ->
+    History.init 10 0 |> History.canRedo |> Expect.isFalse "no redo initially"
+
+  testCase "withHistory checkpoints model before shouldCheckpoint messages" <| fun () ->
+    let counter = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg m -> m + msg, NoCmd
+      View = fun n -> El.text (string n)
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let histProg = counter |> Program.withHistory 10 (fun _ -> true)
+    let app = TestHarness.init 80 3 histProg
+    let app2 = app |> TestHarness.sendMsg (HistoryMsg.Inner 5)
+    History.present app2.Model |> Expect.equal "present=5" 5
+    History.canUndo app2.Model |> Expect.isTrue "can undo after inner msg"
+
+  testCase "Undo restores previous model" <| fun () ->
+    let counter = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg m -> m + msg, NoCmd
+      View = fun n -> El.text (string n)
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let histProg = counter |> Program.withHistory 10 (fun _ -> true)
+    let app =
+      TestHarness.init 80 3 histProg
+      |> TestHarness.sendMsg (HistoryMsg.Inner 5)
+      |> TestHarness.sendMsg (HistoryMsg.Inner 3)
+      |> TestHarness.sendMsg HistoryMsg.Undo
+    History.present app.Model |> Expect.equal "undone to 5" 5
+
+  testCase "Redo restores undone state" <| fun () ->
+    let counter = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg m -> m + msg, NoCmd
+      View = fun n -> El.text (string n)
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let histProg = counter |> Program.withHistory 10 (fun _ -> true)
+    let app =
+      TestHarness.init 80 3 histProg
+      |> TestHarness.sendMsg (HistoryMsg.Inner 5)
+      |> TestHarness.sendMsg HistoryMsg.Undo
+      |> TestHarness.sendMsg HistoryMsg.Redo
+    History.present app.Model |> Expect.equal "redo to 5" 5
+
+  testCase "Undo on empty stack is a no-op" <| fun () ->
+    let counter = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg m -> m + msg, NoCmd
+      View = fun n -> El.text (string n)
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let histProg = counter |> Program.withHistory 10 (fun _ -> true)
+    let app = TestHarness.init 80 3 histProg |> TestHarness.sendMsg HistoryMsg.Undo
+    History.present app.Model |> Expect.equal "still 0" 0
+
+  testCase "shouldCheckpoint=false does not push to history" <| fun () ->
+    let counter = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg m -> m + msg, NoCmd
+      View = fun n -> El.text (string n)
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let histProg = counter |> Program.withHistory 10 (fun _ -> false)
+    let app =
+      TestHarness.init 80 3 histProg
+      |> TestHarness.sendMsg (HistoryMsg.Inner 5)
+    History.canUndo app.Model |> Expect.isFalse "no checkpoint when shouldCheckpoint=false"
+
+  testCase "maxDepth caps the undo stack" <| fun () ->
+    let counter = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg m -> m + msg, NoCmd
+      View = fun n -> El.text (string n)
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let histProg = counter |> Program.withHistory 3 (fun _ -> true)
+    let app =
+      TestHarness.init 80 3 histProg
+      |> TestHarness.sendMsgs (List.replicate 10 (HistoryMsg.Inner 1))
+    (app.Model.Past.Length, 3) |> Expect.isLessThanOrEqual "past capped at maxDepth"
+
+  testCase "ClearHistory empties stacks" <| fun () ->
+    let counter = {
+      Init = fun () -> 0, NoCmd
+      Update = fun msg m -> m + msg, NoCmd
+      View = fun n -> El.text (string n)
+      Subscribe = fun _ -> []
+      OnError = CrashOnError
+    }
+    let histProg = counter |> Program.withHistory 10 (fun _ -> true)
+    let app =
+      TestHarness.init 80 3 histProg
+      |> TestHarness.sendMsg (HistoryMsg.Inner 5)
+      |> TestHarness.sendMsg HistoryMsg.ClearHistory
+    app.Model.Past   |> Expect.equal "past cleared" []
+    app.Model.Future |> Expect.equal "future cleared" []
+]
+
+[<Tests>]
+let sprint74Tests =
+  testList "Sprint 74" [
+    sprint74CacheFixTests
+    sprint74AssertSequenceTests
+    sprint74PasteTests
+    sprint74HistoryTests
+  ]

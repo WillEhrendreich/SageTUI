@@ -266,6 +266,18 @@ module TextInput =
     let after = match model.Cursor < model.Text.Length with true -> model.Text.[model.Cursor..] | false -> ""
     { Text = before + s + after; Cursor = model.Cursor + s.Length; SelectionAnchor = None }
 
+  /// Handle a bracketed-paste event with a maximum character length.
+  /// Inserts as much of the cleaned paste content as will fit within `maxLength`, truncating the rest.
+  /// Cleaning strips newlines (same as `handlePaste`). Characters are counted in UTF-16 code units.
+  /// Any active selection is cleared before measuring available space.
+  let handlePasteMaxLength (maxLength: int) (text: string) (model: TextInputModel) =
+    // Clear selection anchor so available = maxLength - text.Length (selection replaced later)
+    let baseline = { model with SelectionAnchor = None }
+    let available = max 0 (maxLength - baseline.Text.Length)
+    let clean = text.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ")
+    let trimmed = match clean.Length > available with true -> clean.[..available - 1] | false -> clean
+    insertText trimmed baseline
+
   /// Handle a key press: Char inserts, Backspace/Delete remove, arrows/Home/End move cursor.
   /// All mutations clear any active selection. Plain movement clears selection anchor.
   let handleKey (key: Key) (model: TextInputModel) =
