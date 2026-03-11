@@ -28,7 +28,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore SageTUI.slnx
+        run: dotnet restore SageTUI.slnx && dotnet restore SageTUI.Library.fsproj
 
       - name: Build
         run: dotnet build SageTUI.slnx --no-restore
@@ -124,7 +124,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore SageTUI.slnx
+        run: dotnet restore SageTUI.slnx && dotnet restore SageTUI.Library.fsproj
 
       - name: Build (Release)
         run: dotnet build SageTUI.slnx --no-restore -c Release
