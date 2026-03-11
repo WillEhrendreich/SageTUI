@@ -56,7 +56,6 @@ jobs:
       - name: Pack — Library
         run: >
           dotnet pack SageTUI.Library.fsproj
-          --no-build
           -c Release
           -o ./artifacts
           /p:Version=${{ steps.version.outputs.VERSION }}
@@ -64,7 +63,6 @@ jobs:
       - name: Pack — Templates
         run: >
           dotnet pack SageTUI.Templates.fsproj
-          --no-build
           -c Release
           -o ./artifacts
           /p:Version=${{ steps.version.outputs.VERSION }}
@@ -78,7 +76,6 @@ jobs:
         continue-on-error: true
         run: >
           dotnet pack SageTUI.Html/SageTUI.Html.fsproj
-          --no-build
           -c Release
           -o ./artifacts
 
