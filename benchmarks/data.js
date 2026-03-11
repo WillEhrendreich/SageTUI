@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773241532636,
+  "lastUpdate": 1773244418311,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -108,6 +108,42 @@ window.BENCHMARK_DATA = {
             "value": 2793.5475965646597,
             "unit": "ns",
             "range": "± 16.656338872949785"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "d69975578c5807e5d4e1d73a07e24546054a7b05",
+          "message": "docs: fix stale Known Limitations — mouse support is fully implemented\n\nConsole.In.Read() + AnsiParser SGR mouse parser + ?1000h/?1002h/?1006h\nare all wired. Remove false \"Console.ReadKey\" limitation note.\nUpdate MouseSub/DragSub doc comments to reflect ?1002h being active.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-03-11T10:45:35-05:00",
+          "tree_id": "5d7596800bb9dc3f8c0034e52fe73c04b88c17fc",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/d69975578c5807e5d4e1d73a07e24546054a7b05"
+        },
+        "date": 1773244417843,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 644.9167126019796,
+            "unit": "ns",
+            "range": "± 1.1282984513206087"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2975.819139099121,
+            "unit": "ns",
+            "range": "± 15.754319865310798"
           }
         ]
       }
