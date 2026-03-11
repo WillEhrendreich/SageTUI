@@ -11560,19 +11560,20 @@ let private runSubWithActions (sub: Sub<string>) (actions: unit -> unit) (waitMs
   | CustomSub(_, start) ->
     let messages = System.Collections.Concurrent.ConcurrentBag<string>()
     use cts = new System.Threading.CancellationTokenSource()
+    use threadStarted = new System.Threading.ManualResetEventSlim(false)
     // Thread.Start creates a new OS thread immediately, bypassing the thread pool.
-    // On busy CI runners, Async.Start can queue behind 100+ pool threads and not
-    // execute for seconds — too late for FileSystemWatcher to be ready for the write.
-    // Thread.Start guarantees the subscription thread starts within OS scheduling latency.
+    // On busy CI runners, Async.Start can queue behind saturated pool threads and not
+    // execute for seconds. Thread.Start guarantees immediate OS thread creation.
+    // ManualResetEventSlim provides the synchronization guarantee: we don't proceed
+    // until we know the subscription thread is actually running (not just queued).
     let thread =
       System.Threading.Thread(fun () ->
-        // RunSynchronously blocks this thread until cts is cancelled.
-        // The FSW implementation ends with AwaitWaitHandle(ct.WaitHandle), so when
-        // cts.Cancel() fires the wait handle, the async completes and this returns.
+        threadStarted.Set()  // signal: this thread is actually running
         try Async.RunSynchronously(start messages.Add cts.Token)
         with _ -> ())
     thread.IsBackground <- true
     thread.Start()
+    threadStarted.Wait(5000) |> ignore  // block until thread is executing
     System.Threading.Thread.Sleep(500)  // conservative wait for FSW internal initialization
     actions()
     System.Threading.Thread.Sleep(waitMs)
@@ -11610,7 +11611,7 @@ let sprint72FileWatchTests =
         let msgs =
           runSubWithActions sub
             (fun () -> System.IO.File.WriteAllText(path, "changed"))
-            1000  // allow 600ms FSEvents/Windows latency + 50ms debounce + buffer
+            2000  // macOS FSEvents can take 800ms+ on busy runners; 2000ms gives ample buffer
         msgs |> Expect.hasLength "one message" 1
         msgs[0] |> Expect.equal "full path dispatched" path
         System.IO.Path.IsPathRooted(msgs[0]) |> Expect.isTrue "path should be rooted"
@@ -11624,12 +11625,15 @@ let sprint72FileWatchTests =
         | CustomSub(_, start) ->
           let dispatched = ref 0
           use cts = new System.Threading.CancellationTokenSource()
+          use threadStarted = new System.Threading.ManualResetEventSlim(false)
           let thread =
             System.Threading.Thread(fun () ->
+              threadStarted.Set()
               try start (fun _ -> System.Threading.Interlocked.Increment(dispatched) |> ignore) cts.Token |> Async.RunSynchronously
               with _ -> ())
           thread.IsBackground <- true
           thread.Start()
+          threadStarted.Wait(5000) |> ignore
           System.Threading.Thread.Sleep(500) // conservative wait for FSW init
           System.IO.File.WriteAllText(path, "trigger")
           System.Threading.Thread.Sleep(50)
@@ -11690,15 +11694,18 @@ let sprint72FileWatchTests =
         | CustomSub(_, start) ->
           let received = System.Collections.Concurrent.ConcurrentBag<string>()
           use cts = new System.Threading.CancellationTokenSource()
+          use threadStarted = new System.Threading.ManualResetEventSlim(false)
           let thread =
             System.Threading.Thread(fun () ->
+              threadStarted.Set()
               try Async.RunSynchronously(start received.Add cts.Token)
               with _ -> ())
           thread.IsBackground <- true
           thread.Start()
+          threadStarted.Wait(5000) |> ignore
           System.Threading.Thread.Sleep(500) // conservative wait for FSW init
           System.IO.File.WriteAllText(path, "trigger")
-          System.Threading.Thread.Sleep(1000) // allow 600ms FSEvents/Windows latency + 50ms debounce + buffer
+          System.Threading.Thread.Sleep(1500) // allow FSEvents latency + 50ms debounce + buffer
           cts.Cancel()
           thread.Join(2000) |> ignore
           let msgs = received |> Seq.toList
