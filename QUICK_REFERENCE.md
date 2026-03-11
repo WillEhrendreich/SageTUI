@@ -89,6 +89,55 @@ TerminalOutput (string)                     -- Raw ANSI sequence
 
 ---
 
+## ErrorPolicy DU (Tea.fs)
+
+\\\
+CrashOnError                              -- re-raise the exception (default)
+LogAndContinue                            -- log to sink, continue loop
+RecoverWith (exn -> 'msg)                -- dispatch a recovery message
+\\\
+
+---
+
+## DiffChange DU (Tea.fs / Widgets.fs)
+
+\\\
+Added of 'a       -- item present in new list only
+Removed of 'a     -- item present in old list only
+Unchanged of 'a   -- item present in both
+\\\
+
+Key functions: `Diff.compute old new`, `Diff.countAdded`, `Diff.countRemoved`, `Diff.countUnchanged`
+
+---
+
+## DebuggerMsg DU (Tea.fs)
+
+\\\
+AppMsg of 'msg    -- pass-through to wrapped program
+Toggle            -- show/hide the debugger overlay (default: F12)
+\\\
+
+---
+
+## Program Combinator Order
+
+\\\
+baseProgram
+|> Program.withLogging        -- transparent (preserves type)
+|> Program.withPersistence    -- transparent (preserves type)
+|> Program.withErrorBanner    -- transparent (preserves type)
+|> Program.withHistory        -- changes type to HistoryModel/HistoryMsg
+|> Program.withDebugger       -- changes type to DebuggerModel/DebuggerMsg
+|> App.run
+\\\
+
+Note: type-changing combinators (withHistory, withDebugger) must come LAST because they
+wrap the message type. Transparent combinators (withLogging, withPersistence, withErrorBanner)
+can go in any order before them.
+
+---
+
 ## PackedCell Struct (Buffer.fs)
 
 \\\sharp

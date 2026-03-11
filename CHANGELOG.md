@@ -5,6 +5,34 @@ All notable changes to SageTUI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-03-11
+
+### Added
+
+- **`Program.withDebugger`** — F12-toggleable live model inspector overlay. Wraps any `Program<'model,'msg>` into `Program<DebuggerModel<'model>, DebuggerMsg<'msg>>`. Shows last N messages and optionally the serialized model.
+  - `DebuggerConfig<'model>` record: `ToggleKey: Key`, `ModelPrinter: ('model -> string) option`, `MaxMessages: int`
+  - `DebuggerConfig.defaults<'model>` — F12 toggle, no printer, 50 messages
+  - `DebuggerMsg<'msg> = AppMsg of 'msg | Toggle`
+- **`Program.withLogging`** — transparent logging combinator. Intercepts every message + model transition and routes them to a user-supplied sink. Preserves the `Program<'model,'msg>` type (unlike `withDebugger` which changes it).
+- **`Program.withPersistence`** — auto-save/restore model via JSON. On init, loads from `savePath`; on every update, serializes via `serialize`/`deserialize` callbacks.
+- **`Program.withHistory`** — undo/redo combinator. Wraps model in a `HistoryModel<'m>` with configurable max depth. Integrates with `Cmd.undo`/`Cmd.redo` messages.
+- **`Program.withErrorBanner`** — renders a visible error banner at the top of the screen when an exception occurs, rather than crashing.
+- **`OrderableList<'a>`** — pure zero-overhead reorderable list struct. Module functions: `ofList`, `toList`, `length`, `isEmpty`, `moveUp`, `moveDown`, `insertBefore`, `insertAfter`, `removeAt`, `swapIndices`, `map`, `filter`.
+- **`Diff.compute`** — LCS-based structural diff. Returns `DiffChange<'a> list` where `DiffChange<'a> = Added of 'a | Removed of 'a | Unchanged of 'a`. Helper functions: `countAdded`, `countRemoved`, `countUnchanged`.
+- **`Cmd.computeWhen`** — memoized async computation. Dispatches immediately (zero allocation) on cache hit via `DirectMsg`; runs async on cache miss. Keys are user-supplied strings.
+- **`NavigationStack<'route>`** — push/pop navigation with back-stack. `push`, `pop`, `peek`, `current`, `canGoBack`.
+- **`El.lazy'`/`El.lazy2`/`El.lazy3`/`El.lazy4`** — lazy element memoization. Skips re-render when inputs are structurally equal (reference or value equality).
+- **Hex color literals in `El.markup`** — `[fg=#ff6600]...[/fg]` and `[bg=#RGB]` now supported alongside named colors.
+- **`TableSelection`** — multi-row selection state for `VirtualTable`. `TableSelection.empty`, `toggle`, `selectAll`, `clearAll`, `isSelected`, `selectedRows`.
+- **Testing: `assertSequence`** — verifies a list of model states matches a sequence of expected snapshots.
+- **Testing: `assertSnapshot`** — renders an element to string and verifies via Verify snapshot file.
+
+### Fixed
+
+- **`Cmd.computeWhen` cache hit path**: Previously dispatched `OfAsync` even on cache hit (wasted allocation). Now dispatches `DirectMsg` directly — zero allocation on every cache hit.
+- **Signal handler GC** (`runWith`/`runInlineWith`): `PosixSignalRegistration` objects are now rooted in the closure so the JIT cannot collect the handler under dead-variable elimination.
+- **Log routing**: Duplicate-subscription warnings now route through `config.LogSink` instead of `eprintfn`.
+
 ## [0.9.2] - 2026-03-11
 
 ### Fixed

@@ -195,7 +195,9 @@ let main _ = App.run program; 0
 | **Elements** | Text, Row, Column, Overlay, Constrained, Bordered, Padded, Keyed, Canvas, **Scroll** (viewport clipping) |
 | **Borders** | 6 border styles (Rounded, Light, Heavy, Double, ASCII, None) with optional **titled borders** (`El.borderedWithTitle`) |
 | **Rendering** | Arena-allocated zero-GC frame loop, SIMD-accelerated diff, 24-bit TrueColor |
-| **Widgets** | TextInput, Select, Table, Tabs, Modal, TreeView, ProgressBar, Checkbox, Toggle, RadioGroup, SpinnerWidget, Toast, Form, FuzzyFinder, TextEditor, SplitPane, VirtualList, VirtualTable |
+| **Widgets** | TextInput, Select, Table, Tabs, Modal, TreeView, ProgressBar, Checkbox, Toggle, RadioGroup, SpinnerWidget, Toast, Form, FuzzyFinder, TextEditor, SplitPane, VirtualList, VirtualTable, OrderableList |
+| **Program combinators** | `withDebugger` (F12 overlay), `withLogging` (transparent sink), `withPersistence` (JSON save/restore), `withHistory` (undo/redo), `withErrorBanner` (visible crash recovery) |
+| **Data utilities** | `Diff.compute` (LCS structural diff), `OrderableList<'a>` (pure reorderable list), `Cmd.computeWhen` (memoized async), `NavigationStack` (push/pop routing) |
 | **Focus** | `FocusRing<'F>` with `next`/`prev`/`isFocusedAt` — tab cycling with no allocations, works with any type including `[<NoEquality>]` via index |
 | **Scrolling** | ScrollState, VirtualList with scroll indicators, `El.scroll` element for viewport clipping |
 | **Canvas** | HalfBlock (▀/▄) and Braille (⠿) pixel modes |
@@ -450,9 +452,34 @@ let app =
 app |> TuiExpect.modelSatisfies "button clicked" (fun m -> m.Count = 1)
 ```
 
+## Program Combinators
+
+Program combinators transform a `Program<'model,'msg>` into a richer one. They compose with `|>`:
+
+```fsharp
+let program =
+  { Init = init; Update = update; View = view; Subscribe = fun _ -> [keyBindings] }
+  |> Program.withLogging (fun msg model -> printfn "[%A] -> %A" msg model)
+  |> Program.withPersistence {
+       SavePath = "myapp.json"
+       Serialize = Json.serialize
+       Deserialize = Json.deserialize
+     }
+  |> Program.withDebugger DebuggerConfig.defaults
+```
+
+| Combinator | What it adds | Type change? |
+|-----------|--------------|--------------|
+| `withLogging sink` | Logs every message + model to `sink` | No — same `Program<'m,'msg>` |
+| `withPersistence config` | Auto-save/restore on every update | No — same `Program<'m,'msg>` |
+| `withHistory config` | Undo/redo with configurable depth | Yes — `Program<HistoryModel<'m>, HistoryMsg<'msg>>` |
+| `withErrorBanner` | Renders visible error banner on crash | No — same `Program<'m,'msg>` |
+| `withDebugger config` | F12-toggleable live model inspector | Yes — `Program<DebuggerModel<'m>, DebuggerMsg<'msg>>` |
+| `withTransition config` | Animated keyed-element transitions | No — same `Program<'m,'msg>` |
+
 ## Support & Stability
 
-- **Package version:** 0.9.0
+- **Package version:** 0.9.3
 - **Target framework:** .NET 10.0
 - **API status:** pre-1.0; expect iterative changes while the surface area settles
 - **Core package:** `SageTUI`
