@@ -9,7 +9,7 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>SageTUI</PackageId>
-    <Version>0.9.1</Version>
+    <Version>0.9.2</Version>
     <Authors>Will Ehrendreich</Authors>
     <Copyright>Copyright © 2025 Will Ehrendreich</Copyright>
     <Description>F# terminal UI library. Elm Architecture (TEA/MVU), flexbox layout engine, 17+ widgets, SIMD-accelerated rendering, zero runtime dependencies.</Description>

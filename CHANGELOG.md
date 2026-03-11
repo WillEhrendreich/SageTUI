@@ -5,7 +5,23 @@ All notable changes to SageTUI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.0] - 2025-01-01
+## [0.9.2] - 2026-03-11
+
+### Fixed
+
+- **CI: macOS Hex1b E2E tests skipped on CI runners** — PTY input delivery is unreliable
+  on GitHub Actions macOS runners; tests now skip when `CI=true` (still run locally).
+- **CI: benchmark output filename mismatch** — Added `namespace SageTUI.Benchmarks` to
+  `SageTUI.Benchmarks/Program.fs` so BenchmarkDotNet generates the expected
+  `SageTUI.Benchmarks.BufferDiffBenchmarks-report-full-compressed.json` filename.
+- **CI: `Sub.fileWatch` flaky tests on busy runners** — Wrapped `sprint72FileWatchTests`
+  in `testSequenced` and increased pre-write sleep to 2000ms to eliminate race between
+  OS thread scheduling and `FileSystemWatcher` setup. All 7 fileWatch tests now pass
+  reliably on Ubuntu, Windows, and macOS.
+- **CI pack step: NETSDK1064/1005 on Ubuntu** — Removed `--no-build` from
+  `dotnet pack` in CI so it always performs a fresh restore+build with correct assets.
+
+## [0.9.1] - 2025-01-01 (unreleased)
 
 ### Breaking Changes
 
