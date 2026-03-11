@@ -478,6 +478,30 @@ module TestHarness =
       return current
     }
 
+  /// Run all `OfAsync` commands in a `Cmd` tree, collecting the dispatched messages.
+  /// Does not require a full `TestApp` — useful for directly testing the output of a `Cmd`.
+  ///
+  /// Example:
+  ///   let cmd = Cmd.ofAsyncResult (async { return Ok 42 }) id (fun _ -> -1)
+  ///   let! msgs = TestHarness.runCmdAsync cmd
+  ///   msgs |> Expect.equal "one ok message" [42]
+  let runCmdAsync (cmd: Cmd<'msg>) : Async<'msg list> =
+    async {
+      let messages = System.Collections.Generic.List<'msg>()
+      let rec run (c: Cmd<'msg>) =
+        async {
+          match c with
+          | OfAsync run ->
+            do! run messages.Add
+          | Batch cmds ->
+            for c2 in cmds do
+              do! run c2
+          | _ -> ()
+        }
+      do! run cmd
+      return messages |> Seq.toList
+    }
+
 /// Assertion helpers for SageTUI test programs.
 ///
 /// Functions return unit and throw System.Exception on failure, so they work

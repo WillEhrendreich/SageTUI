@@ -3045,7 +3045,29 @@ type Series = {
 /// Where to render the chart legend.
 type LegendPosition = LegendTop | LegendBottom | LegendRight | NoLegend
 
+/// Unified line chart configuration supporting named series, legend, Y-axis pinning,
+/// and canvas mode selection.
+type LineChartConfig2 = {
+  /// Named series — label, color, data. Use Series.ofColorData for anonymous series.
+  Series2       : Series list
+  /// Optional X-axis label rendered as a text row below the canvas.
+  XLabel2       : string option
+  /// Optional Y-axis label.
+  YLabel2       : string option
+  /// Pin the Y minimum. None = auto-scale from data.
+  YMin          : float option
+  /// Pin the Y maximum. None = auto-scale from data.
+  YMax          : float option
+  /// Render faint horizontal grid lines.
+  ShowGrid2     : bool
+  /// Legend placement. Default: NoLegend.
+  LegendPosition: LegendPosition
+  /// Canvas rendering mode. Default: Braille.
+  CanvasMode    : CanvasMode
+}
+
 /// V2 line chart configuration supporting named series, legend, and grid.
+[<System.Obsolete("Use LineChartConfig2 with named Series list. LineChartV2Config will be removed in a future version.")>]
 type LineChartV2Config = {
   /// Named series list — each series has a label, color, and data array.
   V2Series: Series list
@@ -3058,6 +3080,13 @@ type LineChartV2Config = {
   /// Where to render the series legend.
   V2LegendPosition: LegendPosition
 }
+
+/// Helper constructors for the `Series` type.
+module Series =
+  /// Create a `Series` from a `(Color * float array)` pair with an empty label.
+  /// Useful for migrating from the anonymous-tuple API.
+  let ofColorData (color: Color) (data: float array) : Series =
+    { SeriesLabel = ""; SeriesColor = color; Data = data }
 
 /// Messages for the enhanced Viewport widget.
 type ViewportMsg =
@@ -3312,12 +3341,24 @@ module Viewport =
 
 /// Extension methods on the `Chart` module for multi-series line chart rendering.
 module LineChart =
-  /// Default `LineChartConfig`.
+  /// Default `LineChartConfig` (V1 simple tuple-based API).
   let defaults : LineChartConfig = {
     Series = []
     XLabel = None
     YLabel = None
     ShowGrid = false
+  }
+
+  /// Default `LineChartConfig2` — empty series, no labels, auto-scale, Braille canvas, no legend.
+  let lineChartDefaults : LineChartConfig2 = {
+    Series2        = []
+    XLabel2        = None
+    YLabel2        = None
+    YMin           = None
+    YMax           = None
+    ShowGrid2      = false
+    LegendPosition = NoLegend
+    CanvasMode     = Braille
   }
 
   // ── Shared Bresenham helper ────────────────────────────────────────────────
@@ -3348,65 +3389,7 @@ module LineChart =
         | true -> err <- err + dx; cy <- cy + sy
         | false -> ()
 
-  // ── V1 chart ──────────────────────────────────────────────────────────────
-
-  /// Render a multi-series line chart using the Braille canvas.
-  /// - Lines are drawn with Bresenham's algorithm between consecutive data points.
-  /// - All series share the same Y axis, auto-scaled to the global min/max.
-  /// - NaN values are silently skipped — the line is broken at NaN gaps.
-  /// - An optional `XLabel` is rendered as a text row below the chart canvas.
-  let lineChart' (config: LineChartConfig) : Element =
-    match config.Series with
-    | [] -> El.empty
-    | series ->
-      let allValues =
-        series
-        |> List.collect (fun (_, pts) -> pts |> Array.toList)
-        |> List.filter (fun v -> not (System.Double.IsNaN v))
-      let globalMin = match allValues with [] -> 0.0 | vs -> List.min vs
-      let globalMax = match allValues with [] -> 1.0 | vs -> List.max vs
-      let range = globalMax - globalMin
-      let canvas =
-        Canvas {
-          Mode = Braille
-          Fallback = None
-          Draw = fun pw ph ->
-            let pixels = Array.create (pw * ph) Color.Default
-            let toPixelY (v: float) =
-              match range with
-              | 0.0 -> ph / 2
-              | _ ->
-                let norm = (v - globalMin) / range
-                ph - 1 - int (norm * float (ph - 1))
-            for (color, pts) in series do
-              let n = pts.Length
-              match n with
-              | 0 -> ()
-              | 1 ->
-                match System.Double.IsNaN pts[0] with
-                | false -> bresenham pixels pw ph color (pw / 2) (toPixelY pts[0]) (pw / 2) (toPixelY pts[0])
-                | true -> ()
-              | _ ->
-                for i in 0 .. n - 2 do
-                  match System.Double.IsNaN pts[i] || System.Double.IsNaN pts[i + 1] with
-                  | true -> ()
-                  | false ->
-                    let x0 = int (float i * float (pw - 1) / float (n - 1))
-                    let x1 = int (float (i + 1) * float (pw - 1) / float (n - 1))
-                    let y0 = toPixelY pts[i]
-                    let y1 = toPixelY pts[i + 1]
-                    bresenham pixels pw ph color x0 y0 x1 y1
-            { Width = pw; Height = ph; Pixels = pixels }
-        }
-      match config.XLabel with
-      | None -> canvas
-      | Some lbl -> El.column [ canvas; El.text lbl ]
-
-  /// Render a multi-series line chart from a simple series list (uses default config).
-  let lineChart (series: (Color * float array) list) : Element =
-    lineChart' { defaults with Series = series }
-
-  // ── V2 chart ──────────────────────────────────────────────────────────────
+  // ── Unified chart ─────────────────────────────────────────────────────────
 
   /// Compute auto-scale bounds from a list of finite values.
   /// When all values are equal, expands the range by ±1.0 to avoid a zero-height chart.
@@ -3421,35 +3404,38 @@ module LineChart =
       | true -> (lo - 1.0, hi + 1.0)
       | false -> (lo, hi)
 
-  let private defaultV2 : LineChartV2Config = {
-    V2Series = []
-    V2XLabel = None
-    V2YLabel = None
-    V2ShowGrid = false
-    V2LegendPosition = NoLegend
-  }
+  /// Resolve Y-axis bounds from optional pins and data.
+  /// None = auto-scale from data. Some v = use v as the bound.
+  let resolveBounds (yMin: float option) (yMax: float option) (data: float array) : float * float =
+    let (autoMin, autoMax) = computeAutoScale data
+    let lo = yMin |> Option.defaultValue autoMin
+    let hi = yMax |> Option.defaultValue autoMax
+    (lo, hi)
 
-  let private legendRow (config: LineChartV2Config) : Element =
-    let items =
-      config.V2Series
-      |> List.map (fun s -> El.fg s.SeriesColor (El.text (sprintf "■ %s" s.SeriesLabel)))
-    El.row items
+  let private legendRow2 (series: Series list) : Element =
+    series
+    |> List.map (fun s -> El.fg s.SeriesColor (El.text (sprintf "■ %s" s.SeriesLabel)))
+    |> El.row
 
-  /// Render a V2 multi-series line chart with named series, legend, NaN-gap support,
-  /// and auto-scaled Y axis.
-  let lineChartV2 (config: LineChartV2Config) : Element =
-    match config.V2Series with
+  /// Render a multi-series line chart using the unified `LineChartConfig2`.
+  /// - Braille canvas by default; set `CanvasMode = HalfBlock` for degraded terminals.
+  /// - Y axis auto-scales from data; override with `YMin`/`YMax` for fixed bounds.
+  /// - Series with `SeriesLabel` appear in the legend per `LegendPosition`.
+  /// - NaN values create visible gaps in the line.
+  let lineChart' (config: LineChartConfig2) : Element =
+    match config.Series2 with
     | [] -> El.empty
     | series ->
       let allValues =
         series
         |> List.collect (fun s -> s.Data |> Array.toList)
         |> Array.ofList
-      let (globalMin, globalMax) = computeAutoScale allValues
+      let (globalMin, globalMax) = resolveBounds config.YMin config.YMax allValues
       let range = globalMax - globalMin
+      let mode = config.CanvasMode
       let canvas =
         Canvas {
-          Mode = Braille
+          Mode    = mode
           Fallback = None
           Draw = fun pw ph ->
             let pixels = Array.create (pw * ph) Color.Default
@@ -3468,11 +3454,11 @@ module LineChart =
               | 1 ->
                 match System.Double.IsNaN pts[0] with
                 | false -> bresenham pixels pw ph color (pw / 2) (toPixelY pts[0]) (pw / 2) (toPixelY pts[0])
-                | true -> ()
+                | true  -> ()
               | _ ->
                 for i in 0 .. n - 2 do
                   match System.Double.IsNaN pts[i] || System.Double.IsNaN pts[i + 1] with
-                  | true -> ()
+                  | true  -> ()
                   | false ->
                     let x0 = int (float i * float (pw - 1) / float (n - 1))
                     let x1 = int (float (i + 1) * float (pw - 1) / float (n - 1))
@@ -3482,16 +3468,35 @@ module LineChart =
             { Width = pw; Height = ph; Pixels = pixels }
         }
       let withXLabel el =
-        match config.V2XLabel with
-        | None -> el
+        match config.XLabel2 with
+        | None     -> el
         | Some lbl -> El.column [el; El.text lbl]
       let withLegend el =
-        match config.V2LegendPosition with
-        | NoLegend    -> el
-        | LegendTop   -> El.column [legendRow config; el]
-        | LegendBottom -> El.column [el; legendRow config]
-        | LegendRight  -> El.row [el; legendRow config]
+        let legend = legendRow2 series
+        match config.LegendPosition with
+        | NoLegend     -> el
+        | LegendTop    -> El.column [legend; el]
+        | LegendBottom -> El.column [el; legend]
+        | LegendRight  -> El.row   [el; legend]
       canvas |> withXLabel |> withLegend
+
+  /// Render a multi-series line chart from a simple series list (uses default config).
+  /// Each entry is a `(color, dataPoints)` pair; all series are overlaid on the same Y axis.
+  let lineChart (series: (Color * float array) list) : Element =
+    lineChart' { lineChartDefaults with Series2 = series |> List.map (fun (c, d) -> Series.ofColorData c d) }
+
+  /// Render a V2 multi-series line chart (deprecated — use `lineChart'` with `LineChartConfig2`).
+  [<System.Obsolete("Use LineChart.lineChart' with LineChartConfig2. lineChartV2 will be removed in a future version.")>]
+  let lineChartV2 (config: LineChartV2Config) : Element =
+    let cfg = {
+      lineChartDefaults with
+        Series2        = config.V2Series
+        XLabel2        = config.V2XLabel
+        YLabel2        = config.V2YLabel
+        ShowGrid2      = config.V2ShowGrid
+        LegendPosition = config.V2LegendPosition
+    }
+    lineChart' cfg
 
 // ── StatusBar ─────────────────────────────────────────────────────────────────
 // Composable status-bar builder. Items are placed in three gravity zones (left,

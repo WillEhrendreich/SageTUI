@@ -2886,3 +2886,127 @@ let allWidgetTests = testList "Widgets" [
   toastQueueIdTests
 ]
 
+// ── Sprint 52: Chart.lineChart unified config ─────────────────────────────────
+
+[<Tests>]
+let sprint52ChartTests = testList "Sprint 52 Chart" [
+
+  testList "computeAutoScale" [
+    test "returns (0.0, 1.0) for empty array" {
+      let (lo, hi) = LineChart.computeAutoScale [||]
+      lo |> Expect.equal "lo" 0.0
+      hi |> Expect.equal "hi" 1.0
+    }
+    test "returns (0.0, 1.0) for all-NaN array" {
+      let (lo, hi) = LineChart.computeAutoScale [| nan; nan |]
+      lo |> Expect.equal "lo" 0.0
+      hi |> Expect.equal "hi" 1.0
+    }
+    test "equal values expand by ±1" {
+      let (lo, hi) = LineChart.computeAutoScale [| 5.0; 5.0; 5.0 |]
+      lo |> Expect.equal "lo" 4.0
+      hi |> Expect.equal "hi" 6.0
+    }
+    test "different values use actual range" {
+      let (lo, hi) = LineChart.computeAutoScale [| 2.0; 8.0; 5.0 |]
+      lo |> Expect.equal "lo" 2.0
+      hi |> Expect.equal "hi" 8.0
+    }
+    test "NaN values are filtered from bounds" {
+      let (lo, hi) = LineChart.computeAutoScale [| 1.0; nan; 9.0 |]
+      lo |> Expect.equal "lo" 1.0
+      hi |> Expect.equal "hi" 9.0
+    }
+  ]
+
+  testList "resolveBounds" [
+    test "both None uses auto-scale" {
+      let (lo, hi) = LineChart.resolveBounds None None [| 3.0; 7.0 |]
+      lo |> Expect.equal "lo auto" 3.0
+      hi |> Expect.equal "hi auto" 7.0
+    }
+    test "YMin overrides auto low" {
+      let (lo, hi) = LineChart.resolveBounds (Some 0.0) None [| 1.0; 5.0 |]
+      lo |> Expect.equal "lo pinned" 0.0
+      hi |> Expect.equal "hi auto" 5.0
+    }
+    test "YMax overrides auto high" {
+      let (lo, hi) = LineChart.resolveBounds None (Some 10.0) [| 1.0; 5.0 |]
+      lo |> Expect.equal "lo auto" 1.0
+      hi |> Expect.equal "hi pinned" 10.0
+    }
+    test "both set uses fixed range" {
+      let (lo, hi) = LineChart.resolveBounds (Some 0.0) (Some 100.0) [| 20.0; 80.0 |]
+      lo |> Expect.equal "lo fixed" 0.0
+      hi |> Expect.equal "hi fixed" 100.0
+    }
+  ]
+
+  testList "LineChartConfig and lineChart'" [
+    test "lineChartDefaults has NoLegend by default" {
+      LineChart.lineChartDefaults.LegendPosition |> Expect.equal "NoLegend" NoLegend
+    }
+    test "lineChartDefaults has Braille canvas mode" {
+      LineChart.lineChartDefaults.CanvasMode |> Expect.equal "Braille" Braille
+    }
+    test "lineChart' returns Empty for empty series" {
+      let elem = LineChart.lineChart' LineChart.lineChartDefaults
+      match elem with
+      | Empty -> ()
+      | _ -> failtest "expected Empty element for empty series"
+    }
+    test "lineChart' with one series returns Canvas element" {
+      let series = [ { SeriesLabel = "CPU"; SeriesColor = Color.Named(Red, Normal); Data = [| 1.0; 2.0; 3.0 |] } ]
+      let elem = LineChart.lineChart' { LineChart.lineChartDefaults with Series2 = series }
+      match elem with
+      | Canvas _ -> ()
+      | _ -> failtest "expected Canvas element"
+    }
+    test "lineChart' with XLabel2 wraps in Column" {
+      let series = [ { SeriesLabel = "X"; SeriesColor = Color.Named(Red, Normal); Data = [| 1.0; 2.0 |] } ]
+      let elem = LineChart.lineChart' { LineChart.lineChartDefaults with Series2 = series; XLabel2 = Some "Time" }
+      match elem with
+      | Column _ -> ()
+      | _ -> failtest "expected Column element (canvas + label)"
+    }
+    test "lineChart' with LegendBottom wraps in Column with legend" {
+      let series = [
+        { SeriesLabel = "CPU"; SeriesColor = Color.Named(Red, Normal); Data = [| 1.0; 2.0 |] }
+        { SeriesLabel = "MEM"; SeriesColor = Color.Named(Blue, Normal); Data = [| 3.0; 4.0 |] }
+      ]
+      let elem = LineChart.lineChart' { LineChart.lineChartDefaults with Series2 = series; LegendPosition = LegendBottom }
+      match elem with
+      | Column children -> children.Length |> Expect.equal "canvas + legend = 2" 2
+      | _ -> failtest "expected Column (canvas + legend row)"
+    }
+    test "lineChart' with LegendRight wraps in Row" {
+      let series = [ { SeriesLabel = "A"; SeriesColor = Color.Named(Green, Normal); Data = [| 1.0; 2.0 |] } ]
+      let elem = LineChart.lineChart' { LineChart.lineChartDefaults with Series2 = series; LegendPosition = LegendRight }
+      match elem with
+      | Row _ -> ()
+      | _ -> failtest "expected Row (canvas + legend column)"
+    }
+    test "lineChart convenience wrapper produces same structure as config path" {
+      let data = [| 10.0; 20.0; 15.0 |]
+      let series = [ { SeriesLabel = ""; SeriesColor = Color.Named(Cyan, Normal); Data = data } ]
+      let viaConfig = LineChart.lineChart' { LineChart.lineChartDefaults with Series2 = series }
+      let viaTuple = LineChart.lineChart [ (Color.Named(Cyan, Normal), data) ]
+      // Both should return Canvas (no label, no legend)
+      match viaConfig, viaTuple with
+      | Canvas _, Canvas _ -> ()
+      | _ -> failtest "expected both to be Canvas"
+    }
+  ]
+
+  testList "Series.ofColorData" [
+    test "creates Series with empty label and given color and data" {
+      let data = [| 1.0; 2.0; 3.0 |]
+      let s = Series.ofColorData (Color.Named(Red, Normal)) data
+      s.SeriesLabel |> Expect.equal "empty label" ""
+      s.SeriesColor |> Expect.equal "color" (Color.Named(Red, Normal))
+      s.Data |> Expect.equal "data" data
+    }
+  ]
+
+]
+

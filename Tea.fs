@@ -113,10 +113,16 @@ module Cmd =
           dispatch (onError ex)
       })
 
-  /// Run an `Async<Result<'a, exn>>` and dispatch the appropriate message.
-  /// On `Ok value`, dispatches `onOk value`. On `Error exn`, dispatches `onError exn`.
-  /// Unlike `Cmd.ofAsync`, exceptions embedded in the Result are surfaced as messages —
-  /// nothing is silently swallowed.
+  /// Run an `Async<Result<'ok,'err>>` and dispatch the appropriate message.
+  /// On `Ok value`, dispatches `onOk value`. On `Error err`, dispatches `onError err`.
+  /// Unlike `Cmd.ofAsync`, errors embedded in the Result are surfaced as messages —
+  /// nothing is silently swallowed. The error type `'err` can be any type: exn, DU, string, etc.
+  /// Outer async exceptions (if the computation throws instead of returning Error) propagate
+  /// to the runtime — use `ofAsyncResultSafe` or `ofAsyncResultWith` if the computation
+  /// may throw.
+  ///
+  /// Backward compatible: existing callers using `Async<Result<'a,exn>>` continue to work
+  /// unchanged — `'err` simply infers as `exn`.
   ///
   /// Example:
   ///   let loadFile path = async {
@@ -124,15 +130,15 @@ module Cmd =
   ///     with ex -> return Error ex }
   ///   Cmd.ofAsyncResult (loadFile "data.txt") (fun text -> Loaded text) (fun ex -> LoadFailed ex.Message)
   let ofAsyncResult
-    (computation: Async<Result<'a, exn>>)
-    (onOk: 'a -> 'msg)
-    (onError: exn -> 'msg) : Cmd<'msg> =
+    (computation: Async<Result<'ok,'err>>)
+    (onOk: 'ok -> 'msg)
+    (onError: 'err -> 'msg) : Cmd<'msg> =
     OfAsync(fun dispatch ->
       async {
         let! result = computation
         match result with
         | Ok value -> dispatch (onOk value)
-        | Error ex -> dispatch (onError ex)
+        | Error err -> dispatch (onError err)
       })
 
   /// Run an `Async<Result<'a, exn>>`, catching any exceptions thrown in the async body.
@@ -142,6 +148,10 @@ module Cmd =
   /// Use this in preference to `ofAsyncResult` when the async computation may throw
   /// instead of returning `Error`. Unlike `ofAsyncResult`, no exception can escape
   /// to the .NET async runtime — all failures are dispatched as messages.
+  ///
+  /// Note: the error type is constrained to `exn` because both a `Result Error` and
+  /// a caught outer exception share the same type. For typed domain errors + outer exception
+  /// handling, use `ofAsyncResultWith`.
   let ofAsyncResultSafe
     (computation: Async<Result<'a, exn>>)
     (onOk: 'a -> 'msg)
@@ -155,6 +165,44 @@ module Cmd =
           | Error ex -> dispatch (onError ex)
         with ex ->
           dispatch (onError ex)
+      })
+
+  /// Run an `Async<Result<'ok,'err>>` with typed domain errors AND a separate outer exception handler.
+  /// On `Ok value`, dispatches `onOk value`.
+  /// On `Error err`, dispatches `onError err`.
+  /// If the async computation throws (instead of returning Error), dispatches `onException ex`.
+  ///
+  /// Use this when domain errors are a DU but the computation may also throw.
+  let ofAsyncResultWith
+    (computation: Async<Result<'ok,'err>>)
+    (onOk: 'ok -> 'msg)
+    (onError: 'err -> 'msg)
+    (onException: exn -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        try
+          let! result = computation
+          match result with
+          | Ok value -> dispatch (onOk value)
+          | Error err -> dispatch (onError err)
+        with ex ->
+          dispatch (onException ex)
+      })
+
+  /// Run a `Task<Result<'ok,'err>>` and dispatch the appropriate message.
+  /// For C# interop where async methods return `Task<Result<_,_>>`.
+  /// On `Ok value`, dispatches `onOk value`. On `Error err`, dispatches `onError err`.
+  /// Outer task exceptions propagate to the runtime.
+  let ofTaskFromResult
+    (task: unit -> System.Threading.Tasks.Task<Result<'ok,'err>>)
+    (onOk: 'ok -> 'msg)
+    (onError: 'err -> 'msg) : Cmd<'msg> =
+    OfAsync(fun dispatch ->
+      async {
+        let! result = task() |> Async.AwaitTask
+        match result with
+        | Ok value -> dispatch (onOk value)
+        | Error err -> dispatch (onError err)
       })
 
   /// Extract all synchronously-dispatchable messages from a Cmd tree.

@@ -6401,19 +6401,21 @@ let sprint51Tests =
     sprint51PropertyTests
   ]
 
-// ============================================================
-// Sprint 52 Tests — Chart.lineChart, Viewport, Cmd.ofAsyncResult, ToastQueue, El.markupSpans
-// ============================================================
+// ── Sprint 52 P3 support types — must be at module scope ──
+// F# does not allow type declarations inside expression contexts (e.g., testAsync blocks).
+type S52SimpleError = S52FileNotFound | S52PermissionDenied
+type S52FileError = S52FeNotFound | S52ParseError of string
+type S52DomainErr = S52Timeout | S52BadResponse
 
-let sprint52LineChartTests = testList "Chart lineChart" [
+let sprint52LineChartTests= testList "Chart lineChart" [
   testCase "empty series returns empty" <| fun () ->
-    let el = LineChart.lineChart' { Series = []; XLabel = None; YLabel = None; ShowGrid = false }
+    let el = LineChart.lineChart' LineChart.lineChartDefaults
     match el with
     | Empty -> ()
     | _ -> failtest "Expected Empty element for empty series"
 
   testCase "single series returns non-empty element" <| fun () ->
-    let config = { Series = [ (Color.Default, [| 1.0; 2.0; 3.0 |]) ]; XLabel = None; YLabel = None; ShowGrid = false }
+    let config = { LineChart.lineChartDefaults with Series2 = [ { SeriesLabel = ""; SeriesColor = Color.Default; Data = [| 1.0; 2.0; 3.0 |] } ] }
     let el = LineChart.lineChart' config
     match el with
     | Empty -> failtest "Expected non-Empty element"
@@ -6425,28 +6427,28 @@ let sprint52LineChartTests = testList "Chart lineChart" [
     | Empty -> failtest "Expected non-Empty element"
     | _ -> ()
 
-  testCase "XLabel Some produces Column" <| fun () ->
-    let el = LineChart.lineChart' { Series = [ (Color.Default, [| 1.0; 2.0 |]) ]; XLabel = Some "Time"; YLabel = None; ShowGrid = false }
+  testCase "XLabel2 Some produces Column" <| fun () ->
+    let el = LineChart.lineChart' { LineChart.lineChartDefaults with Series2 = [ { SeriesLabel = ""; SeriesColor = Color.Default; Data = [| 1.0; 2.0 |] } ]; XLabel2 = Some "Time" }
     match el with
     | Column _ -> ()
-    | _ -> failtest "Expected Column element when XLabel is Some"
+    | _ -> failtest "Expected Column element when XLabel2 is Some"
 
   testCase "multiple series no exception" <| fun () ->
     let config = {
-      Series = [
-        (Color.Named(BaseColor.Red, Intensity.Normal), [| 1.0; 2.0; 3.0 |])
-        (Color.Named(BaseColor.Blue, Intensity.Normal), [| 3.0; 1.5; 2.0 |])
-      ]
-      XLabel = None; YLabel = None; ShowGrid = false
+      LineChart.lineChartDefaults with
+        Series2 = [
+          { SeriesLabel = "A"; SeriesColor = Color.Named(BaseColor.Red, Intensity.Normal); Data = [| 1.0; 2.0; 3.0 |] }
+          { SeriesLabel = "B"; SeriesColor = Color.Named(BaseColor.Blue, Intensity.Normal); Data = [| 3.0; 1.5; 2.0 |] }
+        ]
     }
     LineChart.lineChart' config |> ignore
 
   testCase "all-same values no divide by zero" <| fun () ->
-    let config = { Series = [ (Color.Default, [| 5.0; 5.0; 5.0 |]) ]; XLabel = None; YLabel = None; ShowGrid = false }
+    let config = { LineChart.lineChartDefaults with Series2 = [ { SeriesLabel = ""; SeriesColor = Color.Default; Data = [| 5.0; 5.0; 5.0 |] } ] }
     LineChart.lineChart' config |> ignore
 
   testCase "single point series no exception" <| fun () ->
-    let config = { Series = [ (Color.Default, [| 42.0 |]) ]; XLabel = None; YLabel = None; ShowGrid = false }
+    let config = { LineChart.lineChartDefaults with Series2 = [ { SeriesLabel = ""; SeriesColor = Color.Default; Data = [| 42.0 |] } ] }
     LineChart.lineChart' config |> ignore
 ]
 
@@ -6527,6 +6529,130 @@ let sprint52CmdTests = testList "Cmd.ofAsyncResult" [
     match cmd with
     | OfAsync _ -> ()
     | _ -> failtest "Expected OfAsync"
+
+  testList "generic error type" [
+    testAsync "dispatches Ok via onOk with typed error" {
+      let computation = async { return Ok "hello" : Result<string, S52SimpleError> }
+      let cmd = Cmd.ofAsyncResult computation id (fun _ -> "error")
+      let app =
+        TestHarness.init 80 3 {
+          Init = fun () -> None, cmd
+          Update = fun msg _ -> Some msg, NoCmd
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> []
+          OnError = CrashOnError
+        }
+      let! app2 = TestHarness.runCapturedAsync app
+      app2.Model |> Expect.equal "dispatched Ok" (Some "hello")
+    }
+
+    testAsync "dispatches Error via onError with typed error DU" {
+      let computation = async { return Error (S52ParseError "bad format") : Result<int, S52FileError> }
+      let mutable dispatched = None
+      let app =
+        TestHarness.init 80 3 {
+          Init = fun () ->
+            None, Cmd.ofAsyncResult computation
+              (fun v -> Some (sprintf "ok:%d" v))
+              (fun e -> dispatched <- Some e; None)
+          Update = fun msg _ -> msg, NoCmd
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> []
+          OnError = CrashOnError
+        }
+      let! _ = TestHarness.runCapturedAsync app
+      dispatched |> Expect.equal "error dispatched" (Some (S52ParseError "bad format"))
+    }
+
+    testAsync "backward compat: Async<Result<'a,exn>> still works" {
+      let computation = async { return Ok 42 : Result<int, exn> }
+      let app =
+        TestHarness.init 80 3 {
+          Init = fun () -> -1, Cmd.ofAsyncResult computation id (fun _ -> -99)
+          Update = fun msg _ -> msg, NoCmd
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> []
+          OnError = CrashOnError
+        }
+      let! app2 = TestHarness.runCapturedAsync app
+      app2.Model |> Expect.equal "42 dispatched" 42
+    }
+  ]
+
+  testList "ofAsyncResultWith" [
+    testAsync "dispatches inner Error via onError" {
+      let computation = async { return Error S52Timeout : Result<string, S52DomainErr> }
+      let mutable gotErr : S52DomainErr option = None
+      let app =
+        TestHarness.init 80 3 {
+          Init = fun () ->
+            None, Cmd.ofAsyncResultWith computation
+              (fun v -> Some v)
+              (fun e -> gotErr <- Some e; None)
+              (fun _ -> None)
+          Update = fun msg _ -> msg, NoCmd
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> []
+          OnError = CrashOnError
+        }
+      let! _ = TestHarness.runCapturedAsync app
+      gotErr |> Expect.equal "got Timeout" (Some S52Timeout)
+    }
+
+    testAsync "dispatches outer exception via onException" {
+      let computation : Async<Result<string, string>> = async { return failwith "boom" }
+      let mutable gotExn : exn option = None
+      let app =
+        TestHarness.init 80 3 {
+          Init = fun () ->
+            None, Cmd.ofAsyncResultWith computation
+              (fun v -> Some v)
+              (fun _ -> None)
+              (fun ex -> gotExn <- Some ex; None)
+          Update = fun msg _ -> msg, NoCmd
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> []
+          OnError = CrashOnError
+        }
+      let! _ = TestHarness.runCapturedAsync app
+      gotExn.IsSome |> Expect.isTrue "outer exception was caught"
+      gotExn.Value.Message |> Expect.equal "message" "boom"
+    }
+  ]
+
+  testList "ofTaskFromResult" [
+    testAsync "dispatches Ok result from Task<Result<_,_>>" {
+      let task = fun () -> System.Threading.Tasks.Task.FromResult(Ok 99 : Result<int, string>)
+      let app =
+        TestHarness.init 80 3 {
+          Init = fun () -> -1, Cmd.ofTaskFromResult task id (fun _ -> -99)
+          Update = fun msg _ -> msg, NoCmd
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> []
+          OnError = CrashOnError
+        }
+      let! app2 = TestHarness.runCapturedAsync app
+      app2.Model |> Expect.equal "99 dispatched" 99
+    }
+
+    testAsync "dispatches Error result from Task<Result<_,_>>" {
+      let task = fun () -> System.Threading.Tasks.Task.FromResult(Error "oops" : Result<int, string>)
+      let mutable gotErr = None
+      let app =
+        TestHarness.init 80 3 {
+          Init = fun () ->
+            None, Cmd.ofTaskFromResult task
+              (fun _ -> None)
+              (fun e -> gotErr <- Some e; None)
+          Update = fun msg _ -> msg, NoCmd
+          View = fun _ -> El.empty
+          Subscribe = fun _ -> []
+          OnError = CrashOnError
+        }
+      let! _ = TestHarness.runCapturedAsync app
+      gotErr |> Expect.equal "error dispatched" (Some "oops")
+    }
+  ]
 ]
 
 let sprint52ToastQueueTests = testList "ToastQueue" [
@@ -11916,3 +12042,4 @@ let sprint72Phase2Tests =
     sprint72RemoteDataParametricTests
     sprint72WithErrorBannerTests
   ]
+
