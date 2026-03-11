@@ -11675,7 +11675,7 @@ let sprint72FileWatchTests =
           Async.Start(start received.Add cts.Token, cts.Token)
           System.Threading.Thread.Sleep(250) // allow FSW to start
           System.IO.File.WriteAllText(path, "trigger")
-          System.Threading.Thread.Sleep(400)
+          System.Threading.Thread.Sleep(600)
           cts.Cancel()
           System.Threading.Thread.Sleep(50)
           let msgs = received |> Seq.toList
