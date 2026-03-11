@@ -3,7 +3,12 @@
 // This does NOT run a terminal app; it type-checks all tutorial patterns.
 // References the net8.0 output since SageTUI is a multi-TFM library (net8.0;net9.0;net10.0)
 // and net8.0 is the lowest common denominator that always exists after any build.
+// CI builds Release; local dev typically builds Debug. Both are handled below.
+#if RELEASE
+#r "../bin/Release/net8.0/SageTUI.Library.dll"
+#else
 #r "../bin/Debug/net8.0/SageTUI.Library.dll"
+#endif
 
 open SageTUI
 
