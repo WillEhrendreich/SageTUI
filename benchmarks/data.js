@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773266394683,
+  "lastUpdate": 1773267283877,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -324,6 +324,42 @@ window.BENCHMARK_DATA = {
             "value": 2779.2462639441856,
             "unit": "ns",
             "range": "± 4.282702519781505"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "365852bf76976cd3488378c2b85941efefc564c6",
+          "message": "docs: update README + CHANGELOG for v0.9.4 (Sprint 77)\n\n- README: add El.hyperlink/OSC 8 to Elements table\n- README: add OrderableVirtualList + DiffView to Widgets table\n- README: add DiffView.view to Data utilities row\n- README: add new Command algebra row (Cmd.bind/andThen/sequence)\n- CHANGELOG: add [0.9.4] section with all Sprint 77 additions\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-03-11T17:06:13-05:00",
+          "tree_id": "13d0b04f2397771e1f683df07f3be9615f762f6e",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/365852bf76976cd3488378c2b85941efefc564c6"
+        },
+        "date": 1773267282912,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 645.1952251287607,
+            "unit": "ns",
+            "range": "± 0.8343202485604947"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2964.310893758138,
+            "unit": "ns",
+            "range": "± 24.879852428806032"
           }
         ]
       }
