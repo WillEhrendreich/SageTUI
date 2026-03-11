@@ -7,20 +7,16 @@ open SageTUI
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Measures managed bytes allocated by [f] after GC stabilization.
+/// Measures managed bytes allocated by [f] on the calling thread only.
+/// Using GetAllocatedBytesForCurrentThread() avoids pollution from background
+/// GC threads, thread-pool work, and JIT metadata on shared CI runners.
 /// Runs [warmup] iterations of [f] first so the arena's bump-pointer is
 /// exercised and any one-time .NET JIT or GC overhead is paid before we measure.
 let measureAllocBytes (warmup: int) (measured: int) (f: unit -> unit) : int64 =
-    GC.Collect()
-    GC.WaitForPendingFinalizers()
-    GC.Collect()
     for _ in 1 .. warmup do f ()
-    GC.Collect()
-    GC.WaitForPendingFinalizers()
-    GC.Collect()
-    let before = GC.GetTotalAllocatedBytes(precise = true)
+    let before = GC.GetAllocatedBytesForCurrentThread()
     for _ in 1 .. measured do f ()
-    let after = GC.GetTotalAllocatedBytes(precise = true)
+    let after = GC.GetAllocatedBytesForCurrentThread()
     after - before
 
 // ── Tree fixtures ─────────────────────────────────────────────────────────────

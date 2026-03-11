@@ -8,11 +8,11 @@ open Expecto.Flip
 open SageTUI.ProcessHelpers
 
 let private ensureHex1bCaptureSupported () =
-  match RuntimeInformation.IsOSPlatform(OSPlatform.Windows) with
-  | true ->
+  match RuntimeInformation.IsOSPlatform(OSPlatform.OSX) with
+  | false ->
     Tests.skiptest
-      "Hex1b ConPTY capture is not yet producing snapshots for SageTUI apps on Windows; keep the harness in place but skip this smoke test on Windows."
-  | false -> ()
+      "Hex1b PTY capture requires macOS (arm64). Native interop library is not available on Windows or Linux; skipping to avoid DllNotFoundException."
+  | true -> ()
 
 // Lazy specs: builtProjectExecutable is called at test-run time, not module-load time.
 // If called at module-load time, a FailedException thrown by failtestf gets wrapped in
