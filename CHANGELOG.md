@@ -5,7 +5,21 @@ All notable changes to SageTUI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.3] - 2026-03-11
+## [0.9.4] - 2026-03-11
+
+### Added
+
+- **`Cmd.bind`** — monadic command sequencing. `Cmd.bind f cmd` intercepts `cmd`'s dispatched message, applies `f` to produce a `Cmd<'b>`, then runs that command. The intermediate message is **never dispatched to Update** — private async pipelines stay private.
+- **`Cmd.andThen`** — sequential command chaining. `Cmd.andThen cmd2 cmd1` runs `cmd1` (dispatching its messages), then runs `cmd2` (dispatching its messages). Both commands go through the normal Update/View cycle.
+- **`Cmd.sequence`** — ordered list of commands. `Cmd.sequence []` = `Cmd.none`; single element passes through unchanged; multiple fold over `andThen`.
+- **`DiffView.view`** / **`DiffView.viewFromChanges`** — renders an LCS diff as a column of colored lines: green `+` for added, red `−` for removed, dim context lines. `DiffViewOptions` controls context line count and line number display. Long unchanged runs collapse to `… N lines unchanged …`.
+- **`OrderableVirtualList`** — keyboard drag-to-reorder over a virtualized list. `OrderableVirtualListModel<'a>` wraps `OrderableList` + `VirtualListModel` + grab state. `Space` picks up / puts down the focused item; `j`/`k` (or `↓`/`↑`) navigate or move the grabbed item. The grabbed row shows a `⠿` drag handle with inverted colors.
+- **`Element.Hyperlink`** / **`El.hyperlink`** — new Element case that emits OSC 8 terminal hyperlinks on capable terminals. Falls back to underlined text elsewhere.
+- **`TerminalProfile.SupportsOsc8`** — auto-detected: `true` for kitty (`TERM=*kitty*`), WezTerm, and iTerm.app; `false` for Windows Terminal, tmux, screen, and unknown terminals.
+- **`Ansi.oscHyperlinkOpen`** / **`Ansi.oscHyperlinkClose`** — low-level OSC 8 sequence helpers for custom rendering.
+- **`HtmlRender`**: `Hyperlink` now renders as `<a href="...">` in the HTML bridge.
+
+
 
 ### Added
 
