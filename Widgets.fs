@@ -1002,7 +1002,7 @@ module TableState =
 
   /// Select all rows.
   let selectAll (state: TableState) : TableState =
-    let all = Set.ofSeq { 0 .. state.RowCount - 1 }
+    let all = Set.ofSeq (seq { 0 .. state.RowCount - 1 })
     { state with Selected = all }
 
   /// Clear all row selections.
@@ -1318,7 +1318,7 @@ module VirtualList =
   let selectAll (m: VirtualListModel<'row>) : VirtualListModel<'row> =
     match m.Items.Length with
     | 0 -> m
-    | n -> { m with Selected = Set.ofSeq { 0 .. n - 1 } }
+    | n -> { m with Selected = Set.ofSeq (seq { 0 .. n - 1 }) }
 
   /// Remove all indices from the `Selected` set.
   let clearSelection (m: VirtualListModel<'row>) : VirtualListModel<'row> =

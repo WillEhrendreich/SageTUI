@@ -15,7 +15,7 @@
     <PackageTags>fsharp;tui;terminal;elm-architecture;tea;mvu;functional;simd;layout;cli;widgets</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>0.9.0: Complete Elm Architecture (TEA/MVU) with 17+ widgets, SIMD-accelerated double-buffered rendering, flexbox layout engine, Program.OnError error boundaries, Sub.map coverage across all 11 subscription variants, VirtualList (clickToggleAt, multi-select), TextInput (clickAt with Unicode width oracle), FuzzyFinder, Viewport (handleMouse, scrollAt), Chart, Toast/ToastQueue, Tabs (clickActivate), Select (handleMouse), theme system, template package, TestHarness (virtual time, click/scroll simulation), Cmd.saveString/loadString storage, keyChar ergonomic helper, and 2,630 tests.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.9.0: Complete Elm Architecture (TEA/MVU) with 17+ widgets, SIMD-accelerated double-buffered rendering, flexbox layout engine, ErrorPolicy DU (CrashOnError|LogAndContinue|RecoverWith), TestHarness async capture (runCapturedAsync), Keys.bind lazy allocation, Cmd.fromAsync/fromTask, VirtualList multi-select, TextInput (clickAt), FuzzyFinder, Viewport, Chart, Toast/ToastQueue, Tabs, Select, theme system, template package, Cmd.saveString/loadString, keyChar helper, 2,653 tests.</PackageReleaseNotes>
     <RepositoryUrl>https://github.com/WillEhrendreich/SageTUI</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/WillEhrendreich/SageTUI</PackageProjectUrl>
@@ -27,13 +27,6 @@
 
   <ItemGroup>
     <Watch Include="**\*.fs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Minimum floor: let the SDK supply the appropriate FSharp.Core per TFM.
-         Do NOT pin to a preview/specific version — that forces consumers to take a
-         FSharp.Core upgrade they may not want. -->
-    <PackageReference Include="FSharp.Core" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>
