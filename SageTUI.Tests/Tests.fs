@@ -12043,3 +12043,202 @@ let sprint72Phase2Tests =
     sprint72WithErrorBannerTests
   ]
 
+
+// ── Sprint 73: NavigationStack + El.lazy3/lazy4 + Cmd.computeWhen + Testing.exportShrunkTest ──
+
+// ─── P1: NavigationStack<'route> ──────────────────────────────────────────────
+
+let sprint73NavTests = testList "NavigationStack" [
+  testCase "init creates stack with just current" <| fun () ->
+    let s = Nav.init "home"
+    s.Current |> Expect.equal "current" "home"
+    s.History  |> Expect.equal "no history" []
+    s.Forward  |> Expect.equal "no forward" []
+
+  testCase "push advances current and records history" <| fun () ->
+    let s = Nav.init "home" |> Nav.push "settings"
+    s.Current  |> Expect.equal "current" "settings"
+    s.History  |> Expect.equal "history" [ "home" ]
+    s.Forward  |> Expect.equal "forward cleared" []
+
+  testCase "push clears forward history" <| fun () ->
+    let s = Nav.init "home" |> Nav.push "settings" |> Nav.push "detail"
+    let back = Nav.pop s |> Option.get
+    let s2 = Nav.push "other" back
+    s2.Forward |> Expect.equal "forward cleared after push" []
+
+  testCase "pop returns None on single-item stack" <| fun () ->
+    let s = Nav.init "home"
+    Nav.pop s |> Expect.equal "none" None
+
+  testCase "pop restores previous page" <| fun () ->
+    let s = Nav.init "home" |> Nav.push "settings" |> Nav.pop |> Option.get
+    s.Current  |> Expect.equal "current" "home"
+    s.History  |> Expect.equal "history empty" []
+    s.Forward  |> Expect.equal "forward" [ "settings" ]
+
+  testCase "forward after pop restores page" <| fun () ->
+    let s =
+      Nav.init "home"
+      |> Nav.push "settings"
+      |> Nav.pop |> Option.get
+      |> Nav.forward |> Option.get
+    s.Current |> Expect.equal "current" "settings"
+    s.Forward |> Expect.equal "forward empty" []
+
+  testCase "forward returns None when nothing to go forward to" <| fun () ->
+    Nav.init "home" |> Nav.forward |> Expect.equal "none" None
+
+  testCase "replace changes current without touching history" <| fun () ->
+    let s = Nav.init "home" |> Nav.push "settings" |> Nav.replace "help"
+    s.Current  |> Expect.equal "current" "help"
+    s.History  |> Expect.equal "history unchanged" [ "home" ]
+    s.Forward  |> Expect.equal "forward cleared" []
+
+  testCase "canGoBack reflects history" <| fun () ->
+    let s0 = Nav.init "home"
+    let s1 = Nav.push "settings" s0
+    Nav.canGoBack s0 |> Expect.isFalse "no back from init"
+    Nav.canGoBack s1 |> Expect.isTrue  "can go back after push"
+
+  testCase "canGoForward reflects forward stack" <| fun () ->
+    let s = Nav.init "home" |> Nav.push "s" |> Nav.pop |> Option.get
+    Nav.canGoForward s |> Expect.isTrue "can go forward after pop"
+
+  testCase "toList returns full history + current" <| fun () ->
+    let s = Nav.init "a" |> Nav.push "b" |> Nav.push "c"
+    Nav.toList s |> Expect.equal "full list" ["a"; "b"; "c"]
+
+  testCase "depth equals number of items in stack" <| fun () ->
+    let s = Nav.init "a" |> Nav.push "b" |> Nav.push "c"
+    Nav.depth s |> Expect.equal "depth 3" 3
+]
+
+// ─── P2: El.lazy3, El.lazy4, Cmd.computeWhen ──────────────────────────────────
+
+let sprint73LazyTests = testList "El.lazy3 and lazy4" [
+  testCase "lazy3 returns cached element on same inputs" <| fun () ->
+    let calls = ref 0
+    let f = El.lazy3 (fun a b c -> incr calls; El.text (sprintf "%s%s%s" a b c))
+    let e1 = f "x" "y" "z"
+    let e2 = f "x" "y" "z"
+    !calls |> Expect.equal "called once" 1
+    obj.ReferenceEquals(e1, e2) |> Expect.isTrue "same reference on cache hit"
+
+  testCase "lazy3 recomputes when any input changes" <| fun () ->
+    let calls = ref 0
+    let f = El.lazy3 (fun a b c -> incr calls; El.text (sprintf "%d%d%d" a b c))
+    f 1 2 3 |> ignore
+    f 1 2 4 |> ignore
+    !calls |> Expect.equal "called twice" 2
+
+  testCase "lazy4 returns cached element on same inputs" <| fun () ->
+    let calls = ref 0
+    let f = El.lazy4 (fun a b c d -> incr calls; El.text (sprintf "%d" (a+b+c+d)))
+    let e1 = f 1 2 3 4
+    let e2 = f 1 2 3 4
+    !calls |> Expect.equal "called once" 1
+    obj.ReferenceEquals(e1, e2) |> Expect.isTrue "same ref"
+
+  testCase "lazy4 recomputes when input changes" <| fun () ->
+    let calls = ref 0
+    let f = El.lazy4 (fun a b c d -> incr calls; El.text (sprintf "%d" (a+b+c+d)))
+    f 1 2 3 4 |> ignore
+    f 1 2 3 5 |> ignore
+    !calls |> Expect.equal "two calls" 2
+]
+
+let sprint73CmdComputeTests = testList "Cmd.computeWhen" [
+  testAsync "dispatches Ok on new input" {
+    let mutable computed = 0
+    let transform x = computed <- computed + 1; x * 2
+    let cmd = Cmd.computeWhen "test1" 21 transform id
+    let! msgs = TestHarness.runCmdAsync cmd
+    msgs |> Expect.equal "42 dispatched" [ 42 ]
+    computed |> Expect.equal "computed once" 1
+  }
+
+  testAsync "dispatches immediately on same input (cache hit)" {
+    let mutable computed = 0
+    let transform x = computed <- computed + 1; x * 2
+    let cmd1 = Cmd.computeWhen "test2" 10 transform id
+    let! _ = TestHarness.runCmdAsync cmd1
+    // In TEA, Update runs sequentially — cmd2 is built after cmd1's run has populated the cache
+    let cmd2 = Cmd.computeWhen "test2" 10 transform id
+    let! msgs = TestHarness.runCmdAsync cmd2
+    msgs |> Expect.equal "20 dispatched" [ 20 ]
+    computed |> Expect.equal "computed only once across both calls" 1
+  }
+
+  testAsync "recomputes on changed input" {
+    let mutable computed = 0
+    let transform x = computed <- computed + 1; x * 2
+    let cmd1 = Cmd.computeWhen "test3" 5 transform id
+    let cmd2 = Cmd.computeWhen "test3" 7 transform id
+    let! _ = TestHarness.runCmdAsync cmd1
+    let! msgs = TestHarness.runCmdAsync cmd2
+    msgs |> Expect.equal "14 dispatched" [ 14 ]
+    computed |> Expect.equal "computed twice" 2
+  }
+]
+
+// ─── P3: Testing.exportShrunkTest + TuiExpect.modelChanged ─────────────────────
+
+let sprint73DevToolsTests = testList "DevTools testing utilities" [
+  testCase "TuiExpect.modelChanged fails when predicate never fires" <| fun () ->
+    let app =
+      TestHarness.init 80 3 {
+        Init = fun () -> 0, NoCmd
+        Update = fun msg _ -> msg, NoCmd
+        View = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+    let app2 = app |> TestHarness.sendMsg 1 |> TestHarness.sendMsg 2
+    // modelChanged should NOT throw when predicate is satisfied
+    TuiExpect.modelChanged "counter reaches 2" (fun m -> m = 2) app2
+
+  testAsync "Testing.exportShrunkTest produces Some path when predicate fires" {
+    let app =
+      TestHarness.init 80 3 {
+        Init = fun () -> 0, NoCmd
+        Update = fun msg _ -> msg, NoCmd
+        View = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+    let msgs = [ 0; 1; 2; 3; 4; 5 ]
+    let predicate (a: TestApp<int, int>) = a.Model >= 3
+    let outputPath = System.IO.Path.GetTempFileName() + ".fsx"
+    let! result = Testing.exportShrunkTest msgs app predicate outputPath (sprintf "%A")
+    result.IsSome |> Expect.isTrue "produced a file"
+    (result.Value = outputPath) |> Expect.isTrue "returned the path"
+    System.IO.File.Exists(outputPath) |> Expect.isTrue "file exists on disk"
+    System.IO.File.Delete(outputPath)
+  }
+
+  testAsync "Testing.exportShrunkTest returns None when predicate never fires" {
+    let app =
+      TestHarness.init 80 3 {
+        Init = fun () -> 0, NoCmd
+        Update = fun msg _ -> msg, NoCmd
+        View = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+    let msgs = [ 0; 1; 2 ]
+    let predicate (a: TestApp<int, int>) = a.Model >= 99
+    let outputPath = System.IO.Path.GetTempFileName() + ".fsx"
+    let! result = Testing.exportShrunkTest msgs app predicate outputPath (sprintf "%A")
+    result |> Expect.equal "none returned" None
+  }
+]
+
+[<Tests>]
+let sprint73Tests =
+  testList "Sprint 73" [
+    sprint73NavTests
+    sprint73LazyTests
+    sprint73CmdComputeTests
+    sprint73DevToolsTests
+  ]

@@ -50,6 +50,7 @@
     <Compile Include="ArenaRender.fs" />
     <Compile Include="Input.fs" />
     <Compile Include="Tea.fs" />
+    <Compile Include="Navigation.fs" />
     <Compile Include="Detect.fs" />
     <Compile Include="Transition.fs" />
     <Compile Include="App.fs" />

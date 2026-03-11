@@ -782,6 +782,34 @@ module El =
         prev <- ValueSome struct(a, b, elem)
         elem
 
+  /// Memoize a 3-argument view function.
+  let lazy3
+    (viewFn: 'a -> 'b -> 'c -> Element)
+    : ('a -> 'b -> 'c -> Element)
+    when 'a : equality and 'b : equality and 'c : equality =
+    let mutable prev: struct('a * 'b * 'c * Element) voption = ValueNone
+    fun a b c ->
+      match prev with
+      | ValueSome struct(oldA, oldB, oldC, oldElem) when oldA = a && oldB = b && oldC = c -> oldElem
+      | _ ->
+        let elem = viewFn a b c
+        prev <- ValueSome struct(a, b, c, elem)
+        elem
+
+  /// Memoize a 4-argument view function.
+  let lazy4
+    (viewFn: 'a -> 'b -> 'c -> 'd -> Element)
+    : ('a -> 'b -> 'c -> 'd -> Element)
+    when 'a : equality and 'b : equality and 'c : equality and 'd : equality =
+    let mutable prev: struct('a * 'b * 'c * 'd * Element) voption = ValueNone
+    fun a b c d ->
+      match prev with
+      | ValueSome struct(oldA, oldB, oldC, oldD, oldElem) when oldA = a && oldB = b && oldC = c && oldD = d -> oldElem
+      | _ ->
+        let elem = viewFn a b c d
+        prev <- ValueSome struct(a, b, c, d, elem)
+        elem
+
   /// Memoize a view function with a custom equality comparer.
   /// Use when `'a` does not support structural equality (e.g., contains functions).
   let lazy'With (comparer: 'a -> 'a -> bool) (viewFn: 'a -> Element) : ('a -> Element) =

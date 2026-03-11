@@ -6,6 +6,9 @@ on:
     paths:
       - 'samples/**'
       - 'docs/tapes/**'
+      - '*.fs'
+      - '*.fsproj'
+      - 'SageTUI.slnx'
 
 jobs:
   record:

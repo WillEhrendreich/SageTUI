@@ -263,7 +263,45 @@ module Cmd =
       do! System.Threading.Tasks.Task.Delay(delayMs, ct) |> Async.AwaitTask
       dispatch msg })
 
-  /// Race a command against a deadline. If the command dispatches before `timeout`
+  // Module-level cache: id → (boxed input, boxed output)
+  let private computeCache =
+    System.Collections.Concurrent.ConcurrentDictionary<string, struct(obj * obj)>()
+
+  /// Derive a value from `input` and dispatch `toMsg result` as a `Cmd`.
+  ///
+  /// When called with the **same `id` and structurally-equal `input`**, the cached
+  /// result is dispatched immediately without re-running `transform` (no async hop).
+  /// When `input` changes, the transformation is re-run on the thread pool via
+  /// `OfCancellableAsync`, so a new call preempts any previous in-flight computation
+  /// sharing the same `id`.
+  ///
+  /// Rules:
+  ///   • `id` must be globally unique across your program (use a module-qualified string).
+  ///   • `transform` should be pure and free of side effects (it may run on a thread-pool thread).
+  ///   • `'input` must support structural equality (`when 'input : equality`).
+  ///
+  /// Example:
+  ///   | FilterChanged text ->
+  ///       model, Cmd.computeWhen "search.filter" text filterItems SearchResultsReady
+  let computeWhen
+    (id: string)
+    (input: 'input)
+    (transform: 'input -> 'output)
+    (toMsg: 'output -> 'msg)
+    : Cmd<'msg>
+    when 'input : equality =
+    match computeCache.TryGetValue(id) with
+    | true, struct(cachedInput, cachedOutput) when (cachedInput :?> 'input) = input ->
+      // Cache hit — dispatch immediately without going async
+      let result = cachedOutput :?> 'output
+      OfAsync(fun dispatch -> async { dispatch (toMsg result) })
+    | _ ->
+      OfCancellableAsync(id, fun _ct dispatch -> async {
+        let result = transform input
+        computeCache.[id] <- struct(box input, box result)
+        dispatch (toMsg result) })
+
+  /// Race a command against a deadline.If the command dispatches before `timeout`
   /// elapses, that message goes through normally. If the timeout fires first,
   /// `onTimeout` is dispatched instead. Exactly one message is dispatched.
   ///
