@@ -450,14 +450,13 @@ type Sub<'msg> =
   | KeySub of (Key * Modifiers -> 'msg option)
   /// Fires for mouse press and release events only (Phase = Pressed or Released).
   /// Does NOT fire for drag/motion events — use DragSub for those.
-  /// When button-event tracking (?1002h) is enabled in a future release, Motion events
-  /// will arrive via DragSub, not MouseSub.
+  /// Motion events (button-event tracking via ?1002h) arrive via DragSub, not MouseSub.
   | MouseSub of (MouseEvent -> 'msg option)
   /// Fires for mouse press events only (Phase = Pressed) at a Keyed element.
   /// The second argument is the key of the innermost Keyed element at the cursor, or None.
   /// Does NOT fire for mouse releases or drag/motion events.
   | ClickSub of (MouseEvent * string option -> 'msg option)
-  /// Internal: fires for mouse drag/motion events when button-event tracking (?1002h) is enabled.
+  /// Internal: fires for mouse drag/motion events (?1002h button-event tracking is active).
   /// Use Sub.fromObservable if you need custom pointer tracking.
   | [<System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)>] DragSub of (MouseEvent -> 'msg option)
   /// Fires when the terminal window gains or loses OS focus (?1004h must be enabled).

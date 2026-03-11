@@ -173,8 +173,14 @@ Raw mode on Linux/macOS uses `tcgetattr`/`tcsetattr` via `DllImport("libc")` in 
 
 ### Known Limitations
 
-- **No mouse event generation** — `MouseSub` and `ClickSub` exist in the Sub DU, and `ArenaRender` builds a hit map, but the `Backend.create` implementation uses `Console.ReadKey` which cannot produce `MouseInput` events. Mouse is wired end-to-end except for the input source.
 - **Transitions are full-screen only** — `App.run` wires transitions, but `Area` is always the full terminal size. Per-element scoped transitions require the layout pass to record each keyed node's area.
+
+### Mouse Support (fully implemented)
+
+Mouse input is fully wired end-to-end:
+- `Detect.fs` `EnterRawMode` writes `?1000h ?1002h ?1006h ?1004h ?2004h` to enable normal button tracking, button-event motion tracking, SGR extended coordinates, focus tracking, and bracketed paste.
+- `Console.In.Read()` feeds a raw char queue via a dedicated reader thread; `AnsiParser.parseEscape` / `parseSgrMouse` parses SGR mouse sequences from that queue.
+- `MouseSub` fires on press/release, `DragSub` fires on motion/drag, `ClickSub` fires on press at a Keyed element (using the hit map built by `ArenaRender`).
 
 ### Confidential: expertPanel/
 
