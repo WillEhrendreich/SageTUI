@@ -224,7 +224,7 @@ module Cmd =
   ///
   /// Example:
   ///   Cmd.withTimeout (TimeSpan.FromSeconds 10.0) (LoadFailed "Request timed out") fetchCmd
-  let withTimeout (timeout: System.TimeSpan) (onTimeout: 'msg) (cmd: Cmd<'msg>) : Cmd<'msg> =
+  let rec withTimeout (timeout: System.TimeSpan) (onTimeout: 'msg) (cmd: Cmd<'msg>) : Cmd<'msg> =
     match cmd with
     | OfAsync run ->
       OfAsync(fun dispatch ->
@@ -266,6 +266,7 @@ module Cmd =
               |> Async.AwaitTask
               |> Async.Ignore
         })
+    | Batch cmds -> Batch(List.map (withTimeout timeout onTimeout) cmds)
     | other -> other
 
   /// Run an `Async<'a>` computation and dispatch the result through a `Result<'a, exn>` mapper.
@@ -338,7 +339,9 @@ module Cmd =
           let dir = appDataDir appName
           IO.Directory.CreateDirectory(dir) |> ignore
           let path = IO.Path.Combine(dir, key + ".bin")
-          do! IO.File.WriteAllBytesAsync(path, data) |> Async.AwaitTask
+          let tmpPath = path + ".tmp"
+          do! IO.File.WriteAllBytesAsync(tmpPath, data) |> Async.AwaitTask
+          IO.File.Move(tmpPath, path, overwrite = true)
           dispatch (onDone ())
         with ex ->
           dispatch (onError ex)
@@ -399,6 +402,29 @@ module Cmd =
     let bind (appName: string) =
       {| save = saveString appName
          load = loadString appName |}
+
+  /// Low-level atomic file I/O helpers, path-based.
+  /// Useful for tests and for users who manage their own file paths.
+  module IO =
+    /// Atomically write `data` to `path`. Writes to `path + ".tmp"` first,
+    /// then renames to `path` with overwrite. If the process crashes during the
+    /// write, the original file (if any) is preserved and no partial content is visible.
+    let saveAtomicBytes (path: string) (data: byte array) : Async<unit> =
+      async {
+        let tmpPath = path + ".tmp"
+        do! System.IO.File.WriteAllBytesAsync(tmpPath, data) |> Async.AwaitTask
+        System.IO.File.Move(tmpPath, path, overwrite = true)
+      }
+
+    /// Load bytes from `path`, returning `None` if the file doesn't exist.
+    let loadBytesOrNone (path: string) : Async<byte array option> =
+      async {
+        match System.IO.File.Exists(path) with
+        | false -> return None
+        | true ->
+          let! data = System.IO.File.ReadAllBytesAsync(path) |> Async.AwaitTask
+          return Some data
+      }
 
 
 /// Available via FrameTimingsSub — subscribe to receive one record per frame.

@@ -11367,3 +11367,196 @@ let sprint71Tests =
     sprint71DeferredViewStringTests
     sprint71ToastOverlayTests
   ]
+
+// ── SPRINT 72 ─────────────────────────────────────────────────────────────────────────────────────
+// P3: Cmd.withTimeout — Batch recursion (correctness bug: timeout silently discarded on Batch input)
+// P6: Cmd.Storage atomic write (.tmp → rename for crash safety)
+// ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+let sprint72WithTimeoutBatchTests =
+  testList "Cmd.withTimeout — Batch and edge cases" [
+
+    // P3 BUG: Currently withTimeout on Batch returns `| other -> other`, silently discarding the timeout.
+    // After fix: Batch is recursed into, each inner async cmd gets its own timeout window.
+    testAsync "withTimeout on Batch containing OfAsync applies timeout to inner cmd" {
+      let mutable msgs : string list = []
+      let dispatch msg = msgs <- msg :: msgs
+      let slowCmd =
+        Cmd.batch [
+          Cmd.ofAsync (fun d ->
+            async {
+              do! Async.Sleep 60_000
+              d "late"
+            })
+        ]
+      let timed = Cmd.withTimeout (System.TimeSpan.FromMilliseconds 30.0) "timed-out" slowCmd
+      match timed with
+      | Batch [ OfAsync run ] ->
+        do! run dispatch
+        msgs |> Expect.equal "timeout msg dispatched from inner cmd" [ "timed-out" ]
+      | _ -> failtest $"expected Batch [OfAsync _], got {timed}"
+    }
+
+    testAsync "withTimeout on Batch fast inner cmd dispatches result not timeout" {
+      let mutable msgs : string list = []
+      let dispatch msg = msgs <- msg :: msgs
+      let fastCmd =
+        Cmd.batch [
+          Cmd.ofAsync (fun d ->
+            async {
+              do! Async.Sleep 5
+              d "result"
+            })
+        ]
+      let timed = Cmd.withTimeout (System.TimeSpan.FromSeconds 5.0) "timed-out" fastCmd
+      match timed with
+      | Batch [ OfAsync run ] ->
+        do! run dispatch
+        msgs |> Expect.equal "inner result dispatched" [ "result" ]
+      | _ -> failtest $"expected Batch [OfAsync _], got {timed}"
+    }
+
+    test "withTimeout on mixed Batch: async gets wrapped, non-async passes through" {
+      let mixedCmd =
+        Cmd.batch [
+          Cmd.delay 100 "delayed-msg"
+          Cmd.ofAsync (fun d -> async { d "async-result" })
+          NoCmd
+        ]
+      let timed = Cmd.withTimeout (System.TimeSpan.FromSeconds 5.0) "timeout" mixedCmd
+      match timed with
+      | Batch [ Delay(100, "delayed-msg"); OfAsync _; NoCmd ] -> ()
+      | _ -> failtest $"unexpected structure: {timed}"
+    }
+
+    test "withTimeout on nested Batch recurses into inner Batch" {
+      let nested =
+        Cmd.batch [ Cmd.batch [ Cmd.ofAsync (fun d -> async { d "inner" }) ] ]
+      let timed = Cmd.withTimeout (System.TimeSpan.FromSeconds 5.0) "timeout" nested
+      match timed with
+      | Batch [ Batch [ OfAsync _ ] ] -> ()
+      | _ -> failtest $"nested Batch should be recursed: {timed}"
+    }
+
+    test "withTimeout on empty Batch returns empty Batch" {
+      let timed = Cmd.withTimeout (System.TimeSpan.FromSeconds 1.0) "timeout" (Cmd.batch [])
+      match timed with
+      | Batch [] -> ()
+      | _ -> failtest "empty Batch should remain empty Batch"
+    }
+
+    testAsync "withTimeout on Batch dispatches exactly one message per inner cmd" {
+      let mutable count = 0
+      let dispatch _ = count <- count + 1
+      let fastCmd =
+        Cmd.batch [
+          Cmd.ofAsync (fun d ->
+            async {
+              do! Async.Sleep 5
+              d "result"
+            })
+        ]
+      let timed = Cmd.withTimeout (System.TimeSpan.FromSeconds 5.0) "timed-out" fastCmd
+      match timed with
+      | Batch [ OfAsync run ] ->
+        do! run dispatch
+        do! Async.Sleep 100
+        count |> Expect.equal "exactly one dispatch per inner cmd" 1
+      | _ -> failtest $"expected Batch [OfAsync _], got {timed}"
+    }
+
+    testAsync "withTimeout on OfCancellableAsync outer CT cancel suppresses timeout dispatch" {
+      let mutable msgs : string list = []
+      let dispatch msg = msgs <- msg :: msgs
+      use cts = new System.Threading.CancellationTokenSource()
+      let slowCmd = Cmd.debounce "x" 60_000 "done"
+      let timed = Cmd.withTimeout (System.TimeSpan.FromSeconds 5.0) "timeout-fired" slowCmd
+      match timed with
+      | OfCancellableAsync(_, run) ->
+        cts.CancelAfter(20)
+        try
+          do! run cts.Token dispatch
+        with :? System.OperationCanceledException -> ()
+        msgs |> Expect.equal "no dispatch when outer CT cancelled" []
+      | _ -> failtest $"expected OfCancellableAsync, got {timed}"
+    }
+  ]
+
+let sprint72StorageAtomicWriteTests =
+  testList "Cmd.Storage — atomic write" [
+    testAsync "Cmd.IO.saveAtomicBytes writes content correctly" {
+      let path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName() + ".bin")
+      try
+        let data = System.Text.Encoding.UTF8.GetBytes("hello world")
+        do! Cmd.IO.saveAtomicBytes path data
+        let! loaded = Cmd.IO.loadBytesOrNone path
+        loaded |> Expect.equal "content matches" (Some data)
+      finally
+        if System.IO.File.Exists(path) then System.IO.File.Delete(path)
+    }
+
+    testAsync "Cmd.IO.saveAtomicBytes leaves no .tmp file after successful write" {
+      let path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName() + ".bin")
+      try
+        do! Cmd.IO.saveAtomicBytes path (System.Text.Encoding.UTF8.GetBytes("atomic"))
+        System.IO.File.Exists(path + ".tmp") |> Expect.isFalse "no .tmp file after write"
+      finally
+        if System.IO.File.Exists(path) then System.IO.File.Delete(path)
+    }
+
+    testAsync "Cmd.IO.saveAtomicBytes overwrites existing file atomically" {
+      let path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName() + ".bin")
+      try
+        do! Cmd.IO.saveAtomicBytes path (System.Text.Encoding.UTF8.GetBytes("first"))
+        do! Cmd.IO.saveAtomicBytes path (System.Text.Encoding.UTF8.GetBytes("second"))
+        let! loaded = Cmd.IO.loadBytesOrNone path
+        loaded
+        |> Option.map (fun (b: byte[]) -> System.Text.Encoding.UTF8.GetString(b))
+        |> Expect.equal "second write wins" (Some "second")
+      finally
+        if System.IO.File.Exists(path) then System.IO.File.Delete(path)
+    }
+
+    testAsync "Cmd.IO.loadBytesOrNone returns None for missing file" {
+      let path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName() + ".bin")
+      let! result = Cmd.IO.loadBytesOrNone path
+      result |> Expect.equal "missing returns None" None
+    }
+
+    testAsync "saveBytes Cmd uses atomic write (no .tmp left behind)" {
+      let appName = "SageTUI_P6_Test_" + System.Guid.NewGuid().ToString("N")
+      let key = "testkey"
+      let dir =
+        if System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) then
+          System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData), appName)
+        elif System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX) then
+          System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), "Library", "Application Support", appName)
+        else
+          let xdg = System.Environment.GetEnvironmentVariable("XDG_DATA_HOME")
+          if System.String.IsNullOrEmpty(xdg) then
+            System.IO.Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), ".local", "share", appName)
+          else
+            System.IO.Path.Combine(xdg, appName)
+      let filePath = System.IO.Path.Combine(dir, key + ".bin")
+      try
+        let mutable dispatched = []
+        let data = System.Text.Encoding.UTF8.GetBytes("stored data")
+        let cmd = Cmd.saveBytes appName key data (fun () -> "ok") (fun ex -> "err: " + ex.Message)
+        match cmd with
+        | OfAsync run -> do! run (fun msg -> dispatched <- msg :: dispatched)
+        | _ -> failtest "saveBytes must return OfAsync"
+        dispatched |> Expect.equal "onDone dispatched" [ "ok" ]
+        System.IO.File.Exists(filePath + ".tmp") |> Expect.isFalse "no .tmp file after saveBytes"
+        let content = System.IO.File.ReadAllBytes(filePath)
+        content |> Expect.equal "file content correct" data
+      finally
+        if System.IO.Directory.Exists(dir) then System.IO.Directory.Delete(dir, true)
+    }
+  ]
+
+[<Tests>]
+let sprint72Tests =
+  testList "Sprint 72" [
+    sprint72WithTimeoutBatchTests
+    sprint72StorageAtomicWriteTests
+  ]
