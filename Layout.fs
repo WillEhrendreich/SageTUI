@@ -22,6 +22,16 @@ type BorderStyle = Light | Heavy | Double | Rounded | Ascii
 
 type Padding = { Top: int; Right: int; Bottom: int; Left: int }
 
+/// A node captured during the layout pass, recording the resolved bounding box
+/// and element metadata. Used by Buffer.applyDebugOverlay to draw a non-perturbing
+/// debug overlay over the rendered output.
+type DebugNode = {
+  Tag: string
+  Bounds: Area
+  Constraint: Constraint option
+  Depth: int
+}
+
 module Padding =
   let zero = { Top = 0; Right = 0; Bottom = 0; Left = 0 }
   let all n = { Top = n; Right = n; Bottom = n; Left = n }

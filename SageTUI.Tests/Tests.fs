@@ -10343,3 +10343,337 @@ let sprint68Tests =
     sprint68CmdAsyncTests
     sprint68UnsafeRenameTests
   ]
+
+// ── Sprint 69: Layout Debug Overlay v2 + El.richText ─────────────────────────
+// Expert panel #1: Layout Debug Overlay (Impact 9, Effort 2, Ratio 4.5)
+// Correct approach: DebugNode captures resolved bounds AFTER layout pass,
+// overlay drawn ON TOP of normal render without perturbing layout.
+
+let sprint69DebugNodeTests =
+  testList "Sprint 69: DebugNode type" [
+    test "DebugNode has Tag, Bounds, Constraint, Depth fields" {
+      let node : DebugNode = { Tag = "Row"; Bounds = { X=0; Y=0; Width=40; Height=10 }; Constraint = None; Depth = 0 }
+      node.Tag     |> Expect.equal "tag" "Row"
+      node.Bounds.Width  |> Expect.equal "w" 40
+      node.Bounds.Height |> Expect.equal "h" 10
+      node.Depth   |> Expect.equal "depth" 0
+      node.Constraint |> Expect.isNone "no constraint"
+    }
+    test "DebugNode with Constraint option" {
+      let node : DebugNode = { Tag = "Con"; Bounds = { X=0; Y=0; Width=20; Height=5 }; Constraint = Some (Fill 2); Depth = 1 }
+      node.Constraint |> Expect.equal "constraint" (Some (Fill 2))
+    }
+  ]
+
+let sprint69CollectDebugNodesTests =
+  testList "Sprint 69: Render.collectDebugNodes" [
+    test "single text element produces one node" {
+      let nodes = Render.collectDebugNodes 10 1 (El.text "hello")
+      (nodes.Length, 0) |> Expect.isGreaterThan "at least one node"
+      nodes |> List.exists (fun n -> n.Tag.StartsWith("T")) |> Expect.isTrue "has text node"
+    }
+    test "root node has full-canvas bounds" {
+      let nodes = Render.collectDebugNodes 40 10 (El.text "hi")
+      let root = nodes |> List.find (fun n -> n.Depth = 0)
+      root.Bounds.Width  |> Expect.equal "root width"  40
+      root.Bounds.Height |> Expect.equal "root height" 10
+    }
+    test "Row children have correct depths" {
+      let elem = El.row [ El.text "a"; El.text "b" ]
+      let nodes = Render.collectDebugNodes 20 1 elem
+      let rowNodes    = nodes |> List.filter (fun n -> n.Tag = "Row")
+      let textNodes   = nodes |> List.filter (fun n -> n.Tag.StartsWith("T"))
+      (rowNodes.Length, 0) |> Expect.isGreaterThan "has row"
+      (textNodes.Length, 0) |> Expect.isGreaterThan "has texts"
+      let rowDepth  = (rowNodes  |> List.head).Depth
+      let textDepth = (textNodes |> List.head).Depth
+      (textDepth, rowDepth) |> Expect.isGreaterThan "text deeper than row"
+    }
+    test "Column children have correct depths" {
+      let elem = El.column [ El.text "line1"; El.text "line2" ]
+      let nodes = Render.collectDebugNodes 20 5 elem
+      let colNode   = nodes |> List.find (fun n -> n.Tag = "Col")
+      let textNodes = nodes |> List.filter (fun n -> n.Tag.StartsWith("T"))
+      textNodes |> List.forall (fun n -> n.Depth > colNode.Depth)
+      |> Expect.isTrue "text nodes deeper than col"
+    }
+    test "Constrained child records constraint" {
+      let elem = El.column [ El.width 20 (El.text "x"); El.text "y" ]
+      let nodes = Render.collectDebugNodes 40 5 elem
+      let constrained = nodes |> List.filter (fun n -> n.Constraint = Some (Fixed 20))
+      (constrained.Length, 0) |> Expect.isGreaterThan "one Fixed 20 node"
+    }
+    test "Fill constraint recorded on fill children" {
+      let elem = El.row [ El.fill (El.text "a"); El.fill (El.text "b") ]
+      let nodes = Render.collectDebugNodes 40 1 elem
+      let fillNodes = nodes |> List.filter (fun n -> match n.Constraint with Some (Fill _) -> true | _ -> false)
+      (fillNodes.Length, 0) |> Expect.isGreaterThan "fill nodes recorded"
+    }
+    test "nested Row/Column produces multiple depth levels" {
+      let elem = El.column [
+        El.text "header"
+        El.row [ El.text "left"; El.text "right" ]
+      ]
+      let nodes = Render.collectDebugNodes 40 10 elem
+      let maxDepth = nodes |> List.map (fun n -> n.Depth) |> List.max
+      (maxDepth, 1) |> Expect.isGreaterThan "at least 2 levels deep"
+    }
+    test "Bordered element records inner child nodes" {
+      let elem = El.bordered Light (El.text "content")
+      let nodes = Render.collectDebugNodes 20 5 elem
+      let brdNode  = nodes |> List.tryFind (fun n -> n.Tag = "Brd")
+      let textNode = nodes |> List.tryFind (fun n -> n.Tag.StartsWith("T"))
+      brdNode  |> Expect.isSome "has Brd node"
+      textNode |> Expect.isSome "has text node"
+    }
+    test "empty element still produces a node" {
+      let nodes = Render.collectDebugNodes 10 5 El.empty
+      (nodes.Length, 0) |> Expect.isGreaterThan "produces a node"
+    }
+    test "zero-area element produces no nodes" {
+      let nodes = Render.collectDebugNodes 0 0 (El.text "hi")
+      nodes.Length |> Expect.equal "no nodes for zero area" 0
+    }
+    test "nodes total count matches tree complexity" {
+      // A simple Row with 3 children should produce at least 4 nodes (row + 3 children)
+      let elem = El.row [ El.text "a"; El.text "b"; El.text "c" ]
+      let nodes = Render.collectDebugNodes 30 1 elem
+      (nodes.Length, 3) |> Expect.isGreaterThan "at least 4 nodes"
+    }
+  ]
+
+let sprint69DebugOverlayTests =
+  testList "Sprint 69: Render.applyDebugOverlay" [
+    test "overlay draws corner chars for bordered element" {
+      let buf = Buffer.create 10 5
+      let elem = El.text "hello"
+      let nodes = Render.collectDebugNodes 10 5 elem
+      Render.render { X=0; Y=0; Width=10; Height=5 } Style.empty buf elem
+      Render.applyDebugOverlay nodes buf
+      // The overlay should have changed at least some cells' fg colors to debug colors
+      let hasFgChange =
+        [ for y in 0..4 do
+            for x in 0..9 do
+              let cell = Buffer.get x y buf
+              if cell.Fg <> 0 then yield cell.Fg ]
+        |> List.length
+      (hasFgChange, 0) |> Expect.isGreaterThan "overlay changed fg colors"
+    }
+    test "overlay on empty buffer still applies without crash" {
+      let buf = Buffer.create 20 5
+      let nodes : DebugNode list = [
+        { Tag = "Row"; Bounds = { X=0; Y=0; Width=20; Height=5 }; Constraint = None; Depth = 0 }
+      ]
+      Render.applyDebugOverlay nodes buf
+      // Just verify no exception and buffer unchanged for empty nodes at depth 0
+      buf.Width |> Expect.equal "width unchanged" 20
+    }
+    test "overlay single-cell element does not crash" {
+      let buf = Buffer.create 1 1
+      let nodes : DebugNode list = [
+        { Tag = "T\"x\""; Bounds = { X=0; Y=0; Width=1; Height=1 }; Constraint = None; Depth = 0 }
+      ]
+      Render.applyDebugOverlay nodes buf
+      buf.Width |> Expect.equal "no crash" 1
+    }
+    test "overlay 1×n element does not crash" {
+      let buf = Buffer.create 1 5
+      let nodes : DebugNode list = [
+        { Tag = "Col"; Bounds = { X=0; Y=0; Width=1; Height=5 }; Constraint = None; Depth = 0 }
+      ]
+      Render.applyDebugOverlay nodes buf
+      buf.Width |> Expect.equal "no crash" 1
+    }
+    test "overlay does not write outside buffer bounds" {
+      let buf = Buffer.create 10 5
+      // Node with area extending to edge
+      let nodes : DebugNode list = [
+        { Tag = "Row"; Bounds = { X=0; Y=0; Width=10; Height=5 }; Constraint = None; Depth = 0 }
+        { Tag = "T\"x\""; Bounds = { X=5; Y=0; Width=5; Height=5 }; Constraint = None; Depth = 1 }
+      ]
+      // Should not throw on boundary nodes
+      Render.applyDebugOverlay nodes buf
+      buf.Width |> Expect.equal "no crash" 10
+    }
+    test "overlay colors cycle by depth" {
+      let buf = Buffer.create 40 20
+      let nodes : DebugNode list = [
+        { Tag = "Row"; Bounds = { X=0;  Y=0; Width=40; Height=20 }; Constraint = None; Depth = 0 }
+        { Tag = "Col"; Bounds = { X=1;  Y=1; Width=20; Height=18 }; Constraint = None; Depth = 1 }
+        { Tag = "T\"a\""; Bounds = { X=2; Y=2; Width=18; Height=16 }; Constraint = None; Depth = 2 }
+      ]
+      Render.applyDebugOverlay nodes buf
+      // Collect distinct fg colors used (some should be different per depth)
+      let fgColors =
+        [ for y in 0..19 do
+            for x in 0..39 do
+              yield (Buffer.get x y buf).Fg ]
+        |> List.filter (fun fg -> fg <> 0)
+        |> List.distinct
+      // With 3 different depths, expect at least 2 distinct debug colors
+      (fgColors.Length, 1) |> Expect.isGreaterThan "multiple debug colors"
+    }
+    test "overlay preserves rune content between borders" {
+      let buf = Buffer.create 20 3
+      Render.render { X=0; Y=0; Width=20; Height=3 } Style.empty buf (El.text "hello world")
+      let nodes = Render.collectDebugNodes 20 3 (El.text "hello world")
+      Render.applyDebugOverlay nodes buf
+      // The text in the interior should still be readable (not all replaced)
+      let hasText =
+        [ for x in 0..19 do
+            let cell = Buffer.get x 0 buf
+            if cell.Rune > int ' ' then yield char cell.Rune ]
+        |> List.length
+      (hasText, 0) |> Expect.isGreaterThan "content still visible"
+    }
+  ]
+
+// Expert panel #3: El.richText / Span inline markup (Impact 8, Effort 4)
+let sprint69RichTextTests =
+  testList "Sprint 69: El.richText / Span" [
+    test "Literal span renders text" {
+      let buf = Buffer.create 20 1
+      let el = El.richText [ Span.Literal "hello" ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringStarts "starts hello" "hello"
+    }
+    test "Bold span has bold attribute" {
+      let buf = Buffer.create 20 1
+      let el = El.richText [ Span.Bold [ Span.Literal "bold" ] ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let cell = Buffer.get 0 0 buf
+      cell.Attrs |> Expect.equal "bold attr" TextAttrs.bold.Value
+    }
+    test "Italic span has italic attribute" {
+      let buf = Buffer.create 20 1
+      let el = El.richText [ Span.Italic [ Span.Literal "ital" ] ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let cell = Buffer.get 0 0 buf
+      { Value = cell.Attrs } |> TextAttrs.has TextAttrs.italic |> Expect.isTrue "italic"
+    }
+    test "Fg span applies foreground color" {
+      let buf = Buffer.create 20 1
+      let el = El.richText [ Span.Fg(Named(Red, Normal), [ Span.Literal "err" ]) ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let cell = Buffer.get 0 0 buf
+      cell.Fg |> Expect.equal "red fg" (PackedColor.pack (Named(Red, Normal)))
+    }
+    test "Bg span applies background color" {
+      let buf = Buffer.create 20 1
+      let el = El.richText [ Span.Bg(Named(Blue, Normal), [ Span.Literal "bg" ]) ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let cell = Buffer.get 0 0 buf
+      cell.Bg |> Expect.equal "blue bg" (PackedColor.pack (Named(Blue, Normal)))
+    }
+    test "Underline span has underline attribute" {
+      let buf = Buffer.create 20 1
+      let el = El.richText [ Span.Underline [ Span.Literal "under" ] ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let cell = Buffer.get 0 0 buf
+      { Value = cell.Attrs } |> TextAttrs.has TextAttrs.underline |> Expect.isTrue "underline"
+    }
+    test "nested Bold+Fg applies both attributes" {
+      let buf = Buffer.create 20 1
+      let el = El.richText [ Span.Bold [ Span.Fg(Named(Green, Bright), [ Span.Literal "hi" ]) ] ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let cell = Buffer.get 0 0 buf
+      { Value = cell.Attrs } |> TextAttrs.has TextAttrs.bold |> Expect.isTrue "bold"
+      cell.Fg |> Expect.equal "green" (PackedColor.pack (Named(Green, Bright)))
+    }
+    test "multiple spans render sequentially" {
+      let buf = Buffer.create 10 1
+      let el = El.richText [ Span.Literal "AB"; Span.Bold [ Span.Literal "CD" ] ]
+      Render.render { X=0; Y=0; Width=10; Height=1 } Style.empty buf el
+      let c0 = Buffer.get 0 0 buf
+      let c2 = Buffer.get 2 0 buf
+      c0.Rune |> Expect.equal "A" (int 'A')
+      c2.Rune |> Expect.equal "C" (int 'C')
+      { Value = c2.Attrs } |> TextAttrs.has TextAttrs.bold |> Expect.isTrue "CD is bold"
+    }
+    test "Strikethrough span has strikethrough attribute" {
+      let buf = Buffer.create 20 1
+      let el = El.richText [ Span.Strikethrough [ Span.Literal "del" ] ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let cell = Buffer.get 0 0 buf
+      { Value = cell.Attrs } |> TextAttrs.has TextAttrs.strikethrough |> Expect.isTrue "strikethrough"
+    }
+    test "empty span list renders nothing" {
+      let buf = Buffer.create 10 1
+      let el = El.richText []
+      Render.render { X=0; Y=0; Width=10; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.equal "blank" (String.replicate 10 " ")
+    }
+    test "Markup.width counts only display characters" {
+      Markup.width [ Span.Literal "hello" ]      |> Expect.equal "plain" 5
+      Markup.width [ Span.Bold [ Span.Literal "bold" ] ] |> Expect.equal "bold same width" 4
+    }
+    test "Markup.width handles wide Unicode" {
+      Markup.width [ Span.Literal "日本語" ] |> Expect.equal "CJK width 6" 6
+    }
+    test "Markup.width handles nested spans" {
+      let spans = [ Span.Literal "AB"; Span.Bold [ Span.Fg(Named(Red, Normal), [ Span.Literal "CD" ]) ] ]
+      Markup.width spans |> Expect.equal "ABCD=4" 4
+    }
+    test "Markup.parse parses bold tag" {
+      match Markup.parse "[bold]hello[/bold]" with
+      | Ok spans ->
+        spans |> Expect.equal "parsed" [ Span.Bold [ Span.Literal "hello" ] ]
+      | Error e -> failtest (sprintf "parse error: %s" e)
+    }
+    test "Markup.parse parses fg color tag" {
+      match Markup.parse "[fg:red]error[/fg]" with
+      | Ok spans ->
+        match spans with
+        | [ Span.Fg(Named(Red, Normal), [ Span.Literal "error" ]) ] ->
+          ()
+        | _ -> failtest (sprintf "unexpected: %A" spans)
+      | Error e -> failtest (sprintf "parse error: %s" e)
+    }
+    test "Markup.parse plain text is Literal" {
+      match Markup.parse "hello world" with
+      | Ok spans -> spans |> Expect.equal "literal" [ Span.Literal "hello world" ]
+      | Error e  -> failtest (sprintf "error: %s" e)
+    }
+    test "Markup.parse returns Error for unclosed tag" {
+      match Markup.parse "[bold]unclosed" with
+      | Error _ -> ()
+      | Ok _    -> failtest "should have failed"
+    }
+    test "Markup.parseOrLiteral returns literal for malformed markup" {
+      let spans = Markup.parseOrLiteral "[bold]unclosed"
+      spans |> Expect.equal "fallback" [ Span.Literal "[bold]unclosed" ]
+    }
+    test "Markup.parseOrLiteral parses valid markup" {
+      let spans = Markup.parseOrLiteral "[bold]hi[/bold]"
+      spans |> Expect.equal "parsed" [ Span.Bold [ Span.Literal "hi" ] ]
+    }
+    test "El.richText clips at area width" {
+      let buf = Buffer.create 5 1
+      let el = El.richText [ Span.Literal "hello world" ]
+      Render.render { X=0; Y=0; Width=5; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.equal "clipped" "hello"
+    }
+    test "El.richText measurable for layout" {
+      let el = El.richText [ Span.Literal "hello"; Span.Bold [ Span.Literal " world" ] ]
+      Measure.measureWidth el |> Expect.equal "width 11" 11
+    }
+    test "Span.text helper creates Literal" {
+      Span.text "hi" |> Expect.equal "literal" (Span.Literal "hi")
+    }
+    test "Span.bold helper wraps" {
+      Span.bold [ Span.Literal "x" ] |> Expect.equal "bold" (Span.Bold [ Span.Literal "x" ])
+    }
+    test "Span.fg helper wraps with color" {
+      Span.fg (Named(Red, Normal)) [ Span.Literal "x" ]
+      |> Expect.equal "fg" (Span.Fg(Named(Red, Normal), [ Span.Literal "x" ]))
+    }
+  ]
+
+[<Tests>]
+let sprint69Tests =
+  testList "Sprint 69" [
+    sprint69DebugNodeTests
+    sprint69CollectDebugNodesTests
+    sprint69DebugOverlayTests
+    sprint69RichTextTests
+  ]

@@ -93,6 +93,150 @@ type GridColumns =
   /// The last value repeats if the list is shorter than cols.
   | WeightedWidths of int list
 
+/// Inline styled text span for use with El.richText.
+/// Spans compose recursively — e.g. Bold [ Fg(Red, [ Literal "error" ]) ] renders bold red text.
+type Span =
+  | Literal      of string
+  | Bold         of Span list
+  | Italic       of Span list
+  | Underline    of Span list
+  | Strikethrough of Span list
+  | Fg           of Color * Span list
+  | Bg           of Color * Span list
+  /// OSC 8 hyperlink. Falls back to underlined text on terminals that do not support it.
+  | Link         of href: string * Span list
+
+/// Helper constructors for Span values.
+module Span =
+  let text s          = Literal s
+  let bold children   = Bold children
+  let italic children = Italic children
+  let underline children = Underline children
+  let strikethrough children = Strikethrough children
+  let fg color children = Fg(color, children)
+  let bg color children = Bg(color, children)
+  let link href children = Link(href, children)
+
+/// Lightweight markup parser for Span values.
+/// Supported tags: [bold][/bold], [italic][/italic], [underline][/underline],
+/// [strikethrough][/strikethrough], [fg:colorname][/fg], [bg:colorname][/bg].
+/// Color names: black, red, green, yellow, blue, magenta, cyan, white
+/// (append "bright" for bright variants, e.g. "brightred").
+module Markup =
+  open System.Text.RegularExpressions
+
+  let private parseColor (name: string) : Color option =
+    match name.Trim().ToLowerInvariant() with
+    | "black"        -> Some (Named(Black,   Normal))
+    | "red"          -> Some (Named(Red,     Normal))
+    | "green"        -> Some (Named(Green,   Normal))
+    | "yellow"       -> Some (Named(Yellow,  Normal))
+    | "blue"         -> Some (Named(Blue,    Normal))
+    | "magenta"      -> Some (Named(Magenta, Normal))
+    | "cyan"         -> Some (Named(Cyan,    Normal))
+    | "white"        -> Some (Named(White,   Normal))
+    | "brightblack"  -> Some (Named(Black,   Bright))
+    | "brightred"    -> Some (Named(Red,     Bright))
+    | "brightgreen"  -> Some (Named(Green,   Bright))
+    | "brightyellow" -> Some (Named(Yellow,  Bright))
+    | "brightblue"   -> Some (Named(Blue,    Bright))
+    | "brightmagenta"-> Some (Named(Magenta, Bright))
+    | "brightcyan"   -> Some (Named(Cyan,    Bright))
+    | "brightwhite"  -> Some (Named(White,   Bright))
+    | _ -> None
+
+  // Token discriminated union for the markup parser
+  [<Struct>]
+  type private Token = Text of string | Open of string | Close of string
+
+  let private tokenize (input: string) : Token list =
+    let tagPattern = Regex(@"\[(/?)([^\]]+)\]")
+    let mutable pos = 0
+    let tokens = System.Collections.Generic.List<Token>()
+    for m in tagPattern.Matches(input) do
+      if m.Index > pos then
+        tokens.Add(Text input[pos..m.Index - 1])
+      let closing = m.Groups[1].Value = "/"
+      let tag = m.Groups[2].Value
+      tokens.Add(if closing then Close tag else Open tag)
+      pos <- m.Index + m.Length
+    if pos < input.Length then
+      tokens.Add(Text input[pos..])
+    tokens |> Seq.toList
+
+  let private buildSpans (tokens: Token list) : Result<Span list, string> =
+    // Stack-based parser
+    let stack = System.Collections.Generic.Stack<string * System.Collections.Generic.List<Span>>()
+    let root  = System.Collections.Generic.List<Span>()
+    let mutable current = root
+    let mutable error: string option = None
+
+    let push tag =
+      stack.Push(tag, current)
+      current <- System.Collections.Generic.List<Span>()
+
+    let pop expected =
+      if stack.Count = 0 then
+        error <- Some (sprintf "unexpected closing tag [/%s]" expected)
+      else
+        let (openTag, parent) = stack.Pop()
+        let children = current |> Seq.toList
+        let span =
+          match openTag.ToLowerInvariant() with
+          | "bold"          -> Ok (Bold children)
+          | "italic"        -> Ok (Italic children)
+          | "underline"     -> Ok (Underline children)
+          | "strikethrough" -> Ok (Strikethrough children)
+          | s when s.StartsWith("fg:") ->
+            match parseColor (s[3..]) with
+            | Some c -> Ok (Fg(c, children))
+            | None   -> Error (sprintf "unknown color '%s'" s[3..])
+          | s when s.StartsWith("bg:") ->
+            match parseColor (s[3..]) with
+            | Some c -> Ok (Bg(c, children))
+            | None   -> Error (sprintf "unknown color '%s'" s[3..])
+          | s when s.StartsWith("link:") -> Ok (Link(s[5..], children))
+          | s -> Error (sprintf "unknown tag '[%s]'" s)
+        match span with
+        | Ok s  -> parent.Add(s); current <- parent
+        | Error e -> error <- Some e; current <- parent
+
+    for token in tokens do
+      match error with
+      | Some _ -> ()
+      | None ->
+        match token with
+        | Text s -> current.Add(Literal s)
+        | Open tag -> push tag
+        | Close tag -> pop tag
+
+    match error with
+    | Some e -> Error e
+    | None ->
+      match stack.Count with
+      | 0 -> Ok (root |> Seq.toList)
+      | _ -> Error (sprintf "unclosed tag '[%s]'" (fst (stack.Peek())))
+
+  /// Parse a markup string into a Span list.
+  /// Returns Error if any tag is malformed or unclosed.
+  let parse (input: string) : Result<Span list, string> =
+    tokenize input |> buildSpans
+
+  /// Parse a markup string. Falls back to a single Literal span if parsing fails.
+  let parseOrLiteral (input: string) : Span list =
+    match parse input with
+    | Ok spans -> spans
+    | Error _  -> [ Literal input ]
+
+  /// Compute the total display-column width of a span list (ignoring ANSI/markup overhead).
+  let rec width (spans: Span list) : int =
+    spans |> List.sumBy (fun span ->
+      match span with
+      | Literal s -> s |> Seq.sumBy (fun c -> RuneWidth.getColumnWidth (System.Text.Rune c))
+      | Bold children | Italic children | Underline children
+      | Strikethrough children | Fg(_, children) | Bg(_, children)
+      | Link(_, children) -> width children)
+
 /// Element constructors and combinators. All functions return Element values.
 module El =
   /// An empty element that renders nothing.
@@ -681,6 +825,52 @@ module El =
         label (sprintf "Scroll:%d" off) (Scroll(off, dbg (depth + 1) child))
       | Filled _ -> label "Filled" elem
     dbg 0 elem
+
+  /// Render a list of Span values as an inline Row of styled Text elements.
+  ///
+  /// Each span run becomes a `Constrained(Fixed n, Text(...))` cell so that the
+  /// Row allocates exactly the display-column width for each run.  Long lines do
+  /// not wrap; the caller should constrain the outer element to the desired width.
+  ///
+  /// Example:
+  ///   El.richText [
+  ///     Span.fg Color.red [ Span.bold [ Span.text "ERROR" ] ]
+  ///     Span.text " file not found"
+  ///   ]
+  let richText (spans: Span list) : Element =
+    let rec spanToElements (style: Style) (span: Span) : Element list =
+      match span with
+      | Literal s ->
+        let w = s |> Seq.sumBy (fun c -> RuneWidth.getColumnWidth (System.Text.Rune c))
+        [ Constrained(Fixed w, Text(s, style)) ]
+      | Bold children ->
+        let s = { style with Attrs = { Value = style.Attrs.Value ||| TextAttrs.bold.Value } }
+        children |> List.collect (spanToElements s)
+      | Italic children ->
+        let s = { style with Attrs = { Value = style.Attrs.Value ||| TextAttrs.italic.Value } }
+        children |> List.collect (spanToElements s)
+      | Underline children ->
+        let s = { style with Attrs = { Value = style.Attrs.Value ||| TextAttrs.underline.Value } }
+        children |> List.collect (spanToElements s)
+      | Strikethrough children ->
+        let s = { style with Attrs = { Value = style.Attrs.Value ||| TextAttrs.strikethrough.Value } }
+        children |> List.collect (spanToElements s)
+      | Fg(color, children) ->
+        let s = { style with Fg = Some color }
+        children |> List.collect (spanToElements s)
+      | Bg(color, children) ->
+        let s = { style with Bg = Some color }
+        children |> List.collect (spanToElements s)
+      | Link(_, children) ->
+        let s = { style with Attrs = { Value = style.Attrs.Value ||| TextAttrs.underline.Value } }
+        children |> List.collect (spanToElements s)
+
+    let baseStyle = { Fg = None; Bg = None; Attrs = TextAttrs.none }
+    let cells = spans |> List.collect (spanToElements baseStyle)
+    match cells with
+    | []  -> Empty
+    | [c] -> c
+    | _   -> Row cells
 
   /// Lay children out in a grid of `cols` columns.
   ///
