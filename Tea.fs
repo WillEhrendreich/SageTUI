@@ -215,6 +215,59 @@ module Cmd =
       do! System.Threading.Tasks.Task.Delay(delayMs, ct) |> Async.AwaitTask
       dispatch msg })
 
+  /// Race a command against a deadline. If the command dispatches before `timeout`
+  /// elapses, that message goes through normally. If the timeout fires first,
+  /// `onTimeout` is dispatched instead. Exactly one message is dispatched.
+  ///
+  /// Works on `OfAsync` and `OfCancellableAsync` commands. Other command types
+  /// (NoCmd, Delay, Quit, etc.) pass through unchanged.
+  ///
+  /// Example:
+  ///   Cmd.withTimeout (TimeSpan.FromSeconds 10.0) (LoadFailed "Request timed out") fetchCmd
+  let withTimeout (timeout: System.TimeSpan) (onTimeout: 'msg) (cmd: Cmd<'msg>) : Cmd<'msg> =
+    match cmd with
+    | OfAsync run ->
+      OfAsync(fun dispatch ->
+        async {
+          let mutable fired = 0
+          let once (msg: 'msg) =
+            if System.Threading.Interlocked.CompareExchange(&fired, 1, 0) = 0 then
+              dispatch msg
+          let workTask : System.Threading.Tasks.Task =
+            Async.StartAsTask(run once) :> System.Threading.Tasks.Task
+          let timeoutTask : System.Threading.Tasks.Task =
+            System.Threading.Tasks.Task.Delay(timeout)
+              .ContinueWith(System.Action<System.Threading.Tasks.Task>(fun _ -> once onTimeout))
+            :> System.Threading.Tasks.Task
+          do! System.Threading.Tasks.Task.WhenAny(workTask, timeoutTask)
+              |> Async.AwaitTask
+              |> Async.Ignore
+        })
+    | OfCancellableAsync(id, run) ->
+      OfCancellableAsync(id, fun ct dispatch ->
+        async {
+          use innerCts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct)
+          let mutable fired = 0
+          let once (msg: 'msg) =
+            if System.Threading.Interlocked.CompareExchange(&fired, 1, 0) = 0 then
+              innerCts.Cancel()
+              dispatch msg
+          let workAsync = async {
+            try do! run innerCts.Token once
+            with :? System.OperationCanceledException -> () }
+          let workTask : System.Threading.Tasks.Task =
+            Async.StartAsTask(workAsync, cancellationToken = ct) :> System.Threading.Tasks.Task
+          let timeoutTask : System.Threading.Tasks.Task =
+            System.Threading.Tasks.Task.Delay(timeout, ct)
+              .ContinueWith(System.Action<System.Threading.Tasks.Task>(fun _ ->
+                if not ct.IsCancellationRequested then once onTimeout))
+            :> System.Threading.Tasks.Task
+          do! System.Threading.Tasks.Task.WhenAny(workTask, timeoutTask)
+              |> Async.AwaitTask
+              |> Async.Ignore
+        })
+    | other -> other
+
   /// Run an `Async<'a>` computation and dispatch the result through a `Result<'a, exn>` mapper.
   /// If the async throws, the exception is wrapped in `Error` and passed to `toMsg`.
   /// This gives a single-callback API: the caller decides what both success and failure produce.
@@ -467,6 +520,23 @@ module Sub =
   /// Example:
   ///   Sub.frameTimings GotTimings
   let frameTimings (toMsg: FrameTimings -> 'msg) : Sub<'msg> = FrameTimingsSub toMsg
+
+  /// Create a timer subscription that fires `tick ()` every `interval`.
+  /// Convenience wrapper around `TimerSub` — avoids exposing the DU case at call sites.
+  ///
+  /// For namespacing in multi-component apps, use `Sub.prefix`:
+  ///   Sub.interval "clock" (TimeSpan.FromSeconds 1.0) (fun () -> Tick)
+  ///   |> Sub.prefix "header"
+  let interval (id: string) (interval: TimeSpan) (tick: unit -> 'msg) : Sub<'msg> =
+    TimerSub(id, interval, tick)
+
+  /// Create a timer subscription that fires `tick ()` every `intervalMs` milliseconds.
+  /// Convenience overload of `Sub.interval` accepting an integer millisecond count.
+  ///
+  /// Example:
+  ///   Sub.intervalMs "frame" 16 (fun () -> Tick)  // ~60 fps
+  let intervalMs (id: string) (intervalMs: int) (tick: unit -> 'msg) : Sub<'msg> =
+    TimerSub(id, System.TimeSpan.FromMilliseconds(float intervalMs), tick)
 
   /// Prepend a namespace prefix to an identifier-bearing subscription.
   /// TimerSub and CustomSub carry string IDs used for reconciliation; two components
@@ -814,6 +884,30 @@ module Program =
   let withOnError (handler: exn -> 'msg option) (program: Program<'model, 'msg>) : Program<'model, 'msg> =
     { program with OnError = RecoverWith handler }
 
+  /// Install an observer that is called after every `Update` invocation.
+  /// `interceptor msg oldModel newModel` receives the message that triggered the update,
+  /// the model before the update, and the model after.
+  ///
+  /// Use cases: logging, debugging, time-travel/undo snapshots, hot-reload observation.
+  /// The interceptor runs synchronously in the update path — keep it fast (no blocking I/O).
+  ///
+  /// Multiple interceptors can be chained: each call to `withUpdateInterceptor` wraps
+  /// the previous Update function, so both interceptors fire (inner first, then outer).
+  ///
+  /// Example:
+  ///   let program =
+  ///     { ... }
+  ///     |> Program.withUpdateInterceptor (fun msg old new' ->
+  ///         printfn "[Update] %A: %A → %A" msg old new')
+  let withUpdateInterceptor
+    (interceptor: 'msg -> 'model -> 'model -> unit)
+    (program: Program<'model, 'msg>) : Program<'model, 'msg> =
+    { program with
+        Update = fun msg model ->
+          let newModel, cmd = program.Update msg model
+          interceptor msg model newModel
+          newModel, cmd }
+
   /// Combine two independent programs into a single program whose model is a tuple and
   /// whose message type is `Choice<'msg1,'msg2>`.
   ///
@@ -907,6 +1001,19 @@ module RemoteData =
     | Loaded a -> f a
     | Failed ex -> Failed ex
 
+  /// Transform the exception stored in a `Failed` case using a mapping function.
+  /// The mapped string is wrapped in a new `exn` so the `Failed` shape is preserved.
+  /// All other cases pass through unchanged.
+  ///
+  /// Useful for humanizing raw exception messages before passing to a view:
+  ///   model.Data
+  ///   |> RemoteData.mapError (fun e -> sprintf "Failed to load: %s" e.Message)
+  ///   |> Deferred.viewString spinner El.text renderData
+  let mapError (f: exn -> string) (rd: RemoteData<'a>) : RemoteData<'a> =
+    match rd with
+    | Failed ex -> Failed(exn(f ex))
+    | other -> other
+
 /// Helpers for the common async data-loading pattern using RemoteData.
 ///
 /// Usage:
@@ -952,6 +1059,18 @@ module Deferred =
     match rd with
     | Idle | Loading -> loading
     | Failed ex -> error ex
+    | Loaded a -> render a
+
+  /// Like `Deferred.view` but the error handler receives `ex.Message` (a string)
+  /// instead of the raw exception. Eliminates the common boilerplate of writing
+  /// `(fun ex -> El.text ex.Message)` at every call site.
+  ///
+  /// Example:
+  ///   Deferred.viewString spinner (fun msg -> El.text ("Error: " + msg)) renderPosts model.Posts
+  let viewString (loading: Element) (error: string -> Element) (render: 'a -> Element) (rd: RemoteData<'a>) : Element =
+    match rd with
+    | Idle | Loading -> loading
+    | Failed ex -> error ex.Message
     | Loaded a -> render a
 
 // ---------------------------------------------------------------------------

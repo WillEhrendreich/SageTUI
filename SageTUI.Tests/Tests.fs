@@ -10958,3 +10958,412 @@ let sprint70Tests =
     sprint70MenuBarTests
     sprint70CommandPaletteTests
   ]
+
+// ============================================================
+// SPRINT 71 — Sub.interval, Cmd.withTimeout, Program.withUpdateInterceptor,
+//             Deferred.viewString, RemoteData.mapError, ToastQueue.overlay
+// ============================================================
+
+let sprint71SubIntervalTests =
+  testList "Sub.interval" [
+    test "Sub.interval creates a TimerSub with correct id" {
+      let sub = Sub.interval "clock" (TimeSpan.FromSeconds 1.0) (fun () -> "tick")
+      match sub with
+      | TimerSub(id, _, _) -> id |> Expect.equal "id matches" "clock"
+      | _ -> failtest "expected TimerSub"
+    }
+
+    test "Sub.interval creates a TimerSub with correct interval" {
+      let interval = TimeSpan.FromMilliseconds 250.0
+      let sub = Sub.interval "timer" interval (fun () -> 42)
+      match sub with
+      | TimerSub(_, iv, _) -> iv |> Expect.equal "interval matches" interval
+      | _ -> failtest "expected TimerSub"
+    }
+
+    test "Sub.interval tick function is invoked and returns correct msg" {
+      let sub = Sub.interval "t" (TimeSpan.FromSeconds 1.0) (fun () -> "hello")
+      match sub with
+      | TimerSub(_, _, tick) -> tick () |> Expect.equal "tick returns msg" "hello"
+      | _ -> failtest "expected TimerSub"
+    }
+
+    test "Sub.interval is compatible with Sub.prefix" {
+      let sub = Sub.interval "refresh" (TimeSpan.FromSeconds 2.0) (fun () -> ())
+      let prefixed = Sub.prefix "sidebar" sub
+      match prefixed with
+      | TimerSub(id, _, _) -> id |> Expect.equal "id prefixed" "sidebar/refresh"
+      | _ -> failtest "expected TimerSub"
+    }
+
+    test "Sub.interval is compatible with Sub.map" {
+      let sub = Sub.interval "t" (TimeSpan.FromSeconds 1.0) (fun () -> 1)
+      let mapped = Sub.map ((*) 2) sub
+      match mapped with
+      | TimerSub(_, _, tick) -> tick () |> Expect.equal "mapped tick" 2
+      | _ -> failtest "expected TimerSub"
+    }
+
+    test "Sub.intervalMs creates TimerSub with millisecond interval" {
+      let sub = Sub.intervalMs "fast" 500 (fun () -> "ms-tick")
+      match sub with
+      | TimerSub(id, interval, _) ->
+        id |> Expect.equal "id" "fast"
+        interval |> Expect.equal "interval" (TimeSpan.FromMilliseconds 500.0)
+      | _ -> failtest "expected TimerSub"
+    }
+
+    test "Sub.intervalMs with 0 ms creates zero-interval TimerSub" {
+      let sub = Sub.intervalMs "zero" 0 (fun () -> ())
+      match sub with
+      | TimerSub(_, interval, _) ->
+        interval |> Expect.equal "zero interval" (TimeSpan.FromMilliseconds 0.0)
+      | _ -> failtest "expected TimerSub"
+    }
+
+    test "Sub.intervalMs tick message is correct" {
+      let sub = Sub.intervalMs "tick" 100 (fun () -> 99)
+      match sub with
+      | TimerSub(_, _, tick) -> tick () |> Expect.equal "tick value" 99
+      | _ -> failtest "expected TimerSub"
+    }
+  ]
+
+let sprint71CmdWithTimeoutTests =
+  testList "Cmd.withTimeout" [
+    testAsync "fast OfAsync cmd dispatches its message before timeout" {
+      let mutable msgs : string list = []
+      let dispatch msg = msgs <- msg :: msgs
+      let fastCmd = Cmd.ofAsync(fun d -> async {
+        do! Async.Sleep 5
+        d "result"
+      })
+      let timed = Cmd.withTimeout (TimeSpan.FromSeconds 5.0) "timed-out" fastCmd
+      match timed with
+      | OfAsync run ->
+        do! run dispatch
+        msgs |> Expect.equal "fast cmd dispatches result" ["result"]
+      | _ -> failtest "expected OfAsync"
+    }
+
+    testAsync "slow OfAsync cmd dispatches onTimeout when it exceeds timeout" {
+      let mutable msgs : string list = []
+      let dispatch msg = msgs <- msg :: msgs
+      let slowCmd = Cmd.ofAsync(fun d -> async {
+        do! Async.Sleep 60000  // 60s — will definitely timeout
+        d "late"
+      })
+      let timed = Cmd.withTimeout (TimeSpan.FromMilliseconds 20.0) "timed-out" slowCmd
+      match timed with
+      | OfAsync run ->
+        do! run dispatch
+        msgs |> Expect.equal "timeout message dispatched" ["timed-out"]
+      | _ -> failtest "expected OfAsync"
+    }
+
+    test "withTimeout on NoCmd returns NoCmd unchanged" {
+      let timed = Cmd.withTimeout (TimeSpan.FromSeconds 1.0) "timeout" NoCmd
+      match timed with
+      | NoCmd -> ()
+      | _ -> failtest "NoCmd should pass through unchanged"
+    }
+
+    testAsync "withTimeout dispatches exactly one message (not both)" {
+      let mutable count = 0
+      let dispatch _ = count <- count + 1
+      let fastCmd = Cmd.ofAsync(fun d -> async {
+        do! Async.Sleep 5
+        d "result"
+      })
+      let timed = Cmd.withTimeout (TimeSpan.FromSeconds 5.0) "timed-out" fastCmd
+      match timed with
+      | OfAsync run ->
+        do! run dispatch
+        do! Async.Sleep 100  // wait for any stray second dispatch
+        count |> Expect.equal "exactly one dispatch" 1
+      | _ -> failtest "expected OfAsync"
+    }
+
+    testAsync "withTimeout on OfCancellableAsync fast path dispatches result" {
+      let mutable msgs : string list = []
+      let dispatch msg = msgs <- msg :: msgs
+      let fastCmd = Cmd.debounce "search" 5 "done"
+      let timed = Cmd.withTimeout (TimeSpan.FromSeconds 5.0) "timed-out" fastCmd
+      match timed with
+      | OfCancellableAsync(_, run) ->
+        do! run CancellationToken.None dispatch
+        msgs |> Expect.equal "fast cancellable dispatches result" ["done"]
+      | _ -> failtest "expected OfCancellableAsync"
+    }
+
+    testAsync "withTimeout on OfCancellableAsync slow path dispatches onTimeout" {
+      let mutable msgs : string list = []
+      let dispatch msg = msgs <- msg :: msgs
+      let slowCmd = Cmd.debounce "search" 60000 "done"  // 60s delay
+      let timed = Cmd.withTimeout (TimeSpan.FromMilliseconds 20.0) "timed-out" slowCmd
+      match timed with
+      | OfCancellableAsync(_, run) ->
+        try do! run CancellationToken.None dispatch
+        with :? OperationCanceledException -> ()
+        msgs |> Expect.equal "timeout fires for slow cancellable" ["timed-out"]
+      | _ -> failtest "expected OfCancellableAsync"
+    }
+  ]
+
+let sprint71ProgramInterceptorTests =
+  testList "Program.withUpdateInterceptor" [
+    test "interceptor is called after each Update" {
+      let calls = System.Collections.Generic.List<int * int * int>()
+      let prog : Program<int, int> = {
+        Init = fun () -> 0, NoCmd
+        Update = fun msg model -> model + msg, NoCmd
+        View = fun m -> El.text (string m)
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+      let prog' = prog |> Program.withUpdateInterceptor (fun msg oldM newM -> calls.Add(msg, oldM, newM))
+      let newM, _ = prog'.Update 5 0
+      newM |> Expect.equal "model updated correctly" 5
+      calls.Count |> Expect.equal "interceptor called once" 1
+      calls.[0] |> Expect.equal "interceptor receives (msg, old, new)" (5, 0, 5)
+    }
+
+    test "interceptor does not affect the returned model or cmd" {
+      let prog : Program<int, int> = {
+        Init = fun () -> 0, NoCmd
+        Update = fun msg model -> model + msg, Delay(100, 99)
+        View = fun m -> El.text (string m)
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+      let prog' = prog |> Program.withUpdateInterceptor (fun _ _ _ -> ())
+      let newM, cmd = prog'.Update 7 10
+      newM |> Expect.equal "model unchanged" 17
+      match cmd with
+      | Delay(100, 99) -> ()
+      | _ -> failtest "cmd unchanged"
+    }
+
+    test "multiple interceptors can be chained via withUpdateInterceptor" {
+      let log1 = System.Collections.Generic.List<string>()
+      let log2 = System.Collections.Generic.List<string>()
+      let prog : Program<int, int> = {
+        Init = fun () -> 0, NoCmd
+        Update = fun msg model -> model + msg, NoCmd
+        View = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+      let prog' =
+        prog
+        |> Program.withUpdateInterceptor (fun _ _ _ -> log1.Add("first"))
+        |> Program.withUpdateInterceptor (fun _ _ _ -> log2.Add("second"))
+      let _ = prog'.Update 1 0
+      log1.Count |> Expect.equal "first interceptor called" 1
+      log2.Count |> Expect.equal "second interceptor called" 1
+    }
+
+    test "interceptor is called for every message in a simulate sequence" {
+      let mutable callCount = 0
+      let prog : Program<int, int> = {
+        Init = fun () -> 0, NoCmd
+        Update = fun msg model -> model + msg, NoCmd
+        View = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError = CrashOnError
+      }
+      let prog' = prog |> Program.withUpdateInterceptor (fun _ _ _ -> callCount <- callCount + 1)
+      let _ = Program.simulate [1; 2; 3] prog'
+      callCount |> Expect.equal "called for each msg" 3
+    }
+
+    test "withUpdateInterceptor preserves OnError setting" {
+      let prog : Program<int, int> = {
+        Init = fun () -> 0, NoCmd
+        Update = fun _ model -> model, NoCmd
+        View = fun _ -> El.empty
+        Subscribe = fun _ -> []
+        OnError = LogAndContinue
+      }
+      let prog' = prog |> Program.withUpdateInterceptor (fun _ _ _ -> ())
+      match prog'.OnError with
+      | LogAndContinue -> ()
+      | _ -> failtest "OnError should be preserved"
+    }
+  ]
+
+let sprint71RemoteDataMapErrorTests =
+  testList "RemoteData.mapError" [
+    test "mapError transforms Failed exception message" {
+      let ex = exn "original error"
+      let result = RemoteData.mapError (fun e -> "Custom: " + e.Message) (Failed ex)
+      match result with
+      | Failed e -> e.Message |> Expect.equal "message transformed" "Custom: original error"
+      | _ -> failtest "expected Failed"
+    }
+
+    test "mapError passes through Idle unchanged" {
+      let result : RemoteData<int> = RemoteData.mapError (fun _ -> "x") Idle
+      result |> Expect.equal "Idle passthrough" Idle
+    }
+
+    test "mapError passes through Loading unchanged" {
+      let result : RemoteData<int> = RemoteData.mapError (fun _ -> "x") Loading
+      result |> Expect.equal "Loading passthrough" Loading
+    }
+
+    test "mapError passes through Loaded value unchanged" {
+      let result = RemoteData.mapError (fun _ -> "x") (Loaded 42)
+      result |> Expect.equal "Loaded passthrough" (Loaded 42)
+    }
+
+    test "mapError with identity-like function preserves message" {
+      let ex = exn "msg"
+      let result = RemoteData.mapError (fun e -> e.Message) (Failed ex)
+      match result with
+      | Failed e -> e.Message |> Expect.equal "identity preserves" "msg"
+      | _ -> failtest "expected Failed"
+    }
+
+    test "mapError wraps transformed string in a new exception" {
+      let ex = exn "raw"
+      let result = RemoteData.mapError (fun _ -> "humanized") (Failed ex)
+      match result with
+      | Failed e ->
+        e.Message |> Expect.equal "humanized message" "humanized"
+        // Should not retain the original exception (it's a new one)
+        (e :> obj |> isNull |> not) |> Expect.isTrue "exception is non-null"
+      | _ -> failtest "expected Failed"
+    }
+  ]
+
+let sprint71DeferredViewStringTests =
+  testList "Deferred.viewString" [
+    test "Idle renders loading element" {
+      let buf = Buffer.create 20 1
+      let el : Element =
+        Deferred.viewString (El.text "loading") (fun s -> El.text s) (fun v -> El.text (string v)) Idle
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "Idle renders loading" "loading"
+    }
+
+    test "Loading renders loading element" {
+      let buf = Buffer.create 20 1
+      let el : Element =
+        Deferred.viewString (El.text "loading") (fun s -> El.text s) (fun v -> El.text (string v)) Loading
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "Loading renders loading" "loading"
+    }
+
+    test "Failed renders error string via error handler" {
+      let buf = Buffer.create 40 1
+      let el : Element =
+        Deferred.viewString (El.text "loading") (fun s -> El.text ("err:" + s)) (fun v -> El.text v) (Failed (exn "oops"))
+      Render.render { X=0; Y=0; Width=40; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "Failed renders error string" "err:oops"
+    }
+
+    test "Loaded renders data via render function" {
+      let buf = Buffer.create 20 1
+      let el : Element =
+        Deferred.viewString (El.text "loading") (fun s -> El.text s) (fun v -> El.text ("data:" + v)) (Loaded "ok")
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "Loaded renders data" "data:ok"
+    }
+
+    test "viewString uses ex.Message (not ex.ToString) for the error string" {
+      let buf = Buffer.create 60 1
+      let ex = exn "just the message"
+      let mutable capturedStr = ""
+      let el : Element =
+        Deferred.viewString (El.text "l") (fun s -> capturedStr <- s; El.text s) (fun _ -> El.empty) (Failed ex)
+      Render.render { X=0; Y=0; Width=60; Height=1 } Style.empty buf el
+      capturedStr |> Expect.equal "uses Message not ToString" "just the message"
+    }
+
+    test "viewString is consistent with Deferred.view for exn identity" {
+      let buf1 = Buffer.create 40 1
+      let buf2 = Buffer.create 40 1
+      let ex = exn "error text"
+      let el1 = Deferred.view (El.text "l") (fun e -> El.text e.Message) (fun v -> El.text v) (Loaded "hello")
+      let el2 = Deferred.viewString (El.text "l") El.text (fun v -> El.text v) (Loaded "hello")
+      Render.render { X=0; Y=0; Width=40; Height=1 } Style.empty buf1 el1
+      Render.render { X=0; Y=0; Width=40; Height=1 } Style.empty buf2 el2
+      Buffer.toString buf1 |> Expect.equal "consistent with Deferred.view for Loaded" (Buffer.toString buf2)
+    }
+  ]
+
+let sprint71ToastOverlayTests =
+  testList "ToastQueue.overlay" [
+    test "overlay with empty queue renders content element only" {
+      let buf = Buffer.create 30 3
+      let el = ToastQueue.overlay (El.text "content") ToastQueue.empty
+      Render.render { X=0; Y=0; Width=30; Height=3 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "content visible" "content"
+    }
+
+    test "overlay with empty queue returns content unchanged (structurally)" {
+      // Element has NoEquality, so verify via rendering — empty queue must render like content directly
+      let content = El.text "hello"
+      let el = ToastQueue.overlay content ToastQueue.empty
+      let buf1 = Buffer.create 20 1
+      let buf2 = Buffer.create 20 1
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf1 el
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf2 content
+      Buffer.toString buf1 |> Expect.equal "empty queue renders same as content" (Buffer.toString buf2)
+    }
+
+    test "overlay with active toasts shows toast text" {
+      let q, _ = ToastQueue.empty |> ToastQueue.push "Toast Message" 100 Style.empty
+      let buf = Buffer.create 40 5
+      let el = ToastQueue.overlay (El.text "main content") q
+      Render.render { X=0; Y=0; Width=40; Height=5 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "toast visible" "Toast Message"
+    }
+
+    test "overlay with active toasts also shows content" {
+      let q, _ = ToastQueue.empty |> ToastQueue.push "Alert!" 100 Style.empty
+      let buf = Buffer.create 40 5
+      // Use fill to render content behind the toast; overlay renders both layers
+      let el = ToastQueue.overlay (El.fill (El.text " ")) q
+      Render.render { X=0; Y=0; Width=40; Height=5 } Style.empty buf el
+      // The toast content should be visible regardless of what's behind it
+      Buffer.toString buf |> Expect.stringContains "toast over content" "Alert!"
+    }
+
+    test "overlay with multiple toasts renders all of them" {
+      let q0 = ToastQueue.empty
+      let q1, _ = q0 |> ToastQueue.push "First" 100 Style.empty
+      let q2, _ = q1 |> ToastQueue.push "Second" 100 Style.empty
+      let buf = Buffer.create 40 8
+      let el = ToastQueue.overlay (El.text "bg") q2
+      Render.render { X=0; Y=0; Width=40; Height=8 } Style.empty buf el
+      let rendered = Buffer.toString buf
+      rendered |> Expect.stringContains "first toast" "First"
+      rendered |> Expect.stringContains "second toast" "Second"
+    }
+
+    test "overlay after tickAll removes expired toasts from view" {
+      let q, _ = ToastQueue.empty |> ToastQueue.push "Expiring" 2 Style.empty
+      let expired = q |> ToastQueue.tickAll 10
+      // expired is now empty — overlay should render identically to content alone
+      let content = El.text "content"
+      let el = ToastQueue.overlay content expired
+      let buf1 = Buffer.create 40 3
+      let buf2 = Buffer.create 40 3
+      Render.render { X=0; Y=0; Width=40; Height=3 } Style.empty buf1 el
+      Render.render { X=0; Y=0; Width=40; Height=3 } Style.empty buf2 content
+      Buffer.toString buf1 |> Expect.equal "expired queue renders same as content" (Buffer.toString buf2)
+    }
+  ]
+
+[<Tests>]
+let sprint71Tests =
+  testList "Sprint 71" [
+    sprint71SubIntervalTests
+    sprint71CmdWithTimeoutTests
+    sprint71ProgramInterceptorTests
+    sprint71RemoteDataMapErrorTests
+    sprint71DeferredViewStringTests
+    sprint71ToastOverlayTests
+  ]

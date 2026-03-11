@@ -3136,6 +3136,23 @@ module ToastQueue =
     | [] -> El.empty
     | toasts -> El.column (toasts |> List.map (fun (_, t) -> Toast.view t))
 
+  /// Compose a background `content` element with the toast overlay.
+  /// When the queue is empty, returns `content` unchanged (zero overhead).
+  /// When toasts are active, wraps both into an `El.overlay` so toasts
+  /// float over the content without disturbing its layout.
+  ///
+  /// Eliminates the per-app boilerplate of manually checking toast count and
+  /// wrapping in an overlay. Typical use in your `view` function:
+  ///
+  /// Example:
+  ///   let view model =
+  ///     El.column [ header; body; footer ]
+  ///     |> ToastQueue.overlay model.Toasts
+  let overlay (content: Element) (q: ToastQueue) : Element =
+    match q.Toasts with
+    | [] -> content
+    | _ -> El.overlay [ content; view q ]
+
 /// Operations on `ViewportModel` — an enhanced read-only, scrollable text pane with
 /// word-wrap, resize-awareness, keyboard navigation, and proportional scrollbar.
 module Viewport =
