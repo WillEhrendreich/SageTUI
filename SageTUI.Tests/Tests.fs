@@ -10677,3 +10677,284 @@ let sprint69Tests =
     sprint69DebugOverlayTests
     sprint69RichTextTests
   ]
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sprint 70: StatusSegment/El.statusBar, El.menuBar, CommandPalette
+// All tests written BEFORE implementation (TDD).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── StatusSegment / El.statusBar ─────────────────────────────────────────────
+
+let sprint70StatusBarTests =
+  testList "Sprint 70: El.statusBar / StatusSegment" [
+    test "El.statusBar empty renders without crash" {
+      let buf = Buffer.create 20 1
+      let el = El.statusBar [] []
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      buf.Width |> Expect.equal "width" 20
+    }
+    test "El.statusBar left text appears in buffer" {
+      let buf = Buffer.create 20 1
+      let el = El.statusBar [ StatusSegment.Text "hello" ] []
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringStarts "starts hello" "hello"
+    }
+    test "El.statusBar right text appears in buffer" {
+      let buf = Buffer.create 20 1
+      let el = El.statusBar [] [ StatusSegment.Text "right" ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringEnds "ends right" "right"
+    }
+    test "El.statusBar left and right both appear" {
+      let buf = Buffer.create 40 1
+      let el = El.statusBar [ StatusSegment.Text "LEFT" ] [ StatusSegment.Text "RIGHT" ]
+      Render.render { X=0; Y=0; Width=40; Height=1 } Style.empty buf el
+      let s = Buffer.toString buf
+      s |> Expect.stringContains "has LEFT"  "LEFT"
+      s |> Expect.stringContains "has RIGHT" "RIGHT"
+    }
+    test "El.statusBar Sep renders │ separator" {
+      let buf = Buffer.create 20 1
+      let el = El.statusBar [ StatusSegment.Text "a"; StatusSegment.Sep; StatusSegment.Text "b" ] []
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let s = Buffer.toString buf
+      s |> Expect.stringContains "has separator" "│"
+    }
+    test "El.statusBar Styled applies style" {
+      let buf = Buffer.create 20 1
+      let redStyle = { Style.empty with Fg = Some (Named(Red, Normal)) }
+      let el = El.statusBar [ StatusSegment.Styled(redStyle, "err") ] []
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let cell = Buffer.get 0 0 buf
+      cell.Fg |> Expect.equal "red fg" (PackedColor.pack (Named(Red, Normal)))
+    }
+    test "El.statusBar Icon renders icon text" {
+      let buf = Buffer.create 20 1
+      let el = El.statusBar [ StatusSegment.Icon "●" ] []
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringStarts "starts with ●" "●"
+    }
+    test "El.statusBarFull segments render in order" {
+      let buf = Buffer.create 20 1
+      let el = El.statusBarFull [ StatusSegment.Text "A"; StatusSegment.Sep; StatusSegment.Text "B" ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let s = Buffer.toString buf
+      s |> Expect.stringContains "has A" "A"
+      s |> Expect.stringContains "has B" "B"
+    }
+    test "El.statusBarFull Fill expands to fill space" {
+      let buf = Buffer.create 20 1
+      let el = El.statusBarFull [ StatusSegment.Text "L"; StatusSegment.Fill; StatusSegment.Text "R" ]
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      let s = Buffer.toString buf
+      s |> Expect.stringStarts "starts L" "L"
+      s |> Expect.stringEnds "ends R" "R"
+    }
+    test "El.statusBar renders in 1 row" {
+      let buf = Buffer.create 20 3
+      let el = El.statusBar [ StatusSegment.Text "hi" ] []
+      Render.render { X=0; Y=0; Width=20; Height=3 } Style.empty buf el
+      // First row has "hi", other rows are blank
+      let row0 = Buffer.toString buf |> fun s -> s.Split('\n').[0]
+      row0 |> Expect.stringStarts "row0 starts hi" "hi"
+    }
+  ]
+
+// ─── El.menuBar ───────────────────────────────────────────────────────────────
+
+let sprint70MenuBarTests =
+  testList "Sprint 70: El.menuBar" [
+    test "El.menuBar empty renders without crash" {
+      let buf = Buffer.create 20 1
+      let el = El.menuBar [] None
+      Render.render { X=0; Y=0; Width=20; Height=1 } Style.empty buf el
+      buf.Width |> Expect.equal "width" 20
+    }
+    test "El.menuBar renders item labels" {
+      let buf = Buffer.create 40 1
+      let el = El.menuBar [ { MenuBarItem.Key="f"; Label="File"; Shortcut=None } ] None
+      Render.render { X=0; Y=0; Width=40; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "has File" "File"
+    }
+    test "El.menuBar renders multiple items" {
+      let buf = Buffer.create 80 1
+      let items = [
+        { Key="f"; Label="File"; Shortcut=None }
+        { Key="e"; Label="Edit"; Shortcut=None }
+        { Key="v"; Label="View"; Shortcut=None }
+      ]
+      let el = El.menuBar items None
+      Render.render { X=0; Y=0; Width=80; Height=1 } Style.empty buf el
+      let s = Buffer.toString buf
+      s |> Expect.stringContains "has File" "File"
+      s |> Expect.stringContains "has Edit" "Edit"
+      s |> Expect.stringContains "has View" "View"
+    }
+    test "El.menuBar active item is styled differently" {
+      let buf1 = Buffer.create 40 1
+      let buf2 = Buffer.create 40 1
+      let items = [ { Key="f"; Label="File"; Shortcut=None } ]
+      let elInactive = El.menuBar items None
+      let elActive   = El.menuBar items (Some "f")
+      Render.render { X=0; Y=0; Width=40; Height=1 } Style.empty buf1 elInactive
+      Render.render { X=0; Y=0; Width=40; Height=1 } Style.empty buf2 elActive
+      // Active should differ from inactive (different fg/attrs)
+      let cell1 = Buffer.get 0 0 buf1
+      let cell2 = Buffer.get 0 0 buf2
+      (cell1.Fg = cell2.Fg && cell1.Attrs = cell2.Attrs) |> Expect.isFalse "active differs"
+    }
+    test "El.menuBar shortcut hint is visible when present" {
+      let buf = Buffer.create 40 1
+      let el = El.menuBar [ { Key="f"; Label="File"; Shortcut=Some "Alt+F" } ] None
+      Render.render { X=0; Y=0; Width=40; Height=1 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "has shortcut" "Alt+F"
+    }
+  ]
+
+// ─── CommandPalette ───────────────────────────────────────────────────────────
+
+type TestMsg = ExecSave | ExecOpen | ExecQuit
+
+let private mkCmd name action : Command<TestMsg> =
+  { Name = name; Description = None; Keywords = []; ShortcutHint = None; Enabled = true; Action = action }
+
+let sprint70CommandPaletteTests =
+  testList "Sprint 70: CommandPalette" [
+    test "CommandPalette.create is initially closed" {
+      let state = CommandPalette.create<TestMsg> ()
+      CommandPalette.isOpen state |> Expect.isFalse "closed initially"
+    }
+    test "CommandPalette.openPalette makes it open" {
+      let state = CommandPalette.create<TestMsg> () |> CommandPalette.openPalette
+      CommandPalette.isOpen state |> Expect.isTrue "open after openPalette"
+    }
+    test "CommandPalette.closePalette makes it closed" {
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.openPalette
+        |> CommandPalette.closePalette
+      CommandPalette.isOpen state |> Expect.isFalse "closed after closePalette"
+    }
+    test "CommandPalette.overlayView returns Empty when closed" {
+      let state = CommandPalette.create<TestMsg> ()
+      let buf = Buffer.create 40 3
+      let el = CommandPalette.overlayView state
+      Render.render { X=0; Y=0; Width=40; Height=3 } Style.empty buf el
+      // closed → nothing rendered, all blank
+      Buffer.toString buf |> Expect.equal "empty when closed" (String.replicate 40 " " + "\n" + String.replicate 40 " " + "\n" + String.replicate 40 " ")
+    }
+    test "CommandPalette.overlayView returns non-empty when open" {
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.withCommands [ mkCmd "Save" ExecSave ]
+        |> CommandPalette.openPalette
+      let buf = Buffer.create 40 3
+      let el = CommandPalette.overlayView state
+      Render.render { X=0; Y=0; Width=40; Height=3 } Style.empty buf el
+      // open → something rendered
+      let content = Buffer.toString buf
+      content.Trim() |> Expect.isNotEmpty "non-empty when open"
+    }
+    test "CommandPalette.view open returns non-empty element" {
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.withCommands [ mkCmd "Save" ExecSave ]
+        |> CommandPalette.openPalette
+      let buf = Buffer.create 40 3
+      let el = CommandPalette.view state
+      Render.render { X=0; Y=0; Width=40; Height=3 } Style.empty buf el
+      Buffer.toString buf |> fun s -> s.Trim() |> Expect.isNotEmpty "non-empty"
+    }
+    test "CommandPalette.update Escape closes palette and returns None msg" {
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.withCommands [ mkCmd "Save" ExecSave ]
+        |> CommandPalette.openPalette
+      let state', msg = CommandPalette.update Key.Escape Modifiers.None state
+      CommandPalette.isOpen state' |> Expect.isFalse "closed after Escape"
+      msg |> Expect.isNone "no message on Escape"
+    }
+    test "CommandPalette.update Enter with single matching command dispatches Action" {
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.withCommands [ mkCmd "Save" ExecSave ]
+        |> CommandPalette.openPalette
+      let _, msg = CommandPalette.update Key.Enter Modifiers.None state
+      msg |> Expect.equal "dispatches ExecSave" (Some ExecSave)
+    }
+    test "CommandPalette.update Enter on empty list returns None" {
+      let state = CommandPalette.create<TestMsg> () |> CommandPalette.openPalette
+      let _, msg = CommandPalette.update Key.Enter Modifiers.None state
+      msg |> Expect.isNone "no message for empty list"
+    }
+    test "CommandPalette.update Escape from closed is no-op" {
+      let state = CommandPalette.create<TestMsg> ()
+      let state', msg = CommandPalette.update Key.Escape Modifiers.None state
+      CommandPalette.isOpen state' |> Expect.isFalse "still closed"
+      msg |> Expect.isNone "no message"
+    }
+    test "CommandPalette.withCommands updates command list" {
+      let cmds = [ mkCmd "Save" ExecSave; mkCmd "Open" ExecOpen ]
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.withCommands cmds
+        |> CommandPalette.openPalette
+      // Type a char to filter — "Save" matches 'S'
+      let state', _ = CommandPalette.update (Key.Char (Rune 'S')) Modifiers.None state
+      let _, msg = CommandPalette.update Key.Enter Modifiers.None state'
+      msg |> Expect.equal "saves after S filter" (Some ExecSave)
+    }
+    test "CommandPalette Enabled=false command does not dispatch" {
+      let disabledCmd : Command<TestMsg> =
+        { Name = "Quit"; Description = None; Keywords = []; ShortcutHint = None; Enabled = false; Action = ExecQuit }
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.withCommands [ disabledCmd ]
+        |> CommandPalette.openPalette
+      let _, msg = CommandPalette.update Key.Enter Modifiers.None state
+      msg |> Expect.isNone "disabled command not dispatched"
+    }
+    test "CommandPalette keyword search finds command by keyword" {
+      let cmd = { Name = "Save"; Description = None; Keywords = ["persist"; "write"]; ShortcutHint = None; Enabled = true; Action = ExecSave }
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.withCommands [ cmd ]
+        |> CommandPalette.openPalette
+      // Type "pers" — matches keyword "persist"
+      let state' =
+        "pers" |> Seq.fold (fun s c ->
+          fst (CommandPalette.update (Key.Char (Rune c)) Modifiers.None s)
+        ) state
+      let _, msg = CommandPalette.update Key.Enter Modifiers.None state'
+      msg |> Expect.equal "found via keyword" (Some ExecSave)
+    }
+    test "CommandPalette view renders command names" {
+      let buf = Buffer.create 60 10
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.withCommands [ mkCmd "Save File" ExecSave ]
+        |> CommandPalette.openPalette
+      let el = CommandPalette.view state
+      Render.render { X=0; Y=0; Width=60; Height=10 } Style.empty buf el
+      Buffer.toString buf |> Expect.stringContains "shows Save File" "Save File"
+    }
+    test "CommandPalette ArrowDown moves selection" {
+      let cmds = [ mkCmd "Save" ExecSave; mkCmd "Open" ExecOpen ]
+      let state =
+        CommandPalette.create<TestMsg> ()
+        |> CommandPalette.withCommands cmds
+        |> CommandPalette.openPalette
+      let state', _ = CommandPalette.update Key.Down Modifiers.None state
+      // After ArrowDown, Enter should dispatch the second command (Open)
+      let _, msg = CommandPalette.update Key.Enter Modifiers.None state'
+      msg |> Expect.equal "selects Open" (Some ExecOpen)
+    }
+  ]
+
+[<Tests>]
+let sprint70Tests =
+  testList "Sprint 70" [
+    sprint70StatusBarTests
+    sprint70MenuBarTests
+    sprint70CommandPaletteTests
+  ]

@@ -237,6 +237,35 @@ module Markup =
       | Strikethrough children | Fg(_, children) | Bg(_, children)
       | Link(_, children) -> width children)
 
+// ── StatusSegment ─────────────────────────────────────────────────────────────
+// Simplified segment type for use with El.statusBar / El.statusBarFull.
+
+/// A simple segment for `El.statusBar` and `El.statusBarFull`.
+[<RequireQualifiedAccess>]
+type StatusSegment =
+  /// Plain text segment.
+  | Text    of string
+  /// Text with an explicit style override.
+  | Styled  of Style * string
+  /// A thin separator glyph (│).
+  | Sep
+  /// Flexible spacer — expands to consume available horizontal space.
+  | Fill
+  /// A single icon or glyph string.
+  | Icon    of string
+
+// ── MenuBarItem ───────────────────────────────────────────────────────────────
+
+/// A single item in a `El.menuBar` row.
+type MenuBarItem = {
+  /// Unique key identifying this item (used for active-item matching).
+  Key:      string
+  /// Display label shown in the bar.
+  Label:    string
+  /// Optional hint text (shortcut or accelerator) shown after the label.
+  Shortcut: string option
+}
+
 /// Element constructors and combinators. All functions return Element values.
 module El =
   /// An empty element that renders nothing.
@@ -1007,7 +1036,87 @@ module El =
         lastResult <- result
         result
 
-/// Computation expression builders for declarative, imperative-style layout construction.
+  // ── StatusSegment / MenuBar helpers ─────────────────────────────────────────
+
+  let private segToElement (seg: StatusSegment) : Element =
+    match seg with
+    | StatusSegment.Text  s        -> text s
+    | StatusSegment.Styled(sty, s) -> styled sty (text s)
+    | StatusSegment.Sep            -> text "│"
+    | StatusSegment.Fill           -> fill Empty
+    | StatusSegment.Icon  s        -> text s
+
+  let private segStringWidth (s: string) : int =
+    let mutable w = 0
+    for rune in s.EnumerateRunes() do
+      w <- w + RuneWidth.getColumnWidth rune
+    w
+
+  // Wrap a non-Fill segment in Constrained(Fixed w) so it takes exactly its
+  // content width rather than defaulting to Fill 1 in a Row layout.
+  let private segToFixed (seg: StatusSegment) : Element =
+    match seg with
+    | StatusSegment.Fill -> Constrained(Fill 1, Empty)
+    | _ ->
+      let e = segToElement seg
+      let w =
+        match seg with
+        | StatusSegment.Text s | StatusSegment.Icon s -> segStringWidth s
+        | StatusSegment.Styled(_, s)                  -> segStringWidth s
+        | StatusSegment.Sep                           -> 1
+        | StatusSegment.Fill                          -> 0
+      Constrained(Fixed w, e)
+
+  /// Render a single-row status bar with left and right segment lists.
+  /// Left segments are left-aligned; right segments are right-aligned;
+  /// a flexible spacer fills the gap between them.
+  let statusBar (left: StatusSegment list) (right: StatusSegment list) : Element =
+    let leftPart  = left  |> List.map segToFixed
+    let rightPart = right |> List.map segToFixed
+    match left, right with
+    | [], [] -> Empty
+    | _, [] -> Row leftPart
+    | [], _ -> Row (Constrained(Fill 1, Empty) :: rightPart)
+    | _, _  -> Row (leftPart @ [ Constrained(Fill 1, Empty) ] @ rightPart)
+
+  /// Render a single-row status bar from an ordered flat segment list.
+  /// `Fill` segments expand to consume available space; all other segments
+  /// take exactly their content width.
+  let statusBarFull (segs: StatusSegment list) : Element =
+    match segs with
+    | [] -> Empty
+    | _  -> Row (segs |> List.map segToFixed)
+
+  /// Render a single-row menu bar from an ordered list of `MenuBarItem` values.
+  /// The active item (matched by `Key`) is highlighted with bold + reverse video.
+  let menuBar (items: MenuBarItem list) (activeItem: string option) : Element =
+    match items with
+    | [] -> Empty
+    | _  ->
+      let renderItem (item: MenuBarItem) : Element =
+        let label =
+          match item.Shortcut with
+          | None   -> item.Label
+          | Some s -> sprintf "%s (%s)" item.Label s
+        let isActive =
+          match activeItem with
+          | Some k -> k = item.Key
+          | None   -> false
+        match isActive with
+        | true  ->
+          let boldRev = { Style.empty with Attrs = TextAttrs.combine TextAttrs.bold TextAttrs.reverse }
+          styled boldRev (text label)
+        | false -> text label
+      let sep = text " "
+      items
+      |> List.mapi (fun i it -> (i, it))
+      |> List.collect (fun (i, it) ->
+          match i with
+          | 0 -> [ renderItem it ]
+          | _ -> [ sep; renderItem it ])
+      |> Row
+
+/// Computation expression buildersfor declarative, imperative-style layout construction.
 ///
 /// Instead of wrapping lists in `[` `]`:
 ///   `El.column [ El.text "A"; if cond then El.text "B" else El.empty ]`
@@ -1042,7 +1151,7 @@ module View =
       xs |> Seq.toList |> List.collect f
     member _.Run(es: Element list) = El.row es
 
-  /// Build a `Column` using computation expression syntax.
+  /// Build a `Column`using computation expression syntax.
   /// Supports `yield`, `yield!`, `if`, and `for`.
   let col = ColumnBuilder()
 

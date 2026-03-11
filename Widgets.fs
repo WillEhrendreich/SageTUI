@@ -3513,7 +3513,136 @@ module StatusBar =
       let rightEl  = match rights  with [] -> El.empty | es -> El.row (interleave es)
       El.row [ leftEl; El.fill El.empty; centerEl; El.fill El.empty; rightEl ]
 
-// ── HelpOverlay ───────────────────────────────────────────────────────────────
+// ── MenuBarItem and El.menuBar convenience helpers are defined in Element.fs ──
+// (StatusSegment, MenuBarItem types and El.statusBar/El.statusBarFull/El.menuBar
+//  live in Element.fs to avoid a duplicate-module error.)
+
+// ── Command / CommandPalette ──────────────────────────────────────────────────
+// A searchable command palette widget backed by the FuzzyFinder engine.
+
+/// A single entry in a command palette.
+type Command<'msg> = {
+  /// Display name shown in the palette list.
+  Name:         string
+  /// Optional longer description shown below the name.
+  Description:  string option
+  /// Additional search keywords (checked alongside the Name).
+  Keywords:     string list
+  /// Optional shortcut hint string displayed on the right of the row.
+  ShortcutHint: string option
+  /// When false the command appears greyed-out and cannot be invoked.
+  Enabled:      bool
+  /// The message to dispatch when the command is confirmed.
+  Action:       'msg
+}
+
+/// Opaque state record for a command palette widget.
+type CommandPaletteState<'msg> = private {
+  IsOpen:   bool
+  Commands: Command<'msg> array
+  Finder:   FuzzyFinderModel<Command<'msg>>
+}
+
+module CommandPalette =
+  /// Build the search-key string for a command: name + all keywords concatenated
+  /// so the FuzzyFinder scores against the full text.
+  let private cmdKey (cmd: Command<'msg>) : string =
+    (cmd.Name :: cmd.Keywords) |> String.concat " "
+
+  /// Create an empty, closed command palette with no commands loaded.
+  let create<'msg> () : CommandPaletteState<'msg> =
+    { IsOpen = false; Commands = [||]; Finder = FuzzyFinder.init cmdKey [||] }
+
+  /// Return true when the palette is open (visible).
+  let isOpen (s: CommandPaletteState<'msg>) : bool = s.IsOpen
+
+  /// Open the palette and reset the search query.
+  let openPalette (s: CommandPaletteState<'msg>) : CommandPaletteState<'msg> =
+    { s with IsOpen = true; Finder = FuzzyFinder.init cmdKey s.Commands }
+
+  /// Close the palette.
+  let closePalette (s: CommandPaletteState<'msg>) : CommandPaletteState<'msg> =
+    { s with IsOpen = false }
+
+  /// Replace the command list. The current open/closed state is preserved.
+  let withCommands (cmds: Command<'msg> list) (s: CommandPaletteState<'msg>) : CommandPaletteState<'msg> =
+    let arr = List.toArray cmds
+    { s with Commands = arr; Finder = FuzzyFinder.init cmdKey arr }
+
+  /// Return the currently selected enabled command, if any.
+  let private selectedCommand (s: CommandPaletteState<'msg>) : Command<'msg> option =
+    s.Finder
+    |> FuzzyFinder.selectedItem
+    |> Option.filter _.Enabled
+
+  /// Update the palette in response to a key press.
+  /// Returns the new state and an optional message to dispatch.
+  /// * Enter  → dispatch the selected command's Action (or None if disabled/empty)
+  /// * Escape → close the palette (no message)
+  /// * Up/Down → navigate the result list
+  /// * Any other key → forward to the FuzzyFinder query input
+  let update (key: Key) (modifiers: Modifiers) (s: CommandPaletteState<'msg>) : CommandPaletteState<'msg> * 'msg option =
+    match s.IsOpen with
+    | false -> s, None
+    | true ->
+      match key with
+      | Key.Escape ->
+        closePalette s, None
+      | Key.Enter ->
+        let msg = selectedCommand s |> Option.map _.Action
+        closePalette s, msg
+      | Key.Up ->
+        let finder' = FuzzyFinder.update FFMoveUp s.Finder
+        { s with Finder = finder' }, None
+      | Key.Down ->
+        let finder' = FuzzyFinder.update FFMoveDown s.Finder
+        { s with Finder = finder' }, None
+      | _ ->
+        let finder' = FuzzyFinder.update (FFQueryKey key) s.Finder
+        { s with Finder = finder' }, None
+
+  /// Render the palette content as a bordered, centred overlay element.
+  /// Returns `El.empty` when the palette is closed.
+  let view (s: CommandPaletteState<'msg>) : Element =
+    match s.IsOpen with
+    | false -> El.empty
+    | true  ->
+      let queryText = FuzzyFinder.query s.Finder
+      let matches   = s.Finder.Results
+      let renderRow (i: int) (cmd: Command<'msg>) : Element =
+        let isSelected = i = s.Finder.SelectedIdx
+        let nameEl  = El.text cmd.Name
+        let hintEl  =
+          match cmd.ShortcutHint with
+          | None   -> El.empty
+          | Some h -> El.fg (Named(BaseColor.Black, Bright)) (El.text (sprintf "  %s" h))
+        let rowEl = El.row [ nameEl; El.fill El.empty; hintEl ]
+        let styled =
+          match isSelected, cmd.Enabled with
+          | true,  true  -> El.styled { Style.empty with Attrs = TextAttrs.reverse } rowEl
+          | true,  false -> El.styled { Style.empty with Fg = Some (Named(BaseColor.Black, Bright)); Attrs = TextAttrs.reverse } rowEl
+          | false, false -> El.fg (Named(BaseColor.Black, Bright)) rowEl
+          | false, true  -> rowEl
+        El.padded { Top=0; Right=1; Bottom=0; Left=1 } styled
+      let resultRows =
+        matches
+        |> Array.toList
+        |> List.mapi (fun i m ->
+            match m.OriginalIndex >= 0 && m.OriginalIndex < s.Commands.Length with
+            | true  -> renderRow i s.Commands.[m.OriginalIndex]
+            | false -> El.empty)
+      let inputEl =
+        El.padded { Top=0; Right=1; Bottom=0; Left=1 } (El.row [ El.text "> "; El.text (if queryText = "" then "" else queryText) ])
+      El.bordered BorderStyle.Rounded (
+        El.column (inputEl :: resultRows)
+      )
+
+  /// Render the palette as a full-screen overlay using `Overlay`.
+  /// Returns `El.empty` when the palette is closed (safe to compose with any base view).
+  let overlayView (s: CommandPaletteState<'msg>) : Element =
+    match s.IsOpen with
+    | false -> El.empty
+    | true  -> view s
 // Declarative keyboard-shortcut overlay widget.  Renders a bordered panel of
 // key → description rows, optionally grouped under labelled headings.
 
