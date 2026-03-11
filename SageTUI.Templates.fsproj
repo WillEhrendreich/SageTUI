@@ -19,6 +19,9 @@
     <ContentTargetFolders>content</ContentTargetFolders>
     <NoDefaultExcludes>true</NoDefaultExcludes>
     <TargetFramework>net8.0</TargetFramework>
+    <!-- Separate obj folder to avoid ILLink.Substitutions.xml race with SageTUI.Library.fsproj
+         when the solution builds both projects in parallel from the same directory. -->
+    <BaseIntermediateOutputPath>obj\templates\</BaseIntermediateOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
