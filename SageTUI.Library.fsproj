@@ -9,14 +9,14 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>SageTUI</PackageId>
-    <Version>0.9.0</Version>
+    <Version>0.9.1</Version>
     <Authors>Will Ehrendreich</Authors>
     <Copyright>Copyright © 2025 Will Ehrendreich</Copyright>
     <Description>F# terminal UI library. Elm Architecture (TEA/MVU), flexbox layout engine, 17+ widgets, SIMD-accelerated rendering, zero runtime dependencies.</Description>
     <PackageTags>fsharp;tui;terminal;elm-architecture;tea;mvu;functional;simd;layout;cli;widgets</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>0.9.0: Complete Elm Architecture (TEA/MVU) with 17+ widgets, SIMD-accelerated double-buffered rendering, flexbox layout engine, ErrorPolicy DU (CrashOnError|LogAndContinue|RecoverWith), TestHarness async capture (runCapturedAsync), Keys.bind lazy allocation, Cmd.fromAsync/fromTask, VirtualList multi-select, TextInput (clickAt), FuzzyFinder, Viewport, Chart, Toast/ToastQueue, Tabs, Select, theme system, template package, Cmd.saveString/loadString, keyChar helper, Sub.interval/intervalMs, Cmd.withTimeout, Program.withUpdateInterceptor, RemoteData.mapError, Deferred.viewString, ToastQueue.overlay, 2,764 tests.</PackageReleaseNotes>
+    <PackageReleaseNotes>0.9.1: Sprint 71 additions — Sub.interval/intervalMs, Cmd.withTimeout, Program.withUpdateInterceptor, RemoteData.mapError, Deferred.viewString, ToastQueue.overlay. CI NETSDK1005 fix for multi-TFM restore. 2,764 tests. Previous: 0.9.0: Complete Elm Architecture (TEA/MVU) with 17+ widgets, SIMD-accelerated double-buffered rendering, flexbox layout engine, ErrorPolicy DU (CrashOnError|LogAndContinue|RecoverWith), TestHarness, Keys.bind, Cmd.fromAsync/fromTask, VirtualList multi-select, TextInput, FuzzyFinder, Viewport, Chart, Toast/ToastQueue, Tabs, Select, theme system, template package.</PackageReleaseNotes>
     <RepositoryUrl>https://github.com/WillEhrendreich/SageTUI</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/WillEhrendreich/SageTUI</PackageProjectUrl>
