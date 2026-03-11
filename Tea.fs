@@ -457,16 +457,15 @@ type Sub<'msg> =
   /// The second argument is the key of the innermost Keyed element at the cursor, or None.
   /// Does NOT fire for mouse releases or drag/motion events.
   | ClickSub of (MouseEvent * string option -> 'msg option)
-  /// Fires for mouse drag/motion events (Phase = Motion) when button-event tracking
-  /// (?1002h) is enabled. Does NOT fire for press or release events.
-  /// Re-enable ?1002h in Detect.fs once your app registers a DragSub.
-  | DragSub of (MouseEvent -> 'msg option)
+  /// Internal: fires for mouse drag/motion events when button-event tracking (?1002h) is enabled.
+  /// Use Sub.fromObservable if you need custom pointer tracking.
+  | [<System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)>] DragSub of (MouseEvent -> 'msg option)
   /// Fires when the terminal window gains or loses OS focus (?1004h must be enabled).
   /// The bool argument is true for focus-gained, false for focus-lost.
   | TerminalFocusSub of (bool -> 'msg option)
-  /// Fires when the terminal sends bracketed-paste content (?2004h must be enabled).
+  /// Internal: fires when the terminal sends bracketed-paste content (?2004h must be enabled).
   /// The string argument contains the full pasted text.
-  | PasteSub of (string -> 'msg option)
+  | [<System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)>] PasteSub of (string -> 'msg option)
   | FocusSub of (FocusDirection -> 'msg option)
   | TimerSub of id: string * interval: TimeSpan * tick: (unit -> 'msg)
   | ResizeSub of (int * int -> 'msg option)
@@ -656,6 +655,76 @@ module Sub =
         match lookup.TryGetValue(k) with
         | true, msg -> Some msg
         | false, _  -> None)
+
+  /// Watch `path` for filesystem changes and dispatch `toMsg fullPath` after a quiet
+  /// period of `debounceMs` milliseconds. Handles both file and directory paths.
+  ///
+  /// `debounceMs` is mandatory — most editors fire 2–4 events per save (atomic writes,
+  /// metadata flushes). A debounce window of 100–300 ms collapses these into one message.
+  /// There is no default; callers must choose explicitly.
+  ///
+  /// The message receives the full absolute path of the changed entry.
+  /// For Renamed events, this is the new path. For Deleted events, the path no longer
+  /// exists when the message is dispatched (dispatch happens after the debounce window).
+  ///
+  /// `id` is the reconciliation key — use `Sub.prefix` to namespace it when embedding
+  /// in a component:
+  ///   Sub.fileWatch "config" "/etc/myapp/config.toml" 200 FileChanged
+  ///   |> Sub.prefix "app"   // id becomes "app/config"
+  let fileWatch (id: string) (path: string) (debounceMs: int) (toMsg: string -> 'msg) : Sub<'msg> =
+    CustomSub(id, fun dispatch ct ->
+      async {
+        // FileSystemWatcher requires a directory path + filter.
+        // For a specific file, watch the parent directory and filter to that filename.
+        let watchDir, watchFilter =
+          match System.IO.Directory.Exists(path) with
+          | true  -> path, "*.*"
+          | false ->
+            System.IO.Path.GetDirectoryName(path),
+            System.IO.Path.GetFileName(path)
+
+        use watcher =
+          new System.IO.FileSystemWatcher(
+            watchDir, watchFilter,
+            NotifyFilter =
+              (System.IO.NotifyFilters.LastWrite |||
+               System.IO.NotifyFilters.FileName  |||
+               System.IO.NotifyFilters.Size),
+            IncludeSubdirectories = false)
+
+        // Single Timer instance reset via Timer.Change on each event — correct debounce.
+        // Thread safety: pendingPath is written on the FSW event thread (thread-pool)
+        // and read on the Timer callback thread (also thread-pool, different thread).
+        // Volatile.Read/Write provides the memory barrier preventing stale CPU-cache reads.
+        let mutable pendingPath = ""
+        use debounce =
+          new System.Threading.Timer(
+            (fun _ ->
+              let p = System.Threading.Volatile.Read(&pendingPath)
+              if p <> "" && not ct.IsCancellationRequested then
+                dispatch (toMsg p)),
+            null,
+            System.Threading.Timeout.Infinite,  // do not start until first event fires
+            System.Threading.Timeout.Infinite)  // fire once; do not repeat
+
+        let onChanged (fullPath: string) =
+          if not ct.IsCancellationRequested then
+            System.Threading.Volatile.Write(&pendingPath, fullPath)
+            // Reset the countdown; any event within debounceMs restarts the window
+            debounce.Change(debounceMs, System.Threading.Timeout.Infinite) |> ignore
+
+        // Register handlers BEFORE enabling events to avoid the race where an event
+        // fires between EnableRaisingEvents=true and the first handler registration.
+        watcher.Changed.Add(fun e -> onChanged e.FullPath)
+        watcher.Created.Add(fun e -> onChanged e.FullPath)
+        watcher.Renamed.Add(fun e -> onChanged e.FullPath)  // e.FullPath = new path
+        watcher.Deleted.Add(fun e -> onChanged e.FullPath)
+        watcher.EnableRaisingEvents <- true
+
+        // Block until App.fs cancels this subscription during reconciliation
+        do! Async.AwaitWaitHandle(ct.WaitHandle) |> Async.Ignore
+        // `use` bindings dispose watcher and debounce here in reverse declaration order
+      })
 
   /// Rate-limit a subscription to fire at most once per `intervalMs` milliseconds.
   ///

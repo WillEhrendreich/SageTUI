@@ -11554,9 +11554,141 @@ let sprint72StorageAtomicWriteTests =
     }
   ]
 
+/// Helper: start a CustomSub, run `actions` after startup delay, collect messages for `waitMs`.
+let private runSubWithActions (sub: Sub<string>) (actions: unit -> unit) (waitMs: int) : string list =
+  match sub with
+  | CustomSub(_, start) ->
+    let messages = System.Collections.Concurrent.ConcurrentBag<string>()
+    use cts = new System.Threading.CancellationTokenSource()
+    Async.Start(start messages.Add cts.Token, cts.Token)
+    System.Threading.Thread.Sleep(100) // allow FSW to start and EnableRaisingEvents
+    actions()
+    System.Threading.Thread.Sleep(waitMs)
+    cts.Cancel()
+    System.Threading.Thread.Sleep(50)
+    messages |> Seq.toList |> List.sort
+  | _ -> failwith "Expected CustomSub"
+
+/// Helper: run a CustomSub for `durationMs` ms and collect all dispatched messages.
+let private runSubFor (sub: Sub<string>) (durationMs: int) : string list =
+  runSubWithActions sub (fun () -> ()) durationMs
+
+let sprint72FileWatchTests =
+  testList "Sub.fileWatch" [
+
+    testCase "debounce collapses rapid burst into exactly one message" <| fun () ->
+      let path = System.IO.Path.GetTempFileName()
+      try
+        let sub = Sub.fileWatch "t1" path 150 id
+        let msgs =
+          runSubWithActions sub
+            (fun () ->
+              for i in 1..5 do
+                System.IO.File.WriteAllText(path, $"content {i}")
+                System.Threading.Thread.Sleep(5))
+            400
+        msgs |> Expect.hasLength "exactly one message after burst" 1
+      finally
+        System.IO.File.Delete(path)
+
+    testCase "dispatches the full absolute path not just filename" <| fun () ->
+      let path = System.IO.Path.GetFullPath(System.IO.Path.GetTempFileName())
+      try
+        let sub = Sub.fileWatch "t2" path 50 id
+        let msgs =
+          runSubWithActions sub
+            (fun () -> System.IO.File.WriteAllText(path, "changed"))
+            300
+        msgs |> Expect.hasLength "one message" 1
+        msgs[0] |> Expect.equal "full path dispatched" path
+        System.IO.Path.IsPathRooted(msgs[0]) |> Expect.isTrue "path should be rooted"
+      finally
+        System.IO.File.Delete(path)
+
+    testCase "cancellation during debounce window suppresses pending dispatch" <| fun () ->
+      let path = System.IO.Path.GetTempFileName()
+      try
+        match Sub.fileWatch "t3" path 300 id with
+        | CustomSub(_, start) ->
+          let dispatched = ref 0
+          use cts = new System.Threading.CancellationTokenSource()
+          Async.Start(start (fun _ -> System.Threading.Interlocked.Increment(dispatched) |> ignore) cts.Token, cts.Token)
+          System.IO.File.WriteAllText(path, "trigger")
+          System.Threading.Thread.Sleep(50)
+          cts.Cancel()
+          System.Threading.Thread.Sleep(400)
+          !dispatched |> Expect.equal "no dispatch after cancel during debounce" 0
+        | _ -> failwith "expected CustomSub"
+      finally
+        System.IO.File.Delete(path)
+
+    testCase "cancellation before any file change produces zero messages" <| fun () ->
+      let path = System.IO.Path.GetTempFileName()
+      try
+        match Sub.fileWatch "t4" path 50 id with
+        | CustomSub(_, start) ->
+          let dispatched = ref 0
+          use cts = new System.Threading.CancellationTokenSource()
+          Async.Start(start (fun _ -> System.Threading.Interlocked.Increment(dispatched) |> ignore) cts.Token, cts.Token)
+          System.Threading.Thread.Sleep(20)
+          cts.Cancel()
+          System.Threading.Thread.Sleep(10)
+          System.IO.File.WriteAllText(path, "too late")
+          System.Threading.Thread.Sleep(200)
+          !dispatched |> Expect.equal "no dispatch when cancelled before write" 0
+        | _ -> failwith "expected CustomSub"
+      finally
+        System.IO.File.Delete(path)
+
+    testCase "directory watch dispatches when a file is created inside it" <| fun () ->
+      let dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), System.IO.Path.GetRandomFileName())
+      System.IO.Directory.CreateDirectory(dir) |> ignore
+      try
+        let sub = Sub.fileWatch "t5" dir 100 id
+        let newFile = System.IO.Path.Combine(dir, "newfile.txt")
+        let msgs =
+          runSubWithActions sub
+            (fun () -> System.IO.File.WriteAllText(newFile, "hello"))
+            400
+        msgs |> Expect.isNonEmpty "at least one message for directory creation"
+      finally
+        System.IO.Directory.Delete(dir, true)
+
+    testCase "Sub.prefix propagates through fileWatch id" <| fun () ->
+      let sub = Sub.fileWatch "watcher" "/some/path" 100 id
+      let prefixed = sub |> Sub.prefix "config"
+      match prefixed with
+      | CustomSub(id, _) -> id |> Expect.equal "prefixed id" "config/watcher"
+      | _ -> failwith "expected CustomSub after prefix"
+
+    testCase "Sub.map transforms the dispatched value through fileWatch" <| fun () ->
+      let path = System.IO.Path.GetTempFileName()
+      try
+        let sub =
+          Sub.fileWatch "t7" path 50 id
+          |> Sub.map (fun p -> $"changed:{p}")
+        match sub with
+        | CustomSub(_, start) ->
+          let received = System.Collections.Concurrent.ConcurrentBag<string>()
+          use cts = new System.Threading.CancellationTokenSource()
+          Async.Start(start received.Add cts.Token, cts.Token)
+          System.Threading.Thread.Sleep(100) // allow FSW to start
+          System.IO.File.WriteAllText(path, "trigger")
+          System.Threading.Thread.Sleep(300)
+          cts.Cancel()
+          System.Threading.Thread.Sleep(50)
+          let msgs = received |> Seq.toList
+          msgs |> Expect.hasLength "one mapped message" 1
+          msgs[0].StartsWith("changed:") |> Expect.isTrue "mapped value has prefix"
+        | _ -> failwith "expected CustomSub"
+      finally
+        System.IO.File.Delete(path)
+  ]
+
 [<Tests>]
 let sprint72Tests =
   testList "Sprint 72" [
     sprint72WithTimeoutBatchTests
     sprint72StorageAtomicWriteTests
+    sprint72FileWatchTests
   ]
