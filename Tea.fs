@@ -292,9 +292,9 @@ module Cmd =
     when 'input : equality =
     match computeCache.TryGetValue(id) with
     | true, struct(cachedInput, cachedOutput) when (cachedInput :?> 'input) = input ->
-      // Cache hit — dispatch immediately without going async
+      // Cache hit — enqueue directly, no async allocation needed
       let result = cachedOutput :?> 'output
-      OfAsync(fun dispatch -> async { dispatch (toMsg result) })
+      DirectMsg(toMsg result)
     | _ ->
       OfCancellableAsync(id, fun _ct dispatch -> async {
         let result = transform input
@@ -1156,6 +1156,40 @@ module Persistence =
         with  _ -> None
       WriteThrottleMs = 100 }
 
+// ---------------------------------------------------------------------------
+// DebuggerConfig / DebuggerMsg — in-process model inspector overlay
+// ---------------------------------------------------------------------------
+
+/// Configuration for the in-process model inspector overlay.
+/// Attach it to any program with `Program.withDebugger`.
+///
+/// `ToggleKey`    — key that shows/hides the overlay (default: F12).
+/// `ModelPrinter` — optional custom model renderer; defaults to `sprintf "%A"`.
+/// `MaxMessages`  — how many recent dispatched messages to display (default: 50).
+[<NoEquality; NoComparison>]
+type DebuggerConfig<'model> = {
+  ToggleKey:    Key
+  ModelPrinter: ('model -> string) option
+  MaxMessages:  int
+}
+
+/// Helpers for building `DebuggerConfig<'model>` values.
+module DebuggerConfig =
+
+  /// Default configuration: F12 toggle, sprintf "%A" model printer, last 50 messages.
+  let defaults<'model> : DebuggerConfig<'model> = {
+    ToggleKey    = Key.F 12
+    ModelPrinter = None
+    MaxMessages  = 50
+  }
+
+/// Messages for a debugger-wrapped program.
+/// App messages are passed through as `AppMsg`; the toggle action is `Toggle`.
+[<RequireQualifiedAccess>]
+type DebuggerMsg<'msg> =
+  | AppMsg of 'msg
+  | Toggle
+
 /// Program combinators for component composition.
 module Program =
   /// Transform a component's program to work within a parent program.
@@ -1539,7 +1573,64 @@ module Program =
       Subscribe = program.Subscribe
       OnError   = program.OnError }
 
-/// A vocabulary type for asynchronous data loading states.
+  /// Attach a live model-inspector overlay to any program.
+  ///
+  /// The overlay is off by default. Press `cfg.ToggleKey` (F12) to toggle it on/off.
+  /// When visible, the overlay shows:
+  ///   • Current model (via `cfg.ModelPrinter`, or `sprintf "%A"` by default)
+  ///   • Count of recently dispatched messages
+  ///
+  /// App messages are wrapped in `DebuggerMsg.AppMsg`; the toggle fires `DebuggerMsg.Toggle`.
+  ///
+  /// Compose AFTER other combinators like `withLogging` to instrument the full pipeline:
+  ///   program |> Program.withLogging logger |> Program.withDebugger cfg
+  let withDebugger
+    (cfg: DebuggerConfig<'model>)
+    (program: Program<'model,'msg>)
+    : Program<'model, DebuggerMsg<'msg>> =
+    let mutable visible = false
+    let mutable msgLog : string list = []
+    { Init = fun () ->
+        let m, cmd = program.Init()
+        m, Cmd.map DebuggerMsg.AppMsg cmd
+      Update = fun msg model ->
+        match msg with
+        | DebuggerMsg.Toggle ->
+          visible <- not visible
+          model, NoCmd
+        | DebuggerMsg.AppMsg inner ->
+          let newModel, cmd = program.Update inner model
+          let label = sprintf "%A" inner
+          let updated = label :: msgLog
+          msgLog <- if updated.Length > cfg.MaxMessages then List.take cfg.MaxMessages updated else updated
+          newModel, Cmd.map DebuggerMsg.AppMsg cmd
+      View = fun model ->
+        let appView = program.View model
+        match visible with
+        | false -> appView
+        | true ->
+          let printer = cfg.ModelPrinter |> Option.defaultValue (fun m -> sprintf "%A" m)
+          let modelStr = printer model
+          let msgCountStr = sprintf "%d msg" (List.length msgLog)
+          let panel =
+            El.column [
+              El.text "── Debug ──────────────────────────────────────"
+              El.text (sprintf "Model: %s" modelStr)
+              El.text msgCountStr
+            ]
+          El.column [ appView; panel ]
+      Subscribe = fun model ->
+        let innerSubs = program.Subscribe model |> List.map (Sub.map DebuggerMsg.AppMsg)
+        let toggleSub =
+          KeySub (fun (key, _) ->
+            if key = cfg.ToggleKey then Some DebuggerMsg.Toggle
+            else None)
+        toggleSub :: innerSubs
+      OnError =
+        match program.OnError with
+        | CrashOnError   -> CrashOnError
+        | LogAndContinue -> LogAndContinue
+        | RecoverWith f  -> RecoverWith (fun ex -> f ex |> Option.map DebuggerMsg.AppMsg) }
 /// The most commonly reinvented type in F# async applications — provided here so
 /// every user doesn't have to define their own `type LoadState`.
 ///
@@ -1679,6 +1770,96 @@ module Deferred =
     | Idle | Loading -> loading
     | Failed e -> error e
     | Loaded a -> render a
+
+// ---------------------------------------------------------------------------
+// Diff<'a> — Myers/LCS-based structural diff for any comparable list
+// ---------------------------------------------------------------------------
+
+/// Represents a single change in a diff between two sequences.
+[<RequireQualifiedAccess>]
+type DiffChange<'a> =
+  /// Present only in the target sequence (insertion).
+  | Added of 'a
+  /// Present only in the source sequence (deletion).
+  | Removed of 'a
+  /// Present in both sequences (no change).
+  | Unchanged of 'a
+
+/// Structural diff operations over `'a list` values.
+/// Uses the Longest Common Subsequence algorithm (O(N*M) time, O(N*M) space).
+/// Suitable for short-to-medium length lists typical in TUI data models.
+module Diff =
+
+  // Build the LCS length table via dynamic programming.
+  let private lcsTable (a: 'a array) (b: 'a array) =
+    let n = a.Length
+    let m = b.Length
+    let dp = Array2D.zeroCreate<int> (n + 1) (m + 1)
+    for i = 1 to n do
+      for j = 1 to m do
+        if a.[i-1] = b.[j-1] then dp.[i,j] <- dp.[i-1,j-1] + 1
+        else dp.[i,j] <- max dp.[i-1,j] dp.[i,j-1]
+    dp
+
+  /// Compute the diff between `src` and `tgt`.
+  ///
+  /// The result is a list of `DiffChange<'a>` values. Applying all `Unchanged`
+  /// and `Added` items (in order, skipping `Removed`) reconstructs `tgt` exactly.
+  ///
+  /// Example:
+  ///   Diff.compute ["a";"b";"c"] ["a";"X";"c"]
+  ///   // → [Unchanged "a"; Removed "b"; Added "X"; Unchanged "c"]
+  let compute (src: 'a list) (tgt: 'a list) : DiffChange<'a> list =
+    let a = Array.ofList src
+    let b = Array.ofList tgt
+    let n = a.Length
+    let m = b.Length
+    if n = 0 && m = 0 then []
+    elif n = 0 then b |> Array.toList |> List.map DiffChange.Added
+    elif m = 0 then a |> Array.toList |> List.map DiffChange.Removed
+    else
+      let dp = lcsTable a b
+      let result = System.Collections.Generic.List<DiffChange<'a>>()
+      let rec backtrack i j =
+        match i, j with
+        | 0, 0 -> ()
+        | i, 0 ->
+          result.Insert(0, DiffChange.Removed a.[i-1])
+          backtrack (i-1) 0
+        | 0, j ->
+          result.Insert(0, DiffChange.Added b.[j-1])
+          backtrack 0 (j-1)
+        | i, j ->
+          if a.[i-1] = b.[j-1] then
+            result.Insert(0, DiffChange.Unchanged a.[i-1])
+            backtrack (i-1) (j-1)
+          elif dp.[i-1,j] >= dp.[i,j-1] then
+            result.Insert(0, DiffChange.Removed a.[i-1])
+            backtrack (i-1) j
+          else
+            result.Insert(0, DiffChange.Added b.[j-1])
+            backtrack i (j-1)
+      backtrack n m
+      result |> Seq.toList
+
+  /// Count the number of `Added` changes.
+  let countAdded (changes: DiffChange<'a> list) : int =
+    changes |> List.sumBy (function DiffChange.Added _ -> 1 | _ -> 0)
+
+  /// Count the number of `Removed` changes.
+  let countRemoved (changes: DiffChange<'a> list) : int =
+    changes |> List.sumBy (function DiffChange.Removed _ -> 1 | _ -> 0)
+
+  /// Count the number of `Unchanged` items.
+  let countUnchanged (changes: DiffChange<'a> list) : int =
+    changes |> List.sumBy (function DiffChange.Unchanged _ -> 1 | _ -> 0)
+
+  /// Reconstruct the target sequence from a diff result.
+  /// Equivalent to keeping `Added` and `Unchanged` items in order.
+  let applyPatch (changes: DiffChange<'a> list) : 'a list =
+    changes |> List.choose (function
+      | DiffChange.Unchanged x | DiffChange.Added x -> Some x
+      | DiffChange.Removed _ -> None)
 
 // ---------------------------------------------------------------------------
 // KeyMap<'msg> — composable, zero-alloc-at-runtime modal key bindings

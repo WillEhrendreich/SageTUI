@@ -123,6 +123,7 @@ module Span =
 /// Color names: black, red, green, yellow, blue, magenta, cyan, white
 /// (append "bright" for bright variants, e.g. "brightred").
 module Markup =
+  open System
   open System.Text.RegularExpressions
 
   let private parseColor (name: string) : Color option =
@@ -143,6 +144,24 @@ module Markup =
     | "brightmagenta"-> Some (Named(Magenta, Bright))
     | "brightcyan"   -> Some (Named(Cyan,    Bright))
     | "brightwhite"  -> Some (Named(White,   Bright))
+    | s when s.StartsWith("#") ->
+      let hex = s.TrimStart('#')
+      match hex.Length with
+      | 3 ->
+        try
+          let r = Convert.ToByte(sprintf "%c%c" hex.[0] hex.[0], 16)
+          let g = Convert.ToByte(sprintf "%c%c" hex.[1] hex.[1], 16)
+          let b = Convert.ToByte(sprintf "%c%c" hex.[2] hex.[2], 16)
+          Some (Rgb(r, g, b))
+        with _ -> None
+      | 6 ->
+        try
+          let r = Convert.ToByte(hex.[0..1], 16)
+          let g = Convert.ToByte(hex.[2..3], 16)
+          let b = Convert.ToByte(hex.[4..5], 16)
+          Some (Rgb(r, g, b))
+        with _ -> None
+      | _ -> None
     | _ -> None
 
   // Token discriminated union for the markup parser

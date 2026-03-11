@@ -1072,6 +1072,98 @@ module TableSelection =
         | _ -> MultiRows ks'
     | RangeRows _ -> sel
 
+// ---------------------------------------------------------------------------
+// OrderableList<'a> — pure state module for keyboard-driven list reordering
+// ---------------------------------------------------------------------------
+
+/// An ordered list of items that supports explicit position manipulation.
+/// All functions are pure and return a new `OrderableList<'a>`.
+/// Use `OrderableList.ofList` to create, `OrderableList.toList` to extract.
+[<Struct>]
+type OrderableList<'a> = private OrderableList of items: 'a list
+
+/// Pure functions for manipulating an `OrderableList<'a>`.
+module OrderableList =
+
+  /// Create from a regular list.
+  let ofList (items: 'a list) : OrderableList<'a> = OrderableList items
+
+  /// Extract items as a regular list in current order.
+  let toList (OrderableList items) : 'a list = items
+
+  /// Number of items.
+  let length (OrderableList items) : int = List.length items
+
+  /// True when the list has no items.
+  let isEmpty (OrderableList items) : bool = List.isEmpty items
+
+  /// Move the item at `index` one position earlier. No-op if already at index 0.
+  let moveUp (index: int) (OrderableList items) : OrderableList<'a> =
+    if index <= 0 || index >= List.length items then OrderableList items
+    else
+      let arr = Array.ofList items
+      let tmp = arr.[index - 1]
+      arr.[index - 1] <- arr.[index]
+      arr.[index] <- tmp
+      OrderableList (Array.toList arr)
+
+  /// Move the item at `index` one position later. No-op if already at last index.
+  let moveDown (index: int) (OrderableList items) : OrderableList<'a> =
+    let n = List.length items
+    if index < 0 || index >= n - 1 then OrderableList items
+    else
+      let arr = Array.ofList items
+      let tmp = arr.[index + 1]
+      arr.[index + 1] <- arr.[index]
+      arr.[index] <- tmp
+      OrderableList (Array.toList arr)
+
+  /// Insert `item` immediately before position `index`.
+  /// If `index >= length`, appends to end.
+  let insertBefore (index: int) (item: 'a) (OrderableList items) : OrderableList<'a> =
+    let n = List.length items
+    let i = max 0 (min index n)
+    let before, after = List.splitAt i items
+    OrderableList (before @ [item] @ after)
+
+  /// Insert `item` immediately after position `index`.
+  /// If `index >= length - 1`, appends to end.
+  let insertAfter (index: int) (item: 'a) (OrderableList items) : OrderableList<'a> =
+    let n = List.length items
+    let i = max 0 (min (index + 1) n)
+    let before, after = List.splitAt i items
+    OrderableList (before @ [item] @ after)
+
+  /// Remove the item at `index`. No-op if index is out of range.
+  let removeAt (index: int) (OrderableList items) : OrderableList<'a> =
+    let n = List.length items
+    if index < 0 || index >= n then OrderableList items
+    else
+      items
+      |> List.indexed
+      |> List.filter (fun (i, _) -> i <> index)
+      |> List.map snd
+      |> OrderableList
+
+  /// Swap the items at `indexA` and `indexB`. No-op if either index is out of range.
+  let swapIndices (indexA: int) (indexB: int) (OrderableList items) : OrderableList<'a> =
+    let n = List.length items
+    if indexA < 0 || indexB < 0 || indexA >= n || indexB >= n then OrderableList items
+    else
+      let arr = Array.ofList items
+      let tmp = arr.[indexA]
+      arr.[indexA] <- arr.[indexB]
+      arr.[indexB] <- tmp
+      OrderableList (Array.toList arr)
+
+  /// Apply `f` to every item, preserving order.
+  let map (f: 'a -> 'b) (OrderableList items) : OrderableList<'b> =
+    OrderableList (List.map f items)
+
+  /// Retain only items for which `predicate` returns true, preserving relative order.
+  let filter (predicate: 'a -> bool) (OrderableList items) : OrderableList<'a> =
+    OrderableList (List.filter predicate items)
+
 /// Interactive state for a table with cursor navigation and multi-row selection.
 /// Works with `Table.viewState` for rendering.
 type TableState = {

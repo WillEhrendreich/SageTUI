@@ -138,6 +138,10 @@ module App =
     let mutable dragTrackingActive = false
     let mutable pasteTrackingActive = false
     let frameSw = System.Diagnostics.Stopwatch()
+    // Holds POSIX signal handler registrations alive for the lifetime of the run loop.
+    // PosixSignalRegistration is IDisposable; if the list were a dead local binding the
+    // JIT/GC could collect it early, silently unregistering the SIGTSTP/SIGCONT/SIGTERM handlers.
+    let mutable sigHandlers: IDisposable list = []
 
     let msgChannel = ConcurrentQueue<'msg>()
     let dispatch msg = msgChannel.Enqueue(msg)
@@ -235,7 +239,7 @@ module App =
           | _ -> None)
       let duplicates = ids |> List.groupBy id |> List.choose (fun (k, vs) -> if vs.Length > 1 then Some k else None)
       for dupId in duplicates do
-        eprintfn "[SageTUI] Warning: duplicate subscription ID '%s' — only the first will run." dupId
+        config.LogSink(sprintf "[SageTUI] Warning: duplicate subscription ID '%s' — only the first will run.\n" dupId)
       let currentIds = ids |> Set.ofList
       for KeyValue(id, cts) in activeSubs |> Seq.toList do
         match Set.contains id currentIds with
@@ -308,6 +312,8 @@ module App =
       try
         for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
         activeSubs.Clear()
+        for h in sigHandlers do try h.Dispose() with _ -> ()
+        sigHandlers <- []
         running <- false
         match mouseTrackingActive with
         | true -> backend.Write Ansi.disableMouseTracking; mouseTrackingActive <- false
@@ -336,7 +342,9 @@ module App =
     // POSIX suspend/resume (SIGTSTP / SIGCONT): restore the terminal before the
     // process is stopped, then re-enter raw/alt-screen when it resumes.
     // Windows does not have SIGTSTP so we guard on the OS platform.
-    let _sigHandlers =
+    // Assigned to sigHandlers mutable (a closure-captured GC root) so the JIT cannot
+    // collect the PosixSignalRegistration objects before the process exits.
+    sigHandlers <-
       match RuntimeInformation.IsOSPlatform(OSPlatform.Windows) with
       | true -> []
       | false ->
@@ -372,7 +380,7 @@ module App =
             ctx.Cancel <- true   // prevent default kill so cleanup() runs first
             cleanup()
             System.Environment.Exit(143))
-        [ tstp; cont; term ]
+        [ tstp :> IDisposable; cont; term ]
 
     try
       interpretCmd initCmd
@@ -767,6 +775,7 @@ module App =
     let mutable dragTrackingActive = false
     let mutable pasteTrackingActive = false
     let frameSw = System.Diagnostics.Stopwatch()
+    let mutable sigHandlers: IDisposable list = []
 
     let msgChannel = ConcurrentQueue<'msg>()
     let dispatch msg = msgChannel.Enqueue(msg)
@@ -870,6 +879,8 @@ module App =
     let cleanup () =
       for kvp in activeSubs do kvp.Value.Cancel(); kvp.Value.Dispose()
       activeSubs.Clear()
+      for h in sigHandlers do try h.Dispose() with _ -> ()
+      sigHandlers <- []
       match mouseTrackingActive with
       | true -> backend.Write Ansi.disableMouseTracking; mouseTrackingActive <- false
       | false -> ()
@@ -897,7 +908,9 @@ module App =
 
     // POSIX suspend/resume + graceful SIGTERM for runInlineWith.
     // runWith has the same registrations; inline mode adds them here.
-    let _sigHandlers =
+    // Assigned to sigHandlers mutable (a closure-captured GC root) so the JIT cannot
+    // collect the PosixSignalRegistration objects before the process exits.
+    sigHandlers <-
       match RuntimeInformation.IsOSPlatform(OSPlatform.Windows) with
       | true -> []
       | false ->
@@ -921,7 +934,7 @@ module App =
             ctx.Cancel <- true
             cleanup()
             System.Environment.Exit(143))
-        [ tstp; cont; term ]
+        [ tstp :> IDisposable; cont; term ]
 
     try
       Console.CancelKeyPress.AddHandler(cancelHandler)

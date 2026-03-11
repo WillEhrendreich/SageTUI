@@ -601,6 +601,8 @@ module TestHarness =
       let rec run (c: Cmd<'msg>) =
         async {
           match c with
+          | DirectMsg msg ->
+            messages.Add msg
           | OfAsync runFn ->
             do! runFn messages.Add
           | OfCancellableAsync(_, runFn) ->

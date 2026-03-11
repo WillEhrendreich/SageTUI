@@ -12150,31 +12150,34 @@ let sprint73LazyTests = testList "El.lazy3 and lazy4" [
 
 let sprint73CmdComputeTests = testList "Cmd.computeWhen" [
   testAsync "dispatches Ok on new input" {
+    let key = System.Guid.NewGuid().ToString()
     let mutable computed = 0
     let transform x = computed <- computed + 1; x * 2
-    let cmd = Cmd.computeWhen "test1" 21 transform id
+    let cmd = Cmd.computeWhen key 21 transform id
     let! msgs = TestHarness.runCmdAsync cmd
     msgs |> Expect.equal "42 dispatched" [ 42 ]
     computed |> Expect.equal "computed once" 1
   }
 
   testAsync "dispatches immediately on same input (cache hit)" {
+    let key = System.Guid.NewGuid().ToString()
     let mutable computed = 0
     let transform x = computed <- computed + 1; x * 2
-    let cmd1 = Cmd.computeWhen "test2" 10 transform id
+    let cmd1 = Cmd.computeWhen key 10 transform id
     let! _ = TestHarness.runCmdAsync cmd1
     // In TEA, Update runs sequentially — cmd2 is built after cmd1's run has populated the cache
-    let cmd2 = Cmd.computeWhen "test2" 10 transform id
+    let cmd2 = Cmd.computeWhen key 10 transform id
     let! msgs = TestHarness.runCmdAsync cmd2
     msgs |> Expect.equal "20 dispatched" [ 20 ]
     computed |> Expect.equal "computed only once across both calls" 1
   }
 
   testAsync "recomputes on changed input" {
+    let key = System.Guid.NewGuid().ToString()
     let mutable computed = 0
     let transform x = computed <- computed + 1; x * 2
-    let cmd1 = Cmd.computeWhen "test3" 5 transform id
-    let cmd2 = Cmd.computeWhen "test3" 7 transform id
+    let cmd1 = Cmd.computeWhen key 5 transform id
+    let cmd2 = Cmd.computeWhen key 7 transform id
     let! _ = TestHarness.runCmdAsync cmd1
     let! msgs = TestHarness.runCmdAsync cmd2
     msgs |> Expect.equal "14 dispatched" [ 14 ]
@@ -12881,4 +12884,254 @@ let sprint75Tests =
     sprint75LoggingTests
     sprint75TableSelectionTests
     sprint75PersistenceTests
+  ]
+
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  SPRINT 76 — withDebugger · OrderableList · Diff                           ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+
+// ─── P1: Program.withDebugger ─────────────────────────────────────────────────
+let sprint76DebuggerTests = testList "withDebugger" [
+
+  testCase "overlay not shown before toggle" <| fun () ->
+    let prog = counterProgram () |> Program.withDebugger DebuggerConfig.defaults
+    let app = TestHarness.init 80 24 prog
+    let output = TestHarness.render app
+    output.Contains("── Debug") |> Expect.isFalse "overlay should not appear"
+
+  testCase "overlay appears after F12 toggle" <| fun () ->
+    let prog = counterProgram () |> Program.withDebugger DebuggerConfig.defaults
+    TestHarness.assertSequence 80 24 prog [
+      Step.PressKey (Key.F 12)
+      Step.ExpectView "── Debug"
+    ]
+
+  testCase "overlay shows current model via sprintf %A" <| fun () ->
+    let prog = counterProgram () |> Program.withDebugger DebuggerConfig.defaults
+    TestHarness.assertSequence 80 24 prog [
+      Step.SendMsg (DebuggerMsg.AppMsg 5)
+      Step.PressKey (Key.F 12)
+      Step.ExpectView "5"
+    ]
+
+  testCase "custom modelPrinter is used when provided" <| fun () ->
+    let cfg : DebuggerConfig<int> = { DebuggerConfig.defaults with ModelPrinter = Some (fun m -> sprintf "MY_MODEL=%d" m) }
+    let prog = counterProgram () |> Program.withDebugger cfg
+    TestHarness.assertSequence 80 24 prog [
+      Step.SendMsg (DebuggerMsg.AppMsg 3)
+      Step.PressKey (Key.F 12)
+      Step.ExpectView "MY_MODEL=3"
+    ]
+
+  testCase "overlay shows last N dispatched messages" <| fun () ->
+    let prog = counterProgram () |> Program.withDebugger DebuggerConfig.defaults
+    TestHarness.assertSequence 80 24 prog [
+      Step.SendMsg (DebuggerMsg.AppMsg 1)
+      Step.SendMsg (DebuggerMsg.AppMsg 2)
+      Step.SendMsg (DebuggerMsg.AppMsg 3)
+      Step.PressKey (Key.F 12)
+      Step.ExpectView "3 msg"
+    ]
+
+  testCase "second F12 hides overlay" <| fun () ->
+    let prog = counterProgram () |> Program.withDebugger DebuggerConfig.defaults
+    TestHarness.assertSequence 80 24 prog [
+      Step.PressKey (Key.F 12)
+      Step.ExpectView "── Debug"
+      Step.PressKey (Key.F 12)
+      Step.ExpectNoView "── Debug"
+    ]
+
+  testCase "overlay does not affect model" <| fun () ->
+    let prog = counterProgram () |> Program.withDebugger DebuggerConfig.defaults
+    let app = TestHarness.init 80 24 prog
+    let app2 = TestHarness.pressKey (Key.F 12) app
+    app2.Model |> Expect.equal "model unchanged" 0
+
+  testCase "withDebugger composes with withLogging" <| fun () ->
+    let logger, getEvents = Logger.toList<int,int> ()
+    let prog =
+      counterProgram ()
+      |> Program.withLogging logger
+      |> Program.withDebugger DebuggerConfig.defaults
+    TestHarness.assertSequence 80 24 prog [
+      Step.SendMsg (DebuggerMsg.AppMsg 1)
+      Step.SendMsg (DebuggerMsg.AppMsg 2)
+      Step.PressKey (Key.F 12)
+      Step.ExpectView "── Debug"
+    ]
+    getEvents () |> List.length |> (fun n -> (n, 1) |> Expect.isGreaterThan "at least 2 events")
+
+  testCase "DebuggerConfig.defaults uses F12 and no custom printer" <| fun () ->
+    let d : DebuggerConfig<int> = DebuggerConfig.defaults
+    d.ToggleKey |> Expect.equal "F12" (Key.F 12)
+    d.ModelPrinter |> Expect.isNone "no custom printer"
+    d.MaxMessages |> Expect.equal "default max" 50
+]
+
+// ─── P3: OrderableList ────────────────────────────────────────────────────────
+let sprint76OrderableListTests = testList "OrderableList" [
+
+  testCase "init creates list in order" <| fun () ->
+    let ol = OrderableList.ofList ["a"; "b"; "c"]
+    ol |> OrderableList.toList |> Expect.equal "same order" ["a"; "b"; "c"]
+
+  testCase "moveUp moves item at index up one" <| fun () ->
+    let ol = OrderableList.ofList [1; 2; 3; 4]
+    let ol2 = OrderableList.moveUp 2 ol
+    ol2 |> OrderableList.toList |> Expect.equal "3 moved up" [1; 3; 2; 4]
+
+  testCase "moveUp at index 0 is identity" <| fun () ->
+    let ol = OrderableList.ofList [1; 2; 3]
+    let ol2 = OrderableList.moveUp 0 ol
+    ol2 |> OrderableList.toList |> Expect.equal "no-op" [1; 2; 3]
+
+  testCase "moveDown moves item at index down one" <| fun () ->
+    let ol = OrderableList.ofList [1; 2; 3; 4]
+    let ol2 = OrderableList.moveDown 1 ol
+    ol2 |> OrderableList.toList |> Expect.equal "2 moved down" [1; 3; 2; 4]
+
+  testCase "moveDown at last index is identity" <| fun () ->
+    let ol = OrderableList.ofList [1; 2; 3]
+    let ol2 = OrderableList.moveDown 2 ol
+    ol2 |> OrderableList.toList |> Expect.equal "no-op" [1; 2; 3]
+
+  testCase "insertBefore inserts at correct position" <| fun () ->
+    let ol = OrderableList.ofList ["a"; "b"; "d"]
+    let ol2 = OrderableList.insertBefore 2 "c" ol
+    ol2 |> OrderableList.toList |> Expect.equal "c before d" ["a"; "b"; "c"; "d"]
+
+  testCase "insertAfter inserts at correct position" <| fun () ->
+    let ol = OrderableList.ofList ["a"; "b"; "d"]
+    let ol2 = OrderableList.insertAfter 1 "c" ol
+    ol2 |> OrderableList.toList |> Expect.equal "c after b" ["a"; "b"; "c"; "d"]
+
+  testCase "removeAt removes the item at index" <| fun () ->
+    let ol = OrderableList.ofList ["a"; "b"; "c"]
+    let ol2 = OrderableList.removeAt 1 ol
+    ol2 |> OrderableList.toList |> Expect.equal "b removed" ["a"; "c"]
+
+  testCase "swapIndices swaps two items" <| fun () ->
+    let ol = OrderableList.ofList [10; 20; 30]
+    let ol2 = OrderableList.swapIndices 0 2 ol
+    ol2 |> OrderableList.toList |> Expect.equal "swapped" [30; 20; 10]
+
+  testCase "length returns correct count" <| fun () ->
+    OrderableList.ofList [1;2;3;4;5] |> OrderableList.length |> Expect.equal "5" 5
+
+  testCase "isEmpty on empty list" <| fun () ->
+    OrderableList.ofList [] |> OrderableList.isEmpty |> Expect.isTrue "empty"
+
+  testCase "isEmpty on non-empty list" <| fun () ->
+    OrderableList.ofList [1] |> OrderableList.isEmpty |> Expect.isFalse "not empty"
+
+  testCase "map transforms all items" <| fun () ->
+    let ol = OrderableList.ofList [1; 2; 3]
+    ol |> OrderableList.map ((*) 2) |> OrderableList.toList |> Expect.equal "doubled" [2; 4; 6]
+
+  testCase "filter retains matching items in order" <| fun () ->
+    let ol = OrderableList.ofList [1;2;3;4;5]
+    ol |> OrderableList.filter (fun x -> x % 2 = 0) |> OrderableList.toList |> Expect.equal "evens" [2; 4]
+
+  testCase "moveUp then moveDown roundtrips" <| fun () ->
+    let ol = OrderableList.ofList [1; 2; 3]
+    let ol2 = ol |> OrderableList.moveUp 1 |> OrderableList.moveDown 0
+    ol2 |> OrderableList.toList |> Expect.equal "roundtrip" [1; 2; 3]
+]
+
+// ─── P4: Diff module ──────────────────────────────────────────────────────────
+let sprint76DiffTests = testList "Diff" [
+
+  testCase "identical lists produce all Unchanged" <| fun () ->
+    let result = Diff.compute [1;2;3] [1;2;3]
+    result |> Expect.equal "all unchanged" [
+      DiffChange.Unchanged 1
+      DiffChange.Unchanged 2
+      DiffChange.Unchanged 3
+    ]
+
+  testCase "empty -> list produces all Added" <| fun () ->
+    let result = Diff.compute [] ["a";"b";"c"]
+    result |> Expect.equal "all added" [
+      DiffChange.Added "a"
+      DiffChange.Added "b"
+      DiffChange.Added "c"
+    ]
+
+  testCase "list -> empty produces all Removed" <| fun () ->
+    let result = Diff.compute ["a";"b";"c"] []
+    result |> Expect.equal "all removed" [
+      DiffChange.Removed "a"
+      DiffChange.Removed "b"
+      DiffChange.Removed "c"
+    ]
+
+  testCase "both empty produces empty list" <| fun () ->
+    Diff.compute ([] : int list) [] |> Expect.equal "empty" []
+
+  testCase "single addition in middle" <| fun () ->
+    let result = Diff.compute ["a";"c"] ["a";"b";"c"]
+    result |> List.exists (function DiffChange.Added "b" -> true | _ -> false)
+    |> Expect.isTrue "b was added"
+    result |> List.exists (function DiffChange.Unchanged "a" -> true | _ -> false)
+    |> Expect.isTrue "a unchanged"
+    result |> List.exists (function DiffChange.Unchanged "c" -> true | _ -> false)
+    |> Expect.isTrue "c unchanged"
+
+  testCase "single removal in middle" <| fun () ->
+    let result = Diff.compute ["a";"b";"c"] ["a";"c"]
+    result |> List.exists (function DiffChange.Removed "b" -> true | _ -> false)
+    |> Expect.isTrue "b was removed"
+
+  testCase "replacement is remove+add" <| fun () ->
+    let result = Diff.compute ["a";"b";"c"] ["a";"X";"c"]
+    let hasRemoved = result |> List.exists (function DiffChange.Removed "b" -> true | _ -> false)
+    let hasAdded   = result |> List.exists (function DiffChange.Added   "X" -> true | _ -> false)
+    hasRemoved |> Expect.isTrue "b removed"
+    hasAdded   |> Expect.isTrue "X added"
+
+  testCase "unchanged items preserved in output" <| fun () ->
+    let result = Diff.compute [1;2;3;4;5] [1;3;5]
+    let unchanged = result |> List.choose (function DiffChange.Unchanged x -> Some x | _ -> None)
+    unchanged |> Expect.equal "shared items" [1;3;5]
+
+  testCase "roundtrip: apply patch reconstructs target" <| fun () ->
+    let src = ["a";"b";"c";"d"]
+    let tgt = ["a";"c";"e"]
+    let result = Diff.compute src tgt
+    let reconstructed =
+      result |> List.choose (function
+        | DiffChange.Unchanged x | DiffChange.Added x -> Some x
+        | DiffChange.Removed _ -> None)
+    reconstructed |> Expect.equal "reconstructed target" tgt
+
+  testCase "countAdded/countRemoved/countUnchanged helpers" <| fun () ->
+    let result = Diff.compute [1;2;3] [1;3;4]
+    Diff.countAdded result   |> Expect.equal "1 added"   1
+    Diff.countRemoved result |> Expect.equal "1 removed" 1
+    Diff.countUnchanged result |> Expect.equal "2 unchanged" 2
+
+  testCase "strings: word-level diff detects insertions" <| fun () ->
+    let v1 = "the quick brown fox" |> (fun s -> s.Split(' ') |> Array.toList)
+    let v2 = "the very quick brown fox" |> (fun s -> s.Split(' ') |> Array.toList)
+    let result = Diff.compute v1 v2
+    result |> List.exists (function DiffChange.Added "very" -> true | _ -> false)
+    |> Expect.isTrue "very was added"
+
+  testCase "property: unchanged items are subset of both lists" <| fun () ->
+    let src = [1;2;3;4;5]
+    let tgt = [1;3;5;7;9]
+    let result = Diff.compute src tgt
+    let unchanged = result |> List.choose (function DiffChange.Unchanged x -> Some x | _ -> None)
+    unchanged |> List.forall (fun x -> List.contains x src && List.contains x tgt)
+    |> Expect.isTrue "unchanged in both"
+]
+
+[<Tests>]
+let sprint76Tests =
+  testList "Sprint 76" [
+    sprint76DebuggerTests
+    sprint76OrderableListTests
+    sprint76DiffTests
   ]
