@@ -707,18 +707,23 @@ module Sub =
             System.Threading.Timeout.Infinite,  // do not start until first event fires
             System.Threading.Timeout.Infinite)  // fire once; do not repeat
 
-        let onChanged (fullPath: string) =
+        // Build path from watchDir + e.Name rather than e.FullPath.
+        // On macOS, FSEvents resolves symlinks in FullPath (e.g. /var → /private/var),
+        // which would produce a different path than the caller supplied.
+        // Reconstructing from watchDir preserves the original path representation.
+        let onChanged (name: string) =
           if not ct.IsCancellationRequested then
-            System.Threading.Volatile.Write(&pendingPath, fullPath)
+            let p = System.IO.Path.Combine(watchDir, name)
+            System.Threading.Volatile.Write(&pendingPath, p)
             // Reset the countdown; any event within debounceMs restarts the window
             debounce.Change(debounceMs, System.Threading.Timeout.Infinite) |> ignore
 
         // Register handlers BEFORE enabling events to avoid the race where an event
         // fires between EnableRaisingEvents=true and the first handler registration.
-        watcher.Changed.Add(fun e -> onChanged e.FullPath)
-        watcher.Created.Add(fun e -> onChanged e.FullPath)
-        watcher.Renamed.Add(fun e -> onChanged e.FullPath)  // e.FullPath = new path
-        watcher.Deleted.Add(fun e -> onChanged e.FullPath)
+        watcher.Changed.Add(fun e -> onChanged e.Name)
+        watcher.Created.Add(fun e -> onChanged e.Name)
+        watcher.Renamed.Add(fun e -> onChanged e.Name)  // e.Name = new filename
+        watcher.Deleted.Add(fun e -> onChanged e.Name)
         watcher.EnableRaisingEvents <- true
 
         // Block until App.fs cancels this subscription during reconciliation

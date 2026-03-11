@@ -11561,7 +11561,7 @@ let private runSubWithActions (sub: Sub<string>) (actions: unit -> unit) (waitMs
     let messages = System.Collections.Concurrent.ConcurrentBag<string>()
     use cts = new System.Threading.CancellationTokenSource()
     Async.Start(start messages.Add cts.Token, cts.Token)
-    System.Threading.Thread.Sleep(100) // allow FSW to start and EnableRaisingEvents
+    System.Threading.Thread.Sleep(250) // allow FSW to start — macOS FSEvents needs more time
     actions()
     System.Threading.Thread.Sleep(waitMs)
     cts.Cancel()
@@ -11586,7 +11586,7 @@ let sprint72FileWatchTests =
               for i in 1..5 do
                 System.IO.File.WriteAllText(path, $"content {i}")
                 System.Threading.Thread.Sleep(5))
-            400
+            700
         msgs |> Expect.hasLength "exactly one message after burst" 1
       finally
         System.IO.File.Delete(path)
@@ -11613,6 +11613,7 @@ let sprint72FileWatchTests =
           let dispatched = ref 0
           use cts = new System.Threading.CancellationTokenSource()
           Async.Start(start (fun _ -> System.Threading.Interlocked.Increment(dispatched) |> ignore) cts.Token, cts.Token)
+          System.Threading.Thread.Sleep(250) // allow FSW to start
           System.IO.File.WriteAllText(path, "trigger")
           System.Threading.Thread.Sleep(50)
           cts.Cancel()
@@ -11649,7 +11650,7 @@ let sprint72FileWatchTests =
         let msgs =
           runSubWithActions sub
             (fun () -> System.IO.File.WriteAllText(newFile, "hello"))
-            400
+            700
         msgs |> Expect.isNonEmpty "at least one message for directory creation"
       finally
         System.IO.Directory.Delete(dir, true)
@@ -11672,9 +11673,9 @@ let sprint72FileWatchTests =
           let received = System.Collections.Concurrent.ConcurrentBag<string>()
           use cts = new System.Threading.CancellationTokenSource()
           Async.Start(start received.Add cts.Token, cts.Token)
-          System.Threading.Thread.Sleep(100) // allow FSW to start
+          System.Threading.Thread.Sleep(250) // allow FSW to start
           System.IO.File.WriteAllText(path, "trigger")
-          System.Threading.Thread.Sleep(300)
+          System.Threading.Thread.Sleep(400)
           cts.Cancel()
           System.Threading.Thread.Sleep(50)
           let msgs = received |> Seq.toList
