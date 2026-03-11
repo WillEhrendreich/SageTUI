@@ -11574,7 +11574,9 @@ let private runSubWithActions (sub: Sub<string>) (actions: unit -> unit) (waitMs
     thread.IsBackground <- true
     thread.Start()
     threadStarted.Wait(5000) |> ignore  // block until thread is executing
-    System.Threading.Thread.Sleep(500)  // conservative wait for FSW internal initialization
+    // 2000ms gives the OS thread time to reach EnableRaisingEvents even on a saturated
+    // CI runner where it may be preempted for hundreds of ms after signaling the MRES.
+    System.Threading.Thread.Sleep(2000)
     actions()
     System.Threading.Thread.Sleep(waitMs)
     cts.Cancel()
@@ -11587,7 +11589,11 @@ let private runSubFor (sub: Sub<string>) (durationMs: int) : string list =
   runSubWithActions sub (fun () -> ()) durationMs
 
 let sprint72FileWatchTests =
-  testList "Sub.fileWatch" [
+  // testSequenced: run these tests sequentially (not in parallel with each other or any other
+  // test). FileSystemWatcher tests create OS threads and real FSW instances; running them in
+  // parallel with 2700+ other tests saturates the thread pool and causes FSW events to be
+  // delivered after the test's wait window has closed.
+  testSequenced <| testList "Sub.fileWatch" [
 
     testCase "debounce collapses rapid burst into exactly one message" <| fun () ->
       let path = System.IO.Path.GetTempFileName()
@@ -11634,7 +11640,7 @@ let sprint72FileWatchTests =
           thread.IsBackground <- true
           thread.Start()
           threadStarted.Wait(5000) |> ignore
-          System.Threading.Thread.Sleep(500) // conservative wait for FSW init
+          System.Threading.Thread.Sleep(2000) // allow FSW to fully initialize on a busy runner
           System.IO.File.WriteAllText(path, "trigger")
           System.Threading.Thread.Sleep(50)
           cts.Cancel()
@@ -11703,7 +11709,7 @@ let sprint72FileWatchTests =
           thread.IsBackground <- true
           thread.Start()
           threadStarted.Wait(5000) |> ignore
-          System.Threading.Thread.Sleep(500) // conservative wait for FSW init
+          System.Threading.Thread.Sleep(2000) // allow FSW to fully initialize on a busy runner
           System.IO.File.WriteAllText(path, "trigger")
           System.Threading.Thread.Sleep(1500) // allow FSEvents latency + 50ms debounce + buffer
           cts.Cancel()
