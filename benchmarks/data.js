@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773257234172,
+  "lastUpdate": 1773262795498,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -252,6 +252,42 @@ window.BENCHMARK_DATA = {
             "value": 2871.7273582458497,
             "unit": "ns",
             "range": "± 17.528411776455012"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "40eab9ed274b090dd94a9a79069a58ef8c53f5d9",
+          "message": "docs: update CHANGELOG, README, QUICK_REFERENCE for v0.9.3\n\n- CHANGELOG.md: add [0.9.3] section covering Sprints 74-76 and expert\n  panel fixes (withDebugger, OrderableList, Diff, withLogging, withPersistence,\n  withHistory, withErrorBanner, computeWhen, NavigationStack, hex colors,\n  TableSelection, assertSequence/Snapshot, signal handler GC fix, log routing)\n- README.md: add Program combinators section with composition table,\n  add 'Program combinators' and 'Data utilities' feature rows, add OrderableList\n  to widgets list, bump package version 0.9.0 -> 0.9.3\n- QUICK_REFERENCE.md: add ErrorPolicy DU, DiffChange DU, DebuggerMsg DU,\n  and Program combinator ordering guide\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-03-11T15:51:27-05:00",
+          "tree_id": "d91be4f7790d3a68f0b2fe72dbddcb7957548f24",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/40eab9ed274b090dd94a9a79069a58ef8c53f5d9"
+        },
+        "date": 1773262794734,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 646.3744223668025,
+            "unit": "ns",
+            "range": "± 2.3877585466985916"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2891.2452829996746,
+            "unit": "ns",
+            "range": "± 18.75810742690998"
           }
         ]
       }
