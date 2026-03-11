@@ -39,8 +39,8 @@ jobs:
       - name: Verify README test count matches actual
         if: matrix.os == 'ubuntu-latest'
         run: |
-          # Extract actual test count from the test binary (runs fast, just lists tests)
-          ACTUAL=$(dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -c Release -- --list-tests 2>/dev/null | wc -l)
+          # Extract actual test count — filter log/header lines to be cross-platform stable
+          ACTUAL=$(dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -c Release -- --list-tests 2>/dev/null | grep -cvE '^\[|^\s*<|^\s*$')
           # Extract the count from the README h1 line: "N,NNN tests"
           README=$(grep -oP '\d[\d,]*(?= tests)' README.md | head -1 | tr -d ',')
           echo "Actual test count: $ACTUAL"
