@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773267283877,
+  "lastUpdate": 1773267527821,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -360,6 +360,42 @@ window.BENCHMARK_DATA = {
             "value": 2964.310893758138,
             "unit": "ns",
             "range": "± 24.879852428806032"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "2d05c09e4cf6fa865b150ee043ca18d97a8c3f9c",
+          "message": "ci: fix screenshots workflow NETSDK1005 build failure\n\nIndividual sample builds with --no-restore failed because\nSageTUI.Library.fsproj's assets file didn't include net10.0\nwhen computed as a transitive dependency. Replace piecemeal\nper-sample builds with a single dotnet build SageTUI.slnx -c Release\nwhich handles restore + multi-TFM build correctly for all projects.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-03-11T17:09:06-05:00",
+          "tree_id": "e23bf201ec6d101139e7ede4d2c26cd6cf85ff56",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/2d05c09e4cf6fa865b150ee043ca18d97a8c3f9c"
+        },
+        "date": 1773267527380,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 645.5696043287005,
+            "unit": "ns",
+            "range": "± 1.5403105475874435"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2846.986485799154,
+            "unit": "ns",
+            "range": "± 13.337701768477656"
           }
         ]
       }
