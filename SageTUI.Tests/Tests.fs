@@ -11560,24 +11560,24 @@ let private runSubWithActions (sub: Sub<string>) (actions: unit -> unit) (waitMs
   | CustomSub(_, start) ->
     let messages = System.Collections.Concurrent.ConcurrentBag<string>()
     use cts = new System.Threading.CancellationTokenSource()
-    use started = new System.Threading.SemaphoreSlim(0, 1)
-    // SwitchToNewThread guarantees the async runs on a dedicated OS thread immediately,
-    // bypassing thread-pool scheduling delays. On busy CI runners with 100+ parallel tests,
-    // Async.Start without this can take >500ms before the async gets a thread, causing
-    // the FSW to miss file writes.
-    Async.Start(
-      async {
-        do! Async.SwitchToNewThread()
-        started.Release() |> ignore
-        return! start messages.Add cts.Token
-      },
-      cts.Token)
-    started.Wait(5000) |> ignore  // block until async is running on its dedicated thread
-    System.Threading.Thread.Sleep(200)  // buffer for FileSystemWatcher internal initialization
+    // Thread.Start creates a new OS thread immediately, bypassing the thread pool.
+    // On busy CI runners, Async.Start can queue behind 100+ pool threads and not
+    // execute for seconds — too late for FileSystemWatcher to be ready for the write.
+    // Thread.Start guarantees the subscription thread starts within OS scheduling latency.
+    let thread =
+      System.Threading.Thread(fun () ->
+        // RunSynchronously blocks this thread until cts is cancelled.
+        // The FSW implementation ends with AwaitWaitHandle(ct.WaitHandle), so when
+        // cts.Cancel() fires the wait handle, the async completes and this returns.
+        try Async.RunSynchronously(start messages.Add cts.Token)
+        with _ -> ())
+    thread.IsBackground <- true
+    thread.Start()
+    System.Threading.Thread.Sleep(500)  // conservative wait for FSW internal initialization
     actions()
     System.Threading.Thread.Sleep(waitMs)
     cts.Cancel()
-    System.Threading.Thread.Sleep(50)
+    thread.Join(2000) |> ignore
     messages |> Seq.toList |> List.sort
   | _ -> failwith "Expected CustomSub"
 
@@ -11624,18 +11624,17 @@ let sprint72FileWatchTests =
         | CustomSub(_, start) ->
           let dispatched = ref 0
           use cts = new System.Threading.CancellationTokenSource()
-          use started = new System.Threading.SemaphoreSlim(0, 1)
-          Async.Start(
-            async {
-              do! Async.SwitchToNewThread()
-              started.Release() |> ignore
-              return! start (fun _ -> System.Threading.Interlocked.Increment(dispatched) |> ignore) cts.Token
-            }, cts.Token)
-          started.Wait(5000) |> ignore
-          System.Threading.Thread.Sleep(200) // buffer for FSW init
+          let thread =
+            System.Threading.Thread(fun () ->
+              try start (fun _ -> System.Threading.Interlocked.Increment(dispatched) |> ignore) cts.Token |> Async.RunSynchronously
+              with _ -> ())
+          thread.IsBackground <- true
+          thread.Start()
+          System.Threading.Thread.Sleep(500) // conservative wait for FSW init
           System.IO.File.WriteAllText(path, "trigger")
           System.Threading.Thread.Sleep(50)
           cts.Cancel()
+          thread.Join(2000) |> ignore
           System.Threading.Thread.Sleep(400)
           !dispatched |> Expect.equal "no dispatch after cancel during debounce" 0
         | _ -> failwith "expected CustomSub"
@@ -11691,19 +11690,17 @@ let sprint72FileWatchTests =
         | CustomSub(_, start) ->
           let received = System.Collections.Concurrent.ConcurrentBag<string>()
           use cts = new System.Threading.CancellationTokenSource()
-          use started = new System.Threading.SemaphoreSlim(0, 1)
-          Async.Start(
-            async {
-              do! Async.SwitchToNewThread()
-              started.Release() |> ignore
-              return! start received.Add cts.Token
-            }, cts.Token)
-          started.Wait(5000) |> ignore
-          System.Threading.Thread.Sleep(200) // buffer for FSW init
+          let thread =
+            System.Threading.Thread(fun () ->
+              try Async.RunSynchronously(start received.Add cts.Token)
+              with _ -> ())
+          thread.IsBackground <- true
+          thread.Start()
+          System.Threading.Thread.Sleep(500) // conservative wait for FSW init
           System.IO.File.WriteAllText(path, "trigger")
           System.Threading.Thread.Sleep(1000) // allow 600ms FSEvents/Windows latency + 50ms debounce + buffer
           cts.Cancel()
-          System.Threading.Thread.Sleep(50)
+          thread.Join(2000) |> ignore
           let msgs = received |> Seq.toList
           msgs |> Expect.hasLength "one mapped message" 1
           msgs[0].StartsWith("changed:") |> Expect.isTrue "mapped value has prefix"

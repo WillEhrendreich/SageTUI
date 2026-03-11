@@ -57,8 +57,8 @@ jobs:
 
       - name: Pack
         run: |
-          dotnet pack SageTUI.Library.fsproj --no-build -c Release -o ./artifacts
-          dotnet pack SageTUI.Templates.fsproj -o ./artifacts
+          dotnet pack SageTUI.Library.fsproj -c Release -o ./artifacts
+          dotnet pack SageTUI.Templates.fsproj -c Release -o ./artifacts
 
       - name: Template smoke test
         if: matrix.os == 'ubuntu-latest'
