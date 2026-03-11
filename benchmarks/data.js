@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773244418311,
+  "lastUpdate": 1773251600828,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -144,6 +144,42 @@ window.BENCHMARK_DATA = {
             "value": 2975.819139099121,
             "unit": "ns",
             "range": "± 15.754319865310798"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "60814e7bbfb0d48bc66ee81d48de21e22641f896",
+          "message": "docs: update test count to 2,880 (Sprint 74)\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-03-11T12:44:55-05:00",
+          "tree_id": "7240f3d8a62803a910c4c58b0042c98ad72e8696",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/60814e7bbfb0d48bc66ee81d48de21e22641f896"
+        },
+        "date": 1773251600369,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 646.9726312955221,
+            "unit": "ns",
+            "range": "± 0.34554711514677555"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2807.4107622419083,
+            "unit": "ns",
+            "range": "± 19.523389804795706"
           }
         ]
       }
