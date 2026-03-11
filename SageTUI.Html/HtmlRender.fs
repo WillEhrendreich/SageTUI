@@ -136,6 +136,8 @@ module HtmlRender =
       Elem.div
         [ Attr.style "overflow:hidden" ]
         [ render child ]
+    | Hyperlink (href, child) ->
+      Elem.a [ Attr.href href ] [ render child ]
     | Filled style ->
       // HTML: render as a div with the fill style; inset:0 makes it cover its container
       let css = "position:absolute;inset:0;" + styleToCss style

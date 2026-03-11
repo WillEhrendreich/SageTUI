@@ -151,6 +151,10 @@ module Render =
           for col = area.X to area.X + area.Width - 1 do
             Buffer.set col row { Rune = spaceRune; Fg = fg; Bg = bg; Attrs = attrs; _pad = 0us } buf
 
+      | Hyperlink(_, child) ->
+        let linkStyle = { Style.empty with Attrs = TextAttrs.underline }
+        render area (Style.merge inheritedStyle linkStyle) buf child
+
   /// Collect debug nodes from the element tree by performing a layout pass without rendering.
   /// Returns a list of DebugNode records capturing the resolved bounds of every element,
   /// which can be fed to Buffer.applyDebugOverlay to draw a non-perturbing debug frame.
@@ -180,6 +184,7 @@ module Render =
         | ResponsiveH _      -> "RspH"
         | Scroll _           -> "Scrl"
         | Filled _           -> "Filled"
+        | Hyperlink _        -> "Link"
 
       // cFromParent: the Constraint already resolved by the parent's Row/Column split
       // When Some, the passed area is already constraint-resolved; do NOT re-apply.
@@ -304,6 +309,9 @@ module Render =
             let naturalH = max resolvedArea.Height (Measure.measureHeight child)
             let vArea = { resolvedArea with Height = naturalH }
             collect vArea (depth + 1) None (unwrapConstrained child)
+
+          | Hyperlink(_, child) ->
+            collect resolvedArea (depth + 1) None (unwrapConstrained child)
 
       collect area0 0 None elem
       nodes |> Seq.toList

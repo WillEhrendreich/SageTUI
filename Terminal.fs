@@ -45,4 +45,5 @@ type TerminalProfile = {
   Size: int * int
   TermName: string
   Platform: Platform
+  SupportsOsc8: bool
 }

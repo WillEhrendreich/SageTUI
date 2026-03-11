@@ -3928,6 +3928,165 @@ module HelpOverlay =
 // layer; pop removes the topmost layer.  `view` renders the stack as an Overlay
 // DU, which ArenaRender composites in Z-order (last item on top).
 
+// ── DiffView ──────────────────────────────────────────────────────────────────
+
+/// Options controlling how DiffView renders a diff.
+type DiffViewOptions = {
+  /// Number of unchanged context lines to show around changes (0 = show all).
+  Context: int
+  /// When true, prefix each line with its line number.
+  ShowLineNums: bool
+}
+
+module DiffViewOptions =
+  let defaults = { Context = 3; ShowLineNums = false }
+
+/// Renders a line-level diff as a column of colored Elements.
+module DiffView =
+
+  let private renderLine (num: int option) (prefix: string) (style: Style) (text: string) : Element =
+    let lineNum =
+      match num with
+      | Some n -> El.text (sprintf "%4d " n)
+      | None -> El.empty
+    El.row [ lineNum; El.styled style (El.text (prefix + text)) ]
+
+  let private addedStyle   = { Style.empty with Fg = Some (Color.Named(BaseColor.Green,   Intensity.Normal)) }
+  let private removedStyle = { Style.empty with Fg = Some (Color.Named(BaseColor.Red,     Intensity.Normal)) }
+  let private dimStyle     = { Style.empty with Attrs = TextAttrs.dim }
+
+  /// Render a pre-computed list of DiffChange<string> as a column Element.
+  let viewFromChanges (changes: DiffChange<string> list) : Element =
+    let rows =
+      changes |> List.map (fun change ->
+        match change with
+        | DiffChange.Added text    -> renderLine None "+ " addedStyle   text
+        | DiffChange.Removed text  -> renderLine None "- " removedStyle text
+        | DiffChange.Unchanged text -> renderLine None "  " dimStyle    text)
+    match rows with
+    | [] -> Empty
+    | _ -> El.column rows
+
+  /// Render a diff between `src` and `tgt` line lists.
+  /// Uses DiffViewOptions to control context and line number display.
+  let view (opts: DiffViewOptions) (src: string list) (tgt: string list) : Element =
+    let changes = Diff.compute src tgt
+    let hasChanges = changes |> List.exists (fun c -> match c with DiffChange.Unchanged _ -> false | _ -> true)
+    match opts.Context = 0 || not hasChanges with
+    | true -> viewFromChanges changes
+    | false ->
+      // Filter to only show changes with context lines around them
+      let arr = Array.ofList changes
+      let n = arr.Length
+      let isChange i =
+        match arr.[i] with
+        | DiffChange.Unchanged _ -> false
+        | _ -> true
+      let inContext i =
+        let lo = max 0 (i - opts.Context)
+        let hi = min (n - 1) (i + opts.Context)
+        let mutable found = false
+        for j in lo .. hi do
+          if isChange j then found <- true
+        found
+      let rows = ResizeArray<Element>()
+      let mutable skip = 0
+      for i in 0 .. n - 1 do
+        match arr.[i] with
+        | DiffChange.Unchanged text ->
+          match inContext i with
+          | true ->
+            match skip > 0 with
+            | true ->
+              rows.Add(El.styled dimStyle (El.text (sprintf "... %d lines unchanged ..." skip)))
+              skip <- 0
+            | false -> ()
+            rows.Add(renderLine None "  " dimStyle text)
+          | false -> skip <- skip + 1
+        | change ->
+          match skip > 0 with
+          | true ->
+            rows.Add(El.styled dimStyle (El.text (sprintf "... %d lines unchanged ..." skip)))
+            skip <- 0
+          | false -> ()
+          let row =
+            match change with
+            | DiffChange.Added t    -> renderLine None "+ " addedStyle   t
+            | DiffChange.Removed t  -> renderLine None "- " removedStyle t
+            | DiffChange.Unchanged t -> renderLine None "  " dimStyle    t
+          rows.Add(row)
+      match skip > 0 with
+      | true ->
+        rows.Add(El.styled dimStyle (El.text (sprintf "... %d lines unchanged ..." skip)))
+      | false -> ()
+      match rows.Count with
+      | 0 -> Empty
+      | _ -> El.column (List.ofSeq rows)
+
+// ── OrderableVirtualList ───────────────────────────────────────────────────────
+
+/// A reorderable virtual list: combines OrderableList<'a> (data) and VirtualListModel<'a> (scroll)
+/// with optional drag state for keyboard-driven reordering.
+type OrderableVirtualListModel<'a> = {
+  Items  : OrderableList<'a>
+  Scroll : VirtualListModel<'a>
+  Grabbed: int option
+}
+
+module OrderableVirtualList =
+  /// Create from a list of items with the given visible height.
+  let init (items: 'a list) (visibleHeight: int) : OrderableVirtualListModel<'a> =
+    let ol = OrderableList.ofList items
+    let vl = VirtualList.ofList visibleHeight items
+    { Items = ol; Scroll = vl; Grabbed = None }
+
+  /// Handle a key event. Returns an updated model.
+  /// Space = pick up / put down. j/↓ = move down (grabbed) or navigate. k/↑ = move up.
+  let update (key: Key) (model: OrderableVirtualListModel<'a>) : OrderableVirtualListModel<'a> =
+    match key with
+    | KeyChar ' ' ->
+      match model.Grabbed with
+      | None ->
+        match model.Scroll.SelectedIndex with
+        | Some i -> { model with Grabbed = Some i }
+        | None -> model
+      | Some _ ->
+        { model with Grabbed = None }
+    | KeyChar 'j' | Key.Down ->
+      match model.Grabbed with
+      | Some i ->
+        let newItems = OrderableList.moveDown i model.Items
+        let newIdx = min (i + 1) (OrderableList.length newItems - 1)
+        let newScroll = VirtualList.ofList model.Scroll.ViewportHeight (OrderableList.toList newItems)
+        let scroll2 = { newScroll with SelectedIndex = Some newIdx } |> VirtualList.ensureVisible
+        { Items = newItems; Scroll = scroll2; Grabbed = Some newIdx }
+      | None ->
+        { model with Scroll = VirtualList.selectNext model.Scroll }
+    | KeyChar 'k' | Key.Up ->
+      match model.Grabbed with
+      | Some i ->
+        let newItems = OrderableList.moveUp i model.Items
+        let newIdx = max (i - 1) 0
+        let newScroll = VirtualList.ofList model.Scroll.ViewportHeight (OrderableList.toList newItems)
+        let scroll2 = { newScroll with SelectedIndex = Some newIdx } |> VirtualList.ensureVisible
+        { Items = newItems; Scroll = scroll2; Grabbed = Some newIdx }
+      | None ->
+        { model with Scroll = VirtualList.selectPrev model.Scroll }
+    | _ -> model
+
+  /// Render the list. Grabbed item shows braille-pattern drag handle + reversed colors.
+  let view (renderItem: bool -> 'a -> Element) (model: OrderableVirtualListModel<'a>) : Element =
+    let isGrabbed =
+      match model.Grabbed, model.Scroll.SelectedIndex with
+      | Some gi, Some si -> gi = si
+      | _ -> false
+    let config = VirtualList.create (fun isFocused item ->
+      let itemEl = renderItem isFocused item
+      match isFocused && isGrabbed with
+      | true -> El.row [ El.text "⠿ "; El.reverse itemEl ]
+      | false -> itemEl)
+    VirtualList.view config model.Scroll
+
 /// A single layer in a ModalStack.
 type ModalLayer = {
   /// The element content to render for this modal layer.

@@ -293,6 +293,14 @@ module Arena =
       arena.Nodes.[idx] <- mkNode 18uy (packStylePair style) style.Attrs.Value 0uy 0s -1 -1 0 0
       h
 
+    | Hyperlink(href, child) ->
+      let h = FrameArena.allocNode arena
+      let (NodeHandle idx) = h
+      let (NodeHandle ci) = lower arena child
+      let (start, len) = FrameArena.allocText href arena
+      arena.Nodes.[idx] <- mkNode 19uy 0UL 0us 0uy 0s ci -1 start len
+      h
+
   and lowerChildren (arena: FrameArena) (children: Element list) : int =
     match children with
     | [] -> -1

@@ -177,6 +177,13 @@ module Ansi =
     let encoded = System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text))
     sprintf "\x1b]52;c;%s\x07" encoded
 
+  /// Open an OSC 8 hyperlink. Emit before the link text.
+  /// Format: ESC ] 8 ; params ; url ST (using BEL as ST for compatibility).
+  let oscHyperlinkOpen (url: string) : string = sprintf "\x1b]8;;%s\x1b\\" url
+
+  /// Close an OSC 8 hyperlink. Emit after the link text.
+  let oscHyperlinkClose : string = "\x1b]8;;\x1b\\"
+
 module Presenter =
   /// Zero-alloc hot path: writes ANSI output for all changed cells directly into
   /// a pre-allocated StringBuilder. Caller owns the StringBuilder lifecycle:

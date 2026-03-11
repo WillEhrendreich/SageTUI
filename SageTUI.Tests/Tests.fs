@@ -465,6 +465,7 @@ let terminalCapabilityTests = testList "TerminalCapabilities" [
       Size = (80, 24)
       TermName = "xterm-256color"
       Platform = Linux
+      SupportsOsc8 = false
     }
     p.Color |> Expect.equal "" ColorCapability.TrueColor
     p.Platform |> Expect.equal "" Linux
@@ -1276,7 +1277,8 @@ let presenterTests = testList "Presenter" [
 let mkProfile color =
   { Color = color; Unicode = UnicodeCapability.FullUnicode
     Graphics = GraphicsCapability.TextOnly; Input = InputCapability.BasicKeys
-    Output = OutputCapability.RawMode; Size = (80, 25); TermName = "xterm"; Platform = Linux }
+    Output = OutputCapability.RawMode; Size = (80, 25); TermName = "xterm"; Platform = Linux
+    SupportsOsc8 = false }
 
 let colorFallbackTests = testList "ColorFallback" [
   testCase "TrueColor passes through Rgb" <| fun () ->
@@ -1333,7 +1335,8 @@ let syncOutputTests = testList "SynchronizedOutput" [
     let profile =
       { Color = ColorCapability.TrueColor; Unicode = UnicodeCapability.FullUnicode
         Graphics = GraphicsCapability.TextOnly; Input = InputCapability.BasicKeys
-        Output = OutputCapability.SynchronizedOutput; Size = (80, 25); TermName = "wt"; Platform = Windows }
+        Output = OutputCapability.SynchronizedOutput; Size = (80, 25); TermName = "wt"; Platform = Windows
+        SupportsOsc8 = false }
     let result = SynchronizedOutput.wrap profile "content"
     result |> Expect.stringStarts "begins with sync" SynchronizedOutput.beginSync
     result |> Expect.stringEnds "ends with sync" SynchronizedOutput.endSync
@@ -1343,7 +1346,8 @@ let syncOutputTests = testList "SynchronizedOutput" [
     let profile =
       { Color = ColorCapability.TrueColor; Unicode = UnicodeCapability.FullUnicode
         Graphics = GraphicsCapability.TextOnly; Input = InputCapability.BasicKeys
-        Output = OutputCapability.RawMode; Size = (80, 25); TermName = "xterm"; Platform = Linux }
+        Output = OutputCapability.RawMode; Size = (80, 25); TermName = "xterm"; Platform = Linux
+        SupportsOsc8 = false }
     SynchronizedOutput.wrap profile "content" |> Expect.equal "passthrough" "content"
 ]
 
@@ -2044,7 +2048,8 @@ let private baseDetectProfile : TerminalProfile =
     Output = OutputCapability.AltScreen
     Size = (80, 24)
     TermName = ""
-    Platform = Windows }
+    Platform = Windows
+    SupportsOsc8 = false }
 
 let detectColorTests = testList "Detect color" [
   testCase "COLORTERM=truecolor → TrueColor" <| fun () ->
@@ -13134,4 +13139,224 @@ let sprint76Tests =
     sprint76DebuggerTests
     sprint76OrderableListTests
     sprint76DiffTests
+  ]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 77 Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+let renderToString (width: int) (height: int) (el: Element) : string =
+  let buf = Buffer.create width height
+  Render.render { X = 0; Y = 0; Width = width; Height = height } Style.empty buf el
+  Buffer.toString buf
+
+let sprint77CmdBindTests =
+  testList "Sprint 77: Cmd.bind" [
+    testAsync "bind DirectMsg applies f" {
+      let cmd = Cmd.ofMsg "hello"
+      let bound = Cmd.bind (fun s -> Cmd.ofMsg (s + " world")) cmd
+      let mutable result = ""
+      match bound with
+      | DirectMsg m -> result <- m
+      | _ -> ()
+      result |> Expect.equal "bound DirectMsg" "hello world"
+    }
+    testAsync "bind OfAsync chains second cmd" {
+      let cmd = Cmd.ofAsync (fun d -> async { d 42 })
+      let bound = Cmd.bind (fun n -> Cmd.ofMsg (n * 2)) cmd
+      let mutable dispatched = []
+      match bound with
+      | OfAsync run ->
+        do! run (fun m -> dispatched <- m :: dispatched)
+      | _ -> failtest "expected OfAsync"
+      dispatched |> Expect.equal "dispatched 84" [84]
+    }
+    testAsync "bind NoCmd returns NoCmd" {
+      let bound = Cmd.bind (fun () -> Cmd.ofMsg "x") Cmd.none
+      match bound with
+      | NoCmd -> ()
+      | _ -> failtest "expected NoCmd"
+    }
+    testAsync "andThen sequences two cmds" {
+      let mutable log = []
+      let cmd1 = Cmd.ofAsync (fun d -> async { d "first"; do! Async.Sleep 10 })
+      let cmd2 = Cmd.ofAsync (fun d -> async { d "second" })
+      let seq = Cmd.andThen cmd2 cmd1
+      match seq with
+      | OfAsync run ->
+        do! run (fun m -> log <- log @ [m])
+      | _ -> failtest "expected OfAsync"
+      log |> Expect.equal "both dispatched in order" ["first"; "second"]
+    }
+    testAsync "sequence empty list is NoCmd" {
+      let s = Cmd.sequence []
+      match s with
+      | NoCmd -> ()
+      | _ -> failtest "expected NoCmd"
+    }
+    testAsync "sequence single item is that item" {
+      let s = Cmd.sequence [Cmd.ofMsg 99]
+      match s with
+      | DirectMsg 99 -> ()
+      | _ -> failtest "expected DirectMsg 99"
+    }
+    testAsync "sequence three cmds dispatches all in order" {
+      let mutable log = []
+      let cmds = [
+        Cmd.ofAsync (fun d -> async { d "a" })
+        Cmd.ofAsync (fun d -> async { d "b" })
+        Cmd.ofAsync (fun d -> async { d "c" })
+      ]
+      let seq = Cmd.sequence cmds
+      match seq with
+      | OfAsync run ->
+        do! run (fun m -> log <- log @ [m])
+      | _ -> failtest "expected OfAsync"
+      log |> Expect.equal "a b c in order" ["a"; "b"; "c"]
+    }
+  ]
+
+let sprint77DiffViewTests =
+  testList "Sprint 77: El.diffView" [
+    test "diffView empty lists renders empty" {
+      let el = DiffView.view DiffViewOptions.defaults [] []
+      match el with
+      | Empty | Column [] -> ()
+      | _ -> ()
+    }
+    test "diffView added lines are green with + prefix" {
+      let el = DiffView.view DiffViewOptions.defaults [] ["hello"]
+      let s = renderToString 40 3 el
+      s |> Expect.stringContains "renderToString should contain +" "+"
+      s |> Expect.stringContains "renderToString should contain hello" "hello"
+    }
+    test "diffView removed lines are red with - prefix" {
+      let el = DiffView.view DiffViewOptions.defaults ["hello"] []
+      let s = renderToString 40 3 el
+      s |> Expect.stringContains "renderToString should contain -" "-"
+    }
+    test "diffView unchanged lines have 2-space prefix" {
+      let el = DiffView.view DiffViewOptions.defaults ["same"] ["same"]
+      let s = renderToString 40 3 el
+      s |> Expect.stringContains "unchanged should have 2-space prefix" "  same"
+    }
+    test "diffView context=0 shows all lines" {
+      let src = ["a";"b";"c";"d";"e"]
+      let tgt = ["a";"b";"X";"d";"e"]
+      let el = DiffView.view { DiffViewOptions.defaults with Context = 0 } src tgt
+      let s = renderToString 40 10 el
+      s |> Expect.stringContains "should show all" "a"
+      s |> Expect.stringContains "should show changed" "X"
+    }
+    test "diffView viewFromChanges equivalent to view" {
+      let src = ["line1";"line2"]
+      let tgt = ["line1";"line3"]
+      let changes = Diff.compute src tgt
+      let el1 = DiffView.view DiffViewOptions.defaults src tgt
+      let el2 = DiffView.viewFromChanges changes
+      let s1 = renderToString 40 5 el1
+      let s2 = renderToString 40 5 el2
+      s1 |> Expect.equal "both renders equal" s2
+    }
+  ]
+
+let sprint77OrderableVirtualListTests =
+  testList "Sprint 77: OrderableVirtualList" [
+    test "init creates model with correct item count" {
+      let model = OrderableVirtualList.init ["a";"b";"c"] 10
+      model.Items |> OrderableList.length |> Expect.equal "3 items" 3
+      model.Grabbed |> Expect.equal "no grab" None
+    }
+    test "space picks up item at focused index" {
+      let model = OrderableVirtualList.init ["a";"b";"c"] 10
+      let updated = OrderableVirtualList.update (Key.Char (System.Text.Rune ' ')) model
+      updated.Grabbed |> Expect.equal "grabbed index 0" (Some 0)
+    }
+    test "space again drops item" {
+      let model = { OrderableVirtualList.init ["a";"b";"c"] 10 with Grabbed = Some 1 }
+      let updated = OrderableVirtualList.update (Key.Char (System.Text.Rune ' ')) model
+      updated.Grabbed |> Expect.equal "no grab after drop" None
+    }
+    test "j without grab moves selection down" {
+      let model = OrderableVirtualList.init ["a";"b";"c"] 10
+      let updated = OrderableVirtualList.update (Key.Char (System.Text.Rune 'j')) model
+      updated.Scroll.SelectedIndex |> Expect.equal "moved to 1" (Some 1)
+    }
+    test "k without grab moves selection up (clamped)" {
+      let model = OrderableVirtualList.init ["a";"b";"c"] 10
+      let updated = OrderableVirtualList.update (Key.Char (System.Text.Rune 'k')) model
+      updated.Scroll.SelectedIndex |> Expect.equal "clamped at 0" (Some 0)
+    }
+    test "j with grab moves item down" {
+      let model = { OrderableVirtualList.init ["a";"b";"c"] 10 with Grabbed = Some 0 }
+      let updated = OrderableVirtualList.update (Key.Char (System.Text.Rune 'j')) model
+      updated.Items |> OrderableList.toList |> Expect.equal "b first now" ["b";"a";"c"]
+      updated.Grabbed |> Expect.equal "still grabbed at 1" (Some 1)
+    }
+    test "k with grab moves item up" {
+      let model = { OrderableVirtualList.init ["a";"b";"c"] 10 with Grabbed = Some 2 }
+      let updated = OrderableVirtualList.update (Key.Char (System.Text.Rune 'k')) model
+      updated.Items |> OrderableList.toList |> Expect.equal "c moved up" ["a";"c";"b"]
+      updated.Grabbed |> Expect.equal "grabbed at 1" (Some 1)
+    }
+    test "view renders grabbed item with drag handle" {
+      let model = { OrderableVirtualList.init ["a";"b"] 10 with Grabbed = Some 0 }
+      let el = OrderableVirtualList.view (fun _ item -> El.text item) model
+      let s = renderToString 20 5 el
+      s |> Expect.stringContains "drag handle glyph present" "⠿"
+    }
+  ]
+
+let sprint77HyperlinkTests =
+  testList "Sprint 77: Ansi.hyperlink" [
+    test "SupportsOsc8 false for Windows Terminal (no TERM_PROGRAM)" {
+      let env = Map.ofList [("WT_SESSION", "some-guid")]
+      let profile = Detect.fromEnvironment (fun k -> Map.tryFind k env) (fun () -> 80,24)
+      profile.SupportsOsc8 |> Expect.equal "WT should be false" false
+    }
+    test "SupportsOsc8 true for kitty" {
+      let env = Map.ofList [("TERM", "xterm-kitty"); ("LANG", "en_US.UTF-8")]
+      let profile = Detect.fromEnvironment (fun k -> Map.tryFind k env) (fun () -> 80,24)
+      profile.SupportsOsc8 |> Expect.equal "kitty should be true" true
+    }
+    test "SupportsOsc8 true for WezTerm" {
+      let env = Map.ofList [("TERM_PROGRAM", "WezTerm"); ("LANG", "en_US.UTF-8")]
+      let profile = Detect.fromEnvironment (fun k -> Map.tryFind k env) (fun () -> 80,24)
+      profile.SupportsOsc8 |> Expect.equal "WezTerm should be true" true
+    }
+    test "SupportsOsc8 true for iTerm2" {
+      let env = Map.ofList [("TERM_PROGRAM", "iTerm.app"); ("LANG", "en_US.UTF-8")]
+      let profile = Detect.fromEnvironment (fun k -> Map.tryFind k env) (fun () -> 80,24)
+      profile.SupportsOsc8 |> Expect.equal "iTerm should be true" true
+    }
+    test "Hyperlink renders as underlined text" {
+      let el = El.hyperlink "https://example.com" (El.text "click me")
+      let s = renderToString 20 3 el
+      s |> Expect.stringContains "should contain text" "click me"
+    }
+    test "El.hyperlink creates Hyperlink element" {
+      match El.hyperlink "https://x.com" (El.text "x") with
+      | Hyperlink(href, _) -> href |> Expect.equal "href stored" "https://x.com"
+      | _ -> failtest "expected Hyperlink element"
+    }
+    test "oscHyperlinkOpen contains url" {
+      let s = Ansi.oscHyperlinkOpen "https://example.com"
+      s |> Expect.stringContains "should contain url" "https://example.com"
+    }
+    test "oscHyperlinkOpen starts with OSC sequence" {
+      let s = Ansi.oscHyperlinkOpen "https://x.com"
+      s |> Expect.stringContains "should start with ESC ]8" "\x1b]8;;"
+    }
+    test "oscHyperlinkClose is OSC 8 close" {
+      Ansi.oscHyperlinkClose |> Expect.equal "close sequence" "\x1b]8;;\x1b\\"
+    }
+  ]
+
+[<Tests>]
+let sprint77Tests =
+  testList "Sprint 77" [
+    sprint77CmdBindTests
+    sprint77DiffViewTests
+    sprint77OrderableVirtualListTests
+    sprint77HyperlinkTests
   ]

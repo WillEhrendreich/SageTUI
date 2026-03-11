@@ -82,6 +82,9 @@ type Element =
   /// Fills the entire layout area with spaces using the given style (merged with inherited).
   /// Use for modal backdrops, colored panels, or any solid background fill.
   | Filled of Style
+  /// OSC 8 hyperlink. Wraps child element; renders as underlined text.
+  /// On terminals with SupportsOsc8=true, emits OSC 8 escape sequences for a clickable link.
+  | Hyperlink of href: string * Element
 
 /// Column width distribution for El.grid.
 type GridColumns =
@@ -484,6 +487,11 @@ module El =
 
   // Formatted text
   let textf fmt = Printf.ksprintf text fmt
+
+  /// OSC 8 hyperlink. Wraps child in a hyperlink with the given URL.
+  /// On terminals that support OSC 8 (kitty, WezTerm, iTerm2), renders as a clickable link.
+  /// Falls back to underlined text on terminals that do not support it.
+  let hyperlink (href: string) (child: Element) : Element = Hyperlink(href, child)
 
   // Inline markup parsing — lightweight tag-based styled text.
   // Grammar: literal text interspersed with [tag] ... [/] or [/tag] close markers.
@@ -900,6 +908,9 @@ module El =
       | Scroll(off, child) ->
         label (sprintf "Scroll:%d" off) (Scroll(off, dbg (depth + 1) child))
       | Filled _ -> label "Filled" elem
+      | Hyperlink(href, child) ->
+        label (sprintf "Link:%s" (if href.Length > 10 then href[..9] + "…" else href))
+          (Hyperlink(href, dbg (depth + 1) child))
     dbg 0 elem
 
   /// Render a list of Span values as an inline Row of styled Text elements.

@@ -72,6 +72,11 @@ module Detect =
           | t when t.Contains("xterm") || t.Contains("kitty") -> InputCapability.MouseSgr
           | _ -> InputCapability.FunctionKeys
 
+    let supportsOsc8 =
+      match termProgram with
+      | "WezTerm" | "iTerm.app" -> true
+      | _ -> term.Contains("kitty")
+
     { Color = color
       Unicode = unicode
       Graphics = graphics
@@ -79,7 +84,8 @@ module Detect =
       Output = OutputCapability.AltScreen
       Size = getSize()
       TermName = termProgram
-      Platform = platform }
+      Platform = platform
+      SupportsOsc8 = supportsOsc8 }
 
   let adjustForMultiplexer (envReader: string -> string option) (profile: TerminalProfile) : TerminalProfile =
     let tmux = envReader "TMUX"

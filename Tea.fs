@@ -67,6 +67,73 @@ module Cmd =
     | Quit code -> Quit code
     | TerminalOutput s -> TerminalOutput s
 
+  // Execute a Cmd<'msg> with a given dispatch function (used by bind/andThen).
+  let rec internal runCmdAsync (dispatch: 'msg -> unit) (cmd: Cmd<'msg>) : Async<unit> =
+    match cmd with
+    | NoCmd -> async.Return()
+    | DirectMsg msg -> async { do dispatch msg }
+    | OfAsync run -> run dispatch
+    | Batch cmds -> async { for c in cmds do do! runCmdAsync dispatch c }
+    | Delay(ms, msg) ->
+      async {
+        do! Async.Sleep ms
+        do dispatch msg
+      }
+    | OfCancellableAsync(_, run) -> run CancellationToken.None dispatch
+    | CancelSub _ | Quit _ | TerminalOutput _ -> async.Return()
+
+  /// Monadic bind: when `cmd` dispatches an 'a, apply `f` to produce a Cmd<'b>,
+  /// then run that command. The intermediate 'a is NOT dispatched to Update —
+  /// this is for private async pipelines.
+  /// For Batch cmds: bind applies to each sub-command independently.
+  let bind (f: 'a -> Cmd<'b>) (cmd: Cmd<'a>) : Cmd<'b> =
+    let intercept (dispatch: 'b -> unit) (msg: 'a) =
+      runCmdAsync dispatch (f msg) |> Async.RunSynchronously
+    let rec runA (dispatch: 'b -> unit) (c: Cmd<'a>) : Async<unit> =
+      match c with
+      | NoCmd -> async.Return()
+      | DirectMsg msg -> async { do intercept dispatch msg }
+      | OfAsync run -> async { do! run (intercept dispatch) }
+      | Batch cmds -> async { for c in cmds do do! runA dispatch c }
+      | Delay(ms, msg) ->
+        async {
+          do! Async.Sleep ms
+          do intercept dispatch msg
+        }
+      | OfCancellableAsync(_, run) ->
+        async { do! run CancellationToken.None (intercept dispatch) }
+      | CancelSub _ | Quit _ | TerminalOutput _ -> async.Return()
+    match cmd with
+    | NoCmd -> NoCmd
+    | DirectMsg msg -> f msg
+    | CancelSub id -> CancelSub id
+    | Quit code -> Quit code
+    | TerminalOutput s -> TerminalOutput s
+    | _ -> OfAsync(fun dispatch -> runA dispatch cmd)
+
+  /// Sequential execution: run `cmd1` first (dispatching its messages), then `cmd2`.
+  /// Both commands dispatch messages through the normal Update/View cycle.
+  ///
+  ///   Cmd.andThen cmd2 cmd1 = run cmd1, then run cmd2
+  let andThen (cmd2: Cmd<'msg>) (cmd1: Cmd<'msg>) : Cmd<'msg> =
+    match cmd1, cmd2 with
+    | NoCmd, _ -> cmd2
+    | _, NoCmd -> cmd1
+    | _ ->
+      OfAsync(fun dispatch ->
+        async {
+          do! runCmdAsync dispatch cmd1
+          do! runCmdAsync dispatch cmd2
+        })
+
+  /// Run all commands in order, each dispatching its messages.
+  /// Empty list → NoCmd. Single item → that item. Multiple → sequential via andThen.
+  let sequence (cmds: Cmd<'msg> list) : Cmd<'msg> =
+    match cmds with
+    | [] -> NoCmd
+    | [single] -> single
+    | _ -> cmds |> List.reduce (fun acc cmd -> andThen cmd acc)
+
   /// Dispatch a message synchronously before the next render frame.
   ///
   /// Unlike Cmd.nextFrame, this does not schedule an async task — the message is
@@ -1978,7 +2045,8 @@ module SafeProfile =
       Output = OutputCapability.RawMode
       Size = (w, h)
       TermName = "unknown"
-      Platform = platform }
+      Platform = platform
+      SupportsOsc8 = false }
 
 module TestBackend =
   let create (width: int) (height: int) (events: TerminalEvent list) : TerminalBackend * (unit -> string) =
