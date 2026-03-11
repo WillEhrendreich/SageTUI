@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773267527821,
+  "lastUpdate": 1773267862980,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -396,6 +396,42 @@ window.BENCHMARK_DATA = {
             "value": 2846.986485799154,
             "unit": "ns",
             "range": "± 13.337701768477656"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "466d2569824e9bab2f9bcef720587f27a6b03e3f",
+          "message": "ci: fix screenshots double-restore for multi-TFM library\n\nMirror the CI pattern: restore solution + library explicitly so\nNuGet computes assets for net8.0/net9.0/net10.0 before the build.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-03-11T17:15:50-05:00",
+          "tree_id": "c86a327a3668fa908551b8e399d61eaf87a4f9f5",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/466d2569824e9bab2f9bcef720587f27a6b03e3f"
+        },
+        "date": 1773267862658,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 732.2283186231341,
+            "unit": "ns",
+            "range": "± 1.4061650352935495"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 3193.3050138033354,
+            "unit": "ns",
+            "range": "± 8.367290261805564"
           }
         ]
       }
