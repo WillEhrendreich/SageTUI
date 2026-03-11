@@ -11560,10 +11560,20 @@ let private runSubWithActions (sub: Sub<string>) (actions: unit -> unit) (waitMs
   | CustomSub(_, start) ->
     let messages = System.Collections.Concurrent.ConcurrentBag<string>()
     use cts = new System.Threading.CancellationTokenSource()
-    Async.Start(start messages.Add cts.Token, cts.Token)
-    // 500ms startup sleep: macOS FSEvents requires more startup time; Windows CI thread-pool
-    // contention can delay async startup beyond 250ms when many tests run in parallel.
-    System.Threading.Thread.Sleep(500)
+    use started = new System.Threading.SemaphoreSlim(0, 1)
+    // SwitchToNewThread guarantees the async runs on a dedicated OS thread immediately,
+    // bypassing thread-pool scheduling delays. On busy CI runners with 100+ parallel tests,
+    // Async.Start without this can take >500ms before the async gets a thread, causing
+    // the FSW to miss file writes.
+    Async.Start(
+      async {
+        do! Async.SwitchToNewThread()
+        started.Release() |> ignore
+        return! start messages.Add cts.Token
+      },
+      cts.Token)
+    started.Wait(5000) |> ignore  // block until async is running on its dedicated thread
+    System.Threading.Thread.Sleep(200)  // buffer for FileSystemWatcher internal initialization
     actions()
     System.Threading.Thread.Sleep(waitMs)
     cts.Cancel()
@@ -11614,8 +11624,15 @@ let sprint72FileWatchTests =
         | CustomSub(_, start) ->
           let dispatched = ref 0
           use cts = new System.Threading.CancellationTokenSource()
-          Async.Start(start (fun _ -> System.Threading.Interlocked.Increment(dispatched) |> ignore) cts.Token, cts.Token)
-          System.Threading.Thread.Sleep(500) // allow FSW to start — 500ms for CI thread-pool contention
+          use started = new System.Threading.SemaphoreSlim(0, 1)
+          Async.Start(
+            async {
+              do! Async.SwitchToNewThread()
+              started.Release() |> ignore
+              return! start (fun _ -> System.Threading.Interlocked.Increment(dispatched) |> ignore) cts.Token
+            }, cts.Token)
+          started.Wait(5000) |> ignore
+          System.Threading.Thread.Sleep(200) // buffer for FSW init
           System.IO.File.WriteAllText(path, "trigger")
           System.Threading.Thread.Sleep(50)
           cts.Cancel()
@@ -11674,8 +11691,15 @@ let sprint72FileWatchTests =
         | CustomSub(_, start) ->
           let received = System.Collections.Concurrent.ConcurrentBag<string>()
           use cts = new System.Threading.CancellationTokenSource()
-          Async.Start(start received.Add cts.Token, cts.Token)
-          System.Threading.Thread.Sleep(500) // allow FSW to start — 500ms for CI thread-pool contention
+          use started = new System.Threading.SemaphoreSlim(0, 1)
+          Async.Start(
+            async {
+              do! Async.SwitchToNewThread()
+              started.Release() |> ignore
+              return! start received.Add cts.Token
+            }, cts.Token)
+          started.Wait(5000) |> ignore
+          System.Threading.Thread.Sleep(200) // buffer for FSW init
           System.IO.File.WriteAllText(path, "trigger")
           System.Threading.Thread.Sleep(1000) // allow 600ms FSEvents/Windows latency + 50ms debounce + buffer
           cts.Cancel()
