@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773253285444,
+  "lastUpdate": 1773257234172,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -216,6 +216,42 @@ window.BENCHMARK_DATA = {
             "value": 2774.086485726493,
             "unit": "ns",
             "range": "± 4.069756296626138"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "c184dfdc019045fde4182e52bafc2da069444d39",
+          "message": "feat: Sprint 76 — Program.withDebugger, OrderableList, Diff module\n\n- Add DebuggerConfig<'model> + DebuggerMsg<'msg> + Program.withDebugger\n  F12-toggleable live model inspector overlay; composes with withLogging\n- Add OrderableList<'a> struct widget with moveUp/Down/insertBefore/After/\n  removeAt/swapIndices/map/filter/length/isEmpty (pure, zero-overhead)\n- Add DiffChange<'a> DU + Diff module with LCS-based compute, countAdded/\n  countRemoved/countUnchanged helpers\n- Fix Cmd.computeWhen tests to use Guid keys (eliminate cross-test cache\n  contamination in parallel runs)\n- 36 new tests, all GREEN; full suite 2,947 passing\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-03-11T14:18:28-05:00",
+          "tree_id": "8d9452e63e3c7a6527c49f9376564f36c9233e3b",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/c184dfdc019045fde4182e52bafc2da069444d39"
+        },
+        "date": 1773257233821,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 646.6300012148344,
+            "unit": "ns",
+            "range": "± 0.6778799698839751"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2871.7273582458497,
+            "unit": "ns",
+            "range": "± 17.528411776455012"
           }
         ]
       }
