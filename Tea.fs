@@ -683,9 +683,21 @@ module Sub =
             System.IO.Path.GetDirectoryName(path),
             System.IO.Path.GetFileName(path)
 
+        // Resolve any symlinks in watchDir before creating the FileSystemWatcher.
+        // On macOS, /var is a symlink to /private/var; FSEvents silently refuses to
+        // watch paths that traverse unresolved symlinks, producing zero events.
+        // We watch the resolved real path, but still dispatch with the original watchDir
+        // so callers receive the path they originally provided.
+        let resolvedWatchDir =
+          try
+            match (System.IO.DirectoryInfo(watchDir)).ResolveLinkTarget(true) with
+            | null     -> watchDir
+            | resolved -> resolved.FullName
+          with _ -> watchDir
+
         use watcher =
           new System.IO.FileSystemWatcher(
-            watchDir, watchFilter,
+            resolvedWatchDir, watchFilter,
             NotifyFilter =
               (System.IO.NotifyFilters.LastWrite |||
                System.IO.NotifyFilters.FileName  |||

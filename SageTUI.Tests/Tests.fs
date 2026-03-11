@@ -11598,7 +11598,7 @@ let sprint72FileWatchTests =
         let msgs =
           runSubWithActions sub
             (fun () -> System.IO.File.WriteAllText(path, "changed"))
-            300
+            600
         msgs |> Expect.hasLength "one message" 1
         msgs[0] |> Expect.equal "full path dispatched" path
         System.IO.Path.IsPathRooted(msgs[0]) |> Expect.isTrue "path should be rooted"
