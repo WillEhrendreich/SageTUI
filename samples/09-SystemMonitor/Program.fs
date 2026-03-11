@@ -87,7 +87,6 @@ let private metricCard accent label value detail =
       |> El.bold
     El.text detail
       |> El.fg theme.TextDim
-      |> El.dim
   ]
   |> El.padHV 1 0
   |> El.bordered Rounded
@@ -170,10 +169,10 @@ let sparkline color label (data: float array) maxVal =
     El.row [
       El.text label |> El.bold |> El.fg color
       El.fill El.empty
-      El.text (sprintf "current %.1f" last) |> El.fg theme.TextDim |> El.dim
+      El.text (sprintf "current %.1f" last) |> El.fg theme.TextDim
     ]
     El.text bars |> El.fg color
-    El.text (sprintf "%.1f%% of threshold" last) |> El.fg theme.TextDim |> El.dim
+    El.text (sprintf "%.1f%% of threshold" last) |> El.fg theme.TextDim
   ]
   |> El.padHV 1 0
   |> El.bordered Rounded
@@ -217,14 +216,13 @@ let processTable (procs: ProcessInfo list) scroll =
              | "sync" -> "checkpointing"
              | _ -> "waiting for work")
             |> El.fg theme.TextDim
-            |> El.dim
         ]
       row)
   El.column [
     El.row [
       El.text "Top processes" |> El.bold |> El.fg theme.Primary
       El.fill El.empty
-      El.text "↑/↓ scroll" |> El.fg theme.TextDim |> El.dim
+      El.text "↑/↓ scroll" |> El.fg theme.TextDim
     ]
     El.row [
       El.text " " |> El.width 2
@@ -234,7 +232,7 @@ let processTable (procs: ProcessInfo list) scroll =
       El.text "STATE" |> El.bold |> El.width 8
       El.text "DETAIL" |> El.bold
     ] |> El.fg theme.Secondary
-    El.text (String.replicate 72 "─") |> El.fg theme.TextDim |> El.dim
+    El.text (String.replicate 72 "─") |> El.fg theme.TextDim
     Scroll.view scroll (fun _idx el -> el) items
   ]
   |> El.padHV 1 0
@@ -297,7 +295,7 @@ let networkTab model =
       El.row [
         El.text "Interface health" |> El.bold |> El.fg theme.Primary
         El.fill El.empty
-        El.text "updated every 500 ms" |> El.fg theme.TextDim |> El.dim
+        El.text "updated every 500 ms" |> El.fg theme.TextDim
       ]
       El.row [
         El.text "eth0" |> El.width 10 |> El.bold
@@ -319,7 +317,6 @@ let networkTab model =
         El.text " DOWN " |> El.bold |> El.fg theme.TextDim |> El.bordered Rounded
         El.text "  idle bridge • no active containers attached"
           |> El.fg theme.TextDim
-          |> El.dim
       ]
     ]
     |> El.padHV 1 0
@@ -362,7 +359,6 @@ let view model =
       El.fill El.empty
       El.text "←/→ or Tab to switch views"
         |> El.fg theme.TextDim
-        |> El.dim
     ]
     |> El.padHV 1 0
 
@@ -383,16 +379,15 @@ let view model =
       El.text " "
       El.text (sprintf "uptime %s" (formatUptime model.Uptime))
         |> El.fg theme.TextDim
-        |> El.dim
     ]
     |> El.padHV 1 0
     tabBar
     content |> El.fill |> El.padAll 1
     El.row [
       El.text "↑/↓" |> El.bold |> El.fg theme.Primary
-      El.text " scroll processes  " |> El.fg theme.TextDim |> El.dim
+      El.text " scroll processes  " |> El.fg theme.TextDim
       El.text "q" |> El.bold |> El.fg theme.Primary
-      El.text " quit" |> El.fg theme.TextDim |> El.dim
+      El.text " quit" |> El.fg theme.TextDim
     ]
     |> El.padHV 1 0
   ]

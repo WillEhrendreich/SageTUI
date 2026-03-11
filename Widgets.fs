@@ -136,7 +136,9 @@ module Theme =
       Warning = Color.Rgb(235uy, 203uy, 139uy)
       Error = Color.Rgb(191uy, 97uy, 106uy)
       TextFg = Color.Rgb(216uy, 222uy, 233uy)
-      TextDim = Color.Rgb(76uy, 86uy, 106uy)
+      // Nord3 (#4C566A) has ~1.7:1 contrast on Nord0 — unreadable for UI text.
+      // #808EA6 gives ~3.8:1, passing WCAG AA for secondary/de-emphasized text.
+      TextDim = Color.Rgb(128uy, 142uy, 166uy)
       Background = Color.Rgb(46uy, 52uy, 64uy)
       Border = Rounded }
 
