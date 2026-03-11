@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773213924572,
+  "lastUpdate": 1773241532636,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -72,6 +72,42 @@ window.BENCHMARK_DATA = {
             "value": 2863.733353478568,
             "unit": "ns",
             "range": "± 17.914278994630237"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "cf596b8349b52bb0e2cbd275e48801fe1632a64a",
+          "message": "fix(ci): remove dotnet-quality preview from screenshots workflow\n\nUsing dotnet-quality: preview caused SDK version mismatch (10.0.102 preview\npicked up .NET 11 pre-installed packages, corrupting project.assets.json).\nStable 10.0.x is sufficient for building samples.\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-03-11T09:57:22-05:00",
+          "tree_id": "ec5d26d1aad2071bee7eaa567179f7f12ac52691",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/cf596b8349b52bb0e2cbd275e48801fe1632a64a"
+        },
+        "date": 1773241532282,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 645.9711583682468,
+            "unit": "ns",
+            "range": "± 2.391796953208193"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2793.5475965646597,
+            "unit": "ns",
+            "range": "± 16.656338872949785"
           }
         ]
       }
