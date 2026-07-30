@@ -401,11 +401,10 @@ module Cmd =
             if System.Threading.Interlocked.CompareExchange(&fired, 1, 0) = 0 then
               dispatch msg
           let workTask : System.Threading.Tasks.Task =
-            Async.StartAsTask(run once) :> System.Threading.Tasks.Task
+            Async.StartAsTask(run once)
           let timeoutTask : System.Threading.Tasks.Task =
             System.Threading.Tasks.Task.Delay(timeout)
               .ContinueWith(System.Action<System.Threading.Tasks.Task>(fun _ -> once onTimeout))
-            :> System.Threading.Tasks.Task
           do! System.Threading.Tasks.Task.WhenAny(workTask, timeoutTask)
               |> Async.AwaitTask
               |> Async.Ignore
@@ -423,12 +422,11 @@ module Cmd =
             try do! run innerCts.Token once
             with :? System.OperationCanceledException -> () }
           let workTask : System.Threading.Tasks.Task =
-            Async.StartAsTask(workAsync, cancellationToken = ct) :> System.Threading.Tasks.Task
+            Async.StartAsTask(workAsync, cancellationToken = ct)
           let timeoutTask : System.Threading.Tasks.Task =
             System.Threading.Tasks.Task.Delay(timeout, ct)
               .ContinueWith(System.Action<System.Threading.Tasks.Task>(fun _ ->
                 if not ct.IsCancellationRequested then once onTimeout))
-            :> System.Threading.Tasks.Task
           do! System.Threading.Tasks.Task.WhenAny(workTask, timeoutTask)
               |> Async.AwaitTask
               |> Async.Ignore

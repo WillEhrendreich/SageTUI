@@ -3364,7 +3364,6 @@ type LineChartConfig2 = {
 }
 
 /// V2 line chart configuration supporting named series, legend, and grid.
-[<System.Obsolete("Use LineChartConfig2 with named Series list. LineChartV2Config will be removed in a future version.")>]
 type LineChartV2Config = {
   /// Named series list — each series has a label, color, and data array.
   V2Series: Series list

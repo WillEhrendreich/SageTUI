@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'SageTUI.Templates'">
+    <!-- Keep template intermediates separate so parallel builds don't collide. -->
+    <BaseIntermediateOutputPath>obj\templates\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>

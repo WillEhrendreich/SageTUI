@@ -26,7 +26,7 @@ jobs:
 
       - name: Restore & build samples
         run: |
-          dotnet restore SageTUI.slnx && dotnet restore SageTUI.Library.fsproj
+          dotnet restore SageTUI.slnx
           dotnet build SageTUI.slnx -c Release --no-restore
 
       - name: Install VHS and dependencies
