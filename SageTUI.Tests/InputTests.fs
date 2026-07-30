@@ -272,7 +272,7 @@ let parseEscapeTests = testList "AnsiParser.parseEscape" [
     |> Expect.equal "drag phase" (Some Motion)
 
   testCase "unknown sequence returns None" <| fun () ->
-    AnsiParser.parseEscape "[Z" |> Expect.isNone "unknown [Z"
+    AnsiParser.parseEscape "[?" |> Expect.isNone "unknown [?"
 
   testCase "empty returns None" <| fun () ->
     AnsiParser.parseEscape "" |> Expect.isNone "empty"
