@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773267862980,
+  "lastUpdate": 1785441174999,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -432,6 +432,42 @@ window.BENCHMARK_DATA = {
             "value": 3193.3050138033354,
             "unit": "ns",
             "range": "± 8.367290261805564"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "3c082c562a613b4839bc350f108c2b3ebc52af06",
+          "message": "docs(ci): update README test count\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-07-30T14:44:53-05:00",
+          "tree_id": "f8846079716836939ed78e922924b5b29414d532",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/3c082c562a613b4839bc350f108c2b3ebc52af06"
+        },
+        "date": 1785441174136,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 646.1704301834106,
+            "unit": "ns",
+            "range": "± 0.4447570931314215"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2953.6162054879323,
+            "unit": "ns",
+            "range": "± 5.338904487024287"
           }
         ]
       }
