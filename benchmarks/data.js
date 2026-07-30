@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1785441174999,
+  "lastUpdate": 1785444268509,
   "repoUrl": "https://github.com/WillEhrendreich/SageTUI",
   "entries": {
     "Benchmark": [
@@ -468,6 +468,42 @@ window.BENCHMARK_DATA = {
             "value": 2953.6162054879323,
             "unit": "ns",
             "range": "± 5.338904487024287"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "committer": {
+            "email": "will.ehrendreich@gmail.com",
+            "name": "Will Ehrendreich",
+            "username": "WillEhrendreich"
+          },
+          "distinct": true,
+          "id": "78c47caeeb51df0000c6900b1f3ea910c0f7e2e5",
+          "message": "chore(release): prepare SageTUI 0.9.5\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+          "timestamp": "2026-07-30T15:35:54-05:00",
+          "tree_id": "d50ca9957f4b3239ab74f83e23fd933532588cea",
+          "url": "https://github.com/WillEhrendreich/SageTUI/commit/78c47caeeb51df0000c6900b1f3ea910c0f7e2e5"
+        },
+        "date": 1785444268197,
+        "tool": "benchmarkdotnet",
+        "benches": [
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffIdentical",
+            "value": 644.4727783997854,
+            "unit": "ns",
+            "range": "± 0.4949758670120034"
+          },
+          {
+            "name": "SageTUI.Benchmarks.BufferDiffBenchmarks.DiffChanged",
+            "value": 2863.299933115641,
+            "unit": "ns",
+            "range": "± 21.000605517592515"
           }
         ]
       }
