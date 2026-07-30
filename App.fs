@@ -596,31 +596,52 @@ module App =
             height <- h
             needsFullRedraw <- true
           | _ -> ()
-          for sub in subs do
-            match sub, event with
-            | KeySub handler, KeyPressed(key, mods) ->
-              handler (key, mods) |> Option.iter dispatch
-            | FocusSub handler, KeyPressed(Key.Tab, mods) ->
-              let dir = match mods.HasFlag(Modifiers.Shift) with true -> FocusPrev | false -> FocusNext
-              handler dir |> Option.iter dispatch
-            // MouseSub: press and release only — Motion events go to DragSub
-            | MouseSub handler, MouseInput me when me.Phase <> Motion ->
-              handler me |> Option.iter dispatch
-            // ClickSub: press only, with hit-test against keyed elements
-            | ClickSub handler, MouseInput me when me.Phase = Pressed ->
-              let hitKey = ArenaRender.hitTest arena me.X me.Y
-              handler (me, hitKey) |> Option.iter dispatch
-            // DragSub: motion only — fires when button-event tracking (?1002h) is enabled
-            | DragSub handler, MouseInput me when me.Phase = Motion ->
-              handler me |> Option.iter dispatch
-            // TerminalFocusSub: OS-level focus gained/lost (?1004h)
-            | TerminalFocusSub handler, FocusGained -> handler true  |> Option.iter dispatch
-            | TerminalFocusSub handler, FocusLost   -> handler false |> Option.iter dispatch
-            | PasteSub handler, Pasted text ->
-              handler text |> Option.iter dispatch
-            | ResizeSub handler, Resized(w, h) ->
-              handler (w, h) |> Option.iter dispatch
-            | _ -> ()
+          match event with
+          | KeyPressed(Key.Tab, mods) ->
+            let focusHandled =
+              let mutable handled = false
+              for sub in subs do
+                match sub with
+                | FocusSub handler ->
+                  let dir = match mods.HasFlag(Modifiers.Shift) with true -> FocusPrev | false -> FocusNext
+                  match handler dir with
+                  | Some msg ->
+                    handled <- true
+                    dispatch msg
+                  | None -> ()
+                | _ -> ()
+              handled
+            for sub in subs do
+              match sub with
+              | KeySub handler when not focusHandled ->
+                handler (Key.Tab, mods) |> Option.iter dispatch
+              | _ -> ()
+          | _ ->
+            for sub in subs do
+              match sub, event with
+              | KeySub handler, KeyPressed(key, mods) ->
+                handler (key, mods) |> Option.iter dispatch
+              | FocusSub handler, KeyPressed(Key.Tab, mods) ->
+                let dir = match mods.HasFlag(Modifiers.Shift) with true -> FocusPrev | false -> FocusNext
+                handler dir |> Option.iter dispatch
+              // MouseSub: press and release only — Motion events go to DragSub
+              | MouseSub handler, MouseInput me when me.Phase <> Motion ->
+                handler me |> Option.iter dispatch
+              // ClickSub: press only, with hit-test against keyed elements
+              | ClickSub handler, MouseInput me when me.Phase = Pressed ->
+                let hitKey = ArenaRender.hitTest arena me.X me.Y
+                handler (me, hitKey) |> Option.iter dispatch
+              // DragSub: motion only — fires when button-event tracking (?1002h) is enabled
+              | DragSub handler, MouseInput me when me.Phase = Motion ->
+                handler me |> Option.iter dispatch
+              // TerminalFocusSub: OS-level focus gained/lost (?1004h)
+              | TerminalFocusSub handler, FocusGained -> handler true  |> Option.iter dispatch
+              | TerminalFocusSub handler, FocusLost   -> handler false |> Option.iter dispatch
+              | PasteSub handler, Pasted text ->
+                handler text |> Option.iter dispatch
+              | ResizeSub handler, Resized(w, h) ->
+                handler (w, h) |> Option.iter dispatch
+              | _ -> ()
 
         match backend.PollEvent 16 with
         | Some firstEvent ->

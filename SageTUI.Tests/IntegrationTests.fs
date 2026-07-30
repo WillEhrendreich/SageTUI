@@ -280,6 +280,43 @@ let layoutIntegrationTests =
   ]
 
 // ============================================================
+// INPUT DISPATCH REGRESSION TESTS
+// ============================================================
+
+type BackTabMsg =
+  | RawTab
+  | FocusMoved
+
+let backTabProgram : Program<int, BackTabMsg> =
+  { Init = fun () -> 0, Cmd.none
+    Update = fun msg model ->
+      match msg with
+      | RawTab -> model + 1, Cmd.terminalWrite "R"
+      | FocusMoved -> model + 10, Cmd.batch [ Cmd.terminalWrite "F"; Cmd.quit ]
+    View = fun _ -> El.empty
+    Subscribe = fun _ ->
+      [
+        Keys.bind [ Key.Tab, RawTab ]
+        FocusSub (fun dir ->
+          match dir with
+          | FocusPrev -> Some FocusMoved
+          | FocusNext -> None)
+      ]
+    OnError = CrashOnError }
+
+let inputDispatchRegressionTests =
+  testList "Input dispatch" [
+    test "Shift+Tab should not dispatch the raw Tab key when focus handles it" {
+      let events = [ KeyPressed(Key.Tab, Modifiers.Shift) ]
+      let backend, getOutput = TestBackend.create 50 10 events
+      App.runWithBackend backend backTabProgram
+      let output = getOutput ()
+      output.Contains("F") |> Expect.isTrue "focus should win"
+      output.Contains("R") |> Expect.isFalse "raw Tab should not leak through"
+    }
+  ]
+
+// ============================================================
 // WIDGET INTEGRATION TESTS
 // ============================================================
 
@@ -1110,6 +1147,7 @@ let integrationTests =
   testList "Integration" [
     counterIntegrationTests
     layoutIntegrationTests
+    inputDispatchRegressionTests
     widgetIntegrationTests
     kanbanIntegrationTests
     formIntegrationTests
