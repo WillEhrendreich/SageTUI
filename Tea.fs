@@ -427,9 +427,11 @@ module Cmd =
             System.Threading.Tasks.Task.Delay(timeout, ct)
               .ContinueWith(System.Action<System.Threading.Tasks.Task>(fun _ ->
                 if not ct.IsCancellationRequested then once onTimeout))
-          do! System.Threading.Tasks.Task.WhenAny(workTask, timeoutTask)
-              |> Async.AwaitTask
-              |> Async.Ignore
+          let! completed =
+            System.Threading.Tasks.Task.WhenAny(workTask, timeoutTask)
+            |> Async.AwaitTask
+          if obj.ReferenceEquals(completed, workTask) && not workTask.IsCompletedSuccessfully && not timeoutTask.IsCompleted then
+            do! timeoutTask |> Async.AwaitTask |> Async.Ignore
         })
     | Batch cmds -> Batch(List.map (withTimeout timeout onTimeout) cmds)
     | other -> other
