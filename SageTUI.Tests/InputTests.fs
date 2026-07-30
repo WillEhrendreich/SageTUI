@@ -206,6 +206,10 @@ let parseEscapeTests = testList "AnsiParser.parseEscape" [
     AnsiParser.parseEscape "[5~" |> Expect.equal "pgup" (Some (KeyPressed(Key.PageUp,  Modifiers.None)))
     AnsiParser.parseEscape "[6~" |> Expect.equal "pgdn" (Some (KeyPressed(Key.PageDown,Modifiers.None)))
 
+  testCase "Shift+Tab backtab sequence" <| fun () ->
+    AnsiParser.parseEscape "[Z"
+    |> Expect.equal "shift+tab" (Some (KeyPressed(Key.Tab, Modifiers.Shift)))
+
   testCase "function keys F1-F4 (SS3)" <| fun () ->
     AnsiParser.parseEscape "OP" |> Expect.equal "F1" (Some (KeyPressed(Key.F 1, Modifiers.None)))
     AnsiParser.parseEscape "OQ" |> Expect.equal "F2" (Some (KeyPressed(Key.F 2, Modifiers.None)))

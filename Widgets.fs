@@ -593,6 +593,101 @@ module TextInput =
     | None          -> ""
     | Some (lo, hi) -> m.Text.[lo..hi - 1]
 
+/// Password input model that reuses TextInput editing behavior while controlling whether
+/// the current value is visually masked.
+type PasswordInputModel = {
+  /// The underlying editable text state. This always stores the real password text.
+  Input: TextInputModel
+  /// When true, view functions render the real text. When false, they render `*` per character.
+  IsRevealed: bool
+}
+
+/// Password input helpers built on top of `TextInput`.
+/// Reveal mode is controlled by your app via `toggleReveal` or `setRevealed`;
+/// the widget does not render a built-in reveal button or checkbox.
+module PasswordInput =
+  let private maskText (text: string) =
+    System.String ('*', text.Length)
+
+  let private displayInput (model: PasswordInputModel) : TextInputModel =
+    match model.IsRevealed with
+    | true -> model.Input
+    | false ->
+      { model.Input with Text = maskText model.Input.Text }
+
+  /// Empty password input with reveal mode disabled.
+  let empty = { Input = TextInput.empty; IsRevealed = false }
+
+  /// Create an empty PasswordInput. Alias for `empty`.
+  let create () = empty
+
+  /// Create a password input pre-filled with a string, with reveal mode disabled.
+  let ofString (text: string) =
+    { Input = TextInput.ofString text; IsRevealed = false }
+
+  /// Replace the stored text, preserving the current reveal mode.
+  let setText (text: string) (model: PasswordInputModel) =
+    { model with Input = TextInput.setText text model.Input }
+
+  /// Set reveal mode explicitly.
+  /// Use this when a separate checkbox, button, or command in your app controls visibility.
+  let setRevealed (isRevealed: bool) (model: PasswordInputModel) =
+    { model with IsRevealed = isRevealed }
+
+  /// Toggle reveal mode on or off.
+  /// Useful when wiring a "show password" action in your update function.
+  let toggleReveal (model: PasswordInputModel) =
+    { model with IsRevealed = not model.IsRevealed }
+
+  /// Handle a key press using the underlying TextInput editing behavior.
+  let handleKey (key: Key) (model: PasswordInputModel) =
+    { model with Input = TextInput.handleKey key model.Input }
+
+  /// Handle a key press with selection awareness using the underlying TextInput behavior.
+  let handleKeyWithSelection (key: Key) (model: PasswordInputModel) =
+    { model with Input = TextInput.handleKeyWithSelection key model.Input }
+
+  /// Handle a paste event using the underlying TextInput behavior.
+  let handlePaste (text: string) (model: PasswordInputModel) =
+    { model with Input = TextInput.handlePaste text model.Input }
+
+  /// Handle a max-length paste event using the underlying TextInput behavior.
+  let handlePasteMaxLength (maxLength: int) (text: string) (model: PasswordInputModel) =
+    { model with Input = TextInput.handlePasteMaxLength maxLength text model.Input }
+
+  /// Handle a full TerminalEvent using the underlying TextInput editing behavior.
+  let handleEvent (event: TerminalEvent) (model: PasswordInputModel) =
+    { model with Input = TextInput.handleEvent event model.Input }
+
+  /// Render the password input. The stored text is masked with `*` unless reveal mode is enabled.
+  /// This only affects presentation; the underlying `Input.Text` remains unchanged.
+  let view (focused: bool) (model: PasswordInputModel) =
+    model
+    |> displayInput
+    |> TextInput.view focused
+
+  /// Render the password input with a placeholder.
+  /// As with `view`, reveal mode only changes how the text is rendered.
+  let viewWithPlaceholder (placeholder: string) (focused: bool) (model: PasswordInputModel) =
+    model
+    |> displayInput
+    |> TextInput.viewWithPlaceholder placeholder focused
+
+  /// Render the password input with theme-aware cursor and selection colors.
+  /// Reveal mode still comes from `model.IsRevealed`; this function does not toggle it.
+  let viewThemed (theme: Theme) (focused: bool) (model: PasswordInputModel) =
+    model
+    |> displayInput
+    |> TextInput.viewThemed theme focused
+
+  /// Render the password input with a themed placeholder and theme-aware cursor/selection colors.
+  /// Pair this with `toggleReveal` or `setRevealed` from your update logic when you want
+  /// a separate "show password" affordance.
+  let viewWithPlaceholderThemed (theme: Theme) (placeholder: string) (focused: bool) (model: PasswordInputModel) =
+    model
+    |> displayInput
+    |> TextInput.viewWithPlaceholderThemed theme placeholder focused
+
 /// Tracks which item in a list currently has keyboard focus, with wrap-around navigation.
 type FocusRing<'a> = {
   Items: 'a list

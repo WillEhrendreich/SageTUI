@@ -266,6 +266,7 @@ module AnsiParser =
     | "[3~" -> Some (KeyPressed(Key.Delete,  Modifiers.None))
     | "[5~" -> Some (KeyPressed(Key.PageUp,  Modifiers.None))
     | "[6~" -> Some (KeyPressed(Key.PageDown,Modifiers.None))
+    | "[Z"  -> Some (KeyPressed(Key.Tab,    Modifiers.Shift))
     | "OP"  -> Some (KeyPressed(Key.F 1,     Modifiers.None))
     | "OQ"  -> Some (KeyPressed(Key.F 2,     Modifiers.None))
     | "OR"  -> Some (KeyPressed(Key.F 3,     Modifiers.None))

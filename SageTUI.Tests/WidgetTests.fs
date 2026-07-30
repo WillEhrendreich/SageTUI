@@ -295,6 +295,55 @@ let textInputEnhancedTests = testList "TextInput enhanced" [
   }
 ]
 
+let rec flattenInlineText element =
+  match element with
+  | Text (text, _) -> text
+  | Row children ->
+    children
+    |> List.map flattenInlineText
+    |> String.concat ""
+  | Styled (_, inner) ->
+    flattenInlineText inner
+  | other ->
+    failtestf "expected inline text element, got %A" other
+
+let passwordInputTests = testList "PasswordInput" [
+  test "view masks text by default when unfocused" {
+    let model = PasswordInput.ofString "secret"
+    let rendered = model |> PasswordInput.view false |> flattenInlineText
+    rendered |> Expect.equal "password should be masked" "******"
+  }
+  test "view masks text by default when focused" {
+    let model = PasswordInput.ofString "secret"
+    let elem = PasswordInput.view true model
+    match elem with
+    | Row _ -> ()
+    | other -> failtestf "expected focused password input to render as Row, got %A" other
+    let rendered = elem |> flattenInlineText
+    rendered |> Expect.equal "focused password should still be masked with end cursor" "****** "
+  }
+  test "toggleReveal shows the underlying text" {
+    let model = PasswordInput.ofString "secret" |> PasswordInput.toggleReveal
+    let rendered = model |> PasswordInput.view false |> flattenInlineText
+    rendered |> Expect.equal "revealed password should be visible" "secret"
+  }
+  test "editing updates stored text while masked output tracks length" {
+    let model =
+      PasswordInput.ofString "secret"
+      |> PasswordInput.handleEvent (KeyPressed (Key.Char (Rune '!'), Modifiers.None))
+    model.Input.Text |> Expect.equal "stored text should update" "secret!"
+    let rendered = model |> PasswordInput.view false |> flattenInlineText
+    rendered |> Expect.equal "masked output should reflect new length" "*******"
+  }
+  test "viewWithPlaceholder shows placeholder when empty" {
+    let rendered =
+      PasswordInput.empty
+      |> PasswordInput.viewWithPlaceholder "Password" false
+      |> flattenInlineText
+    rendered |> Expect.equal "placeholder should be visible" "Password"
+  }
+]
+
 let modalTests = testList "Modal" [
   test "simple modal wraps in Overlay" {
     let elem = Modal.simple (El.text "Confirm?")
@@ -2855,6 +2904,7 @@ let allWidgetTests = testList "Widgets" [
   textfTests
   paragraphTests
   textInputEnhancedTests
+  passwordInputTests
   modalTests
   focusTests
   checkboxTests

@@ -195,7 +195,7 @@ let main _ = App.run program; 0
 | **Elements** | Text, Row, Column, Overlay, Constrained, Bordered, Padded, Keyed, Canvas, **Scroll** (viewport clipping), **Hyperlink** (OSC 8 terminal hyperlinks) |
 | **Borders** | 6 border styles (Rounded, Light, Heavy, Double, ASCII, None) with optional **titled borders** (`El.borderedWithTitle`) |
 | **Rendering** | Arena-allocated zero-GC frame loop, SIMD-accelerated diff, 24-bit TrueColor |
-| **Widgets** | TextInput, Select, Table, Tabs, Modal, TreeView, ProgressBar, Checkbox, Toggle, RadioGroup, SpinnerWidget, Toast, Form, FuzzyFinder, TextEditor, SplitPane, VirtualList, VirtualTable, OrderableList, **OrderableVirtualList**, **DiffView** |
+| **Widgets** | TextInput, PasswordInput, Select, Table, Tabs, Modal, TreeView, ProgressBar, Checkbox, Toggle, RadioGroup, SpinnerWidget, Toast, Form, FuzzyFinder, TextEditor, SplitPane, VirtualList, VirtualTable, OrderableList, **OrderableVirtualList**, **DiffView** |
 | **Program combinators** | `withDebugger` (F12 overlay), `withLogging` (transparent sink), `withPersistence` (JSON save/restore), `withHistory` (undo/redo), `withErrorBanner` (visible crash recovery) |
 | **Data utilities** | `Diff.compute` (LCS structural diff), `DiffView.view` (colored +/− diff rendering), `OrderableList<'a>` (pure reorderable list), `Cmd.computeWhen` (memoized async), `NavigationStack` (push/pop routing) |
 | **Command algebra** | `Cmd.bind` (monadic sequencing), `Cmd.andThen` (sequential chaining), `Cmd.sequence` (ordered list of commands) |
@@ -244,6 +244,7 @@ El.row [
 
 ```fsharp
 TextInput.view focused model.Input
+PasswordInput.view focused model.Password
 ProgressBar.view { ProgressBar.defaults with Percent = 0.75; Width = 40 }
 Tabs.view {
   Items = ["Home"; "Settings"; "Help"]
@@ -257,6 +258,8 @@ Modal.view { Modal.defaults with BorderStyle = Rounded; MaxWidth = Some 40 } con
 TreeView.view id focused nodes treeState
 Form.view fields focusedKey model
 ```
+
+`PasswordInput` is a thin wrapper over `TextInput`: editing, cursoring, selection, and paste behavior are shared. Reveal mode is controlled by your app state via `PasswordInput.toggleReveal` or `PasswordInput.setRevealed`; the widget does not add a built-in "show password" button.
 
 These are low-level building blocks. Most real apps compose them inside `view` functions rather than relying on a heavyweight retained widget tree.
 

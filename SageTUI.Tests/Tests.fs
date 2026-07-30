@@ -2434,9 +2434,10 @@ let cmdExtendedTests= testList "Cmd extended" [
   testCase "ofTask dispatches result" <| fun () ->
     let prog: Program<string, string> = {
       Init = fun () ->
-        ("waiting", Cmd.ofTask
+        ("waiting", Cmd.ofTaskResult
           (fun () -> System.Threading.Tasks.Task.FromResult("task-result"))
-          (fun r -> sprintf "got:%s" r))
+          (fun r -> sprintf "got:%s" r)
+          (fun ex -> sprintf "error:%s" ex.Message))
       Update = fun msg _ ->
         match msg.StartsWith("got:") with
         | true -> (msg, Cmd.quit)
@@ -7408,28 +7409,34 @@ let sprint55LineChartEnhancedTests = testList "LineChart enhanced" [
     LineChart.lineChart [] |> (function Empty -> () | _ -> failtest "should be Empty")
 
   testCase "lineChartV2 with legend renders non-Empty" <| fun () ->
-    let config : LineChartV2Config = {
-      V2Series = [ { SeriesLabel = "A"; SeriesColor = Color.Default; Data = [| 1.0; 2.0; 3.0 |] } ]
-      V2XLabel = None; V2YLabel = None; V2ShowGrid = false; V2LegendPosition = NoLegend
+    let config = {
+      LineChart.lineChartDefaults with
+        Series2 = [ { SeriesLabel = "A"; SeriesColor = Color.Default; Data = [| 1.0; 2.0; 3.0 |] } ]
+        ShowGrid2 = false
+        LegendPosition = NoLegend
     }
-    LineChart.lineChartV2 config |> (function Empty -> failtest "should not be Empty" | _ -> ())
+    LineChart.lineChart' config |> (function Empty -> failtest "should not be Empty" | _ -> ())
 
   testCase "lineChartV2 legend Top renders legend row above chart" <| fun () ->
-    let config : LineChartV2Config = {
-      V2Series = [ { SeriesLabel = "Revenue"; SeriesColor = Color.Named(Green, Normal); Data = [| 1.0; 2.0 |] } ]
-      V2XLabel = None; V2YLabel = None; V2ShowGrid = false; V2LegendPosition = LegendTop
+    let config = {
+      LineChart.lineChartDefaults with
+        Series2 = [ { SeriesLabel = "Revenue"; SeriesColor = Color.Named(Green, Normal); Data = [| 1.0; 2.0 |] } ]
+        ShowGrid2 = false
+        LegendPosition = LegendTop
     }
-    let el = LineChart.lineChartV2 config
+    let el = LineChart.lineChart' config
     match el with
     | Column children -> children |> List.length |> fun n -> (n, 1) |> Expect.isGreaterThan "at least 2"
     | _ -> ()
 
   testCase "lineChartV2 NaN in data does not throw" <| fun () ->
-    let config : LineChartV2Config = {
-      V2Series = [ { SeriesLabel = "A"; SeriesColor = Color.Default; Data = [| 1.0; nan; 3.0 |] } ]
-      V2XLabel = None; V2YLabel = None; V2ShowGrid = false; V2LegendPosition = NoLegend
+    let config = {
+      LineChart.lineChartDefaults with
+        Series2 = [ { SeriesLabel = "A"; SeriesColor = Color.Default; Data = [| 1.0; nan; 3.0 |] } ]
+        ShowGrid2 = false
+        LegendPosition = NoLegend
     }
-    LineChart.lineChartV2 config |> ignore
+    LineChart.lineChart' config |> ignore
 
   testCase "computeAutoScale expands flat range" <| fun () ->
     let lo, hi = LineChart.computeAutoScale [| 5.0; 5.0; 5.0 |]
@@ -9361,6 +9368,7 @@ let private combineTestP2 : Program<int, P2Msg> =
     Subscribe = fun _ -> []
     OnError = CrashOnError }
 
+#nowarn "44"
 let sprint64ProgramCombineTests =
   testList "Program.combine" [
 
