@@ -312,23 +312,33 @@ module Backend =
     // Parse thread: accumulates chars into escape sequences, emits TerminalEvents.
     let parseThread = Threading.Thread(fun () ->
       let buf = Text.StringBuilder()
-      let pasteAccum = Text.StringBuilder()
       let mutable inPaste = false
+      let mutable pasteState = BracketedPaste.empty
       let escTimeoutMs = 50
+
+      let feedPaste character =
+        match BracketedPaste.feed character pasteState with
+        | Continue state ->
+          pasteState <- state
+        | Completed pasted ->
+          inPaste <- false
+          pasteState <- BracketedPaste.empty
+          enqueueEvent (Pasted pasted)
+        | ExceededMaximumLength ->
+          inPaste <- false
+          pasteState <- BracketedPaste.empty
+          enqueueEvent (Pasted (System.String(' ', BracketedPaste.MaximumLength)))
 
       let emitEscape () =
         let seq = buf.ToString()
         buf.Clear() |> ignore
         match seq with
         | "[200~" ->
-          // Bracketed paste start — switch to paste accumulation mode
           inPaste <- true
-          pasteAccum.Clear() |> ignore
+          pasteState <- BracketedPaste.empty
         | "[201~" ->
-          // Bracketed paste end — emit collected text
           inPaste <- false
-          enqueueEvent (Pasted (pasteAccum.ToString()))
-          pasteAccum.Clear() |> ignore
+          pasteState <- BracketedPaste.empty
         | _ ->
           AnsiParser.parseEscape seq
           |> Option.defaultValue (KeyPressed(Key.Escape, Modifiers.None))
@@ -338,6 +348,8 @@ module Backend =
         let raw = tryReadChar -1  // block until char arrives
         match raw with
         | -1 | 0 -> ()  // EOF / no-op
+        | character when inPaste ->
+          feedPaste (char character)
         | 27 ->  // ESC — start sequence accumulation
           buf.Clear() |> ignore
           let mutable seqDone = false
@@ -345,10 +357,7 @@ module Backend =
             let next = tryReadChar escTimeoutMs
             match next with
             | -1 ->
-              // Timeout: bare Escape key (or raw Escape during paste)
-              match inPaste with
-              | true -> pasteAccum.Append('\x1b') |> ignore
-              | false -> enqueueEvent (KeyPressed(Key.Escape, Modifiers.None))
+              enqueueEvent (KeyPressed(Key.Escape, Modifiers.None))
               seqDone <- true
             | c ->
               buf.Append(char c) |> ignore
@@ -365,35 +374,30 @@ module Backend =
                   seqDone <- true
                 | false -> ()
         | c ->
-          match inPaste with
-          | true ->
-            // In paste mode — accumulate raw chars without key routing
-            pasteAccum.Append(char c) |> ignore
-          | false ->
-            let ch = char c
-            let event =
-              match ch with
-              | '\r' -> KeyPressed(Key.Enter,     Modifiers.None)
-              | '\b' | '\x7F' -> KeyPressed(Key.Backspace, Modifiers.None)
-              | '\t' -> KeyPressed(Key.Tab,       Modifiers.None)
-              | c when int c >= 1 && int c <= 26 ->
-                // Ctrl-A (1) through Ctrl-Z (26): map to Char 'a'..'z' + Ctrl modifier
-                KeyPressed(Key.Char (Text.Rune (char (int c + int 'a' - 1))), Modifiers.Ctrl)
-              | c when Char.IsHighSurrogate(c) ->
-                // UTF-16 surrogate pair: read the low surrogate and reassemble into a Rune
-                let next = tryReadChar escTimeoutMs
-                match next > 0 && Char.IsLowSurrogate(char next) with
-                | true ->
-                  let mutable rune = Unchecked.defaultof<Text.Rune>
-                  match Text.Rune.TryCreate(c, char next, &rune) with
-                  | true  -> KeyPressed(Key.Char rune, Modifiers.None)  // correct Rune (may be supplementary)
-                  | false -> KeyPressed(Key.Char (Text.Rune ' '), Modifiers.None)  // malformed pair
-                | false -> KeyPressed(Key.Char (Text.Rune ' '), Modifiers.None)  // lone surrogate
-              | c when Char.IsLowSurrogate(c) ->
-                // Orphaned low surrogate — should not appear without a prior high surrogate
-                KeyPressed(Key.Char (Text.Rune ' '), Modifiers.None)
-              | c -> KeyPressed(Key.Char (Text.Rune c), Modifiers.None)
-            enqueueEvent event)
+          let ch = char c
+          let event =
+            match ch with
+            | '\r' -> KeyPressed(Key.Enter,     Modifiers.None)
+            | '\b' | '\x7F' -> KeyPressed(Key.Backspace, Modifiers.None)
+            | '\t' -> KeyPressed(Key.Tab,       Modifiers.None)
+            | c when int c >= 1 && int c <= 26 ->
+              // Ctrl-A (1) through Ctrl-Z (26): map to Char 'a'..'z' + Ctrl modifier
+              KeyPressed(Key.Char (Text.Rune (char (int c + int 'a' - 1))), Modifiers.Ctrl)
+            | c when Char.IsHighSurrogate(c) ->
+              // UTF-16 surrogate pair: read the low surrogate and reassemble into a Rune
+              let next = tryReadChar escTimeoutMs
+              match next > 0 && Char.IsLowSurrogate(char next) with
+              | true ->
+                let mutable rune = Unchecked.defaultof<Text.Rune>
+                match Text.Rune.TryCreate(c, char next, &rune) with
+                | true  -> KeyPressed(Key.Char rune, Modifiers.None)  // correct Rune (may be supplementary)
+                | false -> KeyPressed(Key.Char (Text.Rune ' '), Modifiers.None)  // malformed pair
+              | false -> KeyPressed(Key.Char (Text.Rune ' '), Modifiers.None)  // lone surrogate
+            | c when Char.IsLowSurrogate(c) ->
+              // Orphaned low surrogate — should not appear without a prior high surrogate
+              KeyPressed(Key.Char (Text.Rune ' '), Modifiers.None)
+            | c -> KeyPressed(Key.Char (Text.Rune c), Modifiers.None)
+          enqueueEvent event)
     parseThread.IsBackground <- true
     parseThread.Name <- "SageTUI.InputParse"
     parseThread.Start()
