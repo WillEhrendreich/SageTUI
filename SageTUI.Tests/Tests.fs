@@ -5566,9 +5566,9 @@ let sprint46ParseTests = testList "Sprint 46: bracketed paste parsing" [
     let buf = "[200~hello[201~"
     AnsiParser.isCompleteEscSeq buf |> Expect.isTrue "complete with [201~"
 
-  testCase "isCompleteEscSeq: bracketed paste prefix only → incomplete" <| fun () ->
-    let buf = "[200~hello"
-    AnsiParser.isCompleteEscSeq buf |> Expect.isFalse "incomplete without closer"
+  testCase "isCompleteEscSeq: bracketed paste start marker completes immediately" <| fun () ->
+    let buf = "[200~"
+    AnsiParser.isCompleteEscSeq buf |> Expect.isTrue "start marker enters paste mode"
 
   testCase "isCompleteEscSeq: bracketed paste empty content" <| fun () ->
     let buf = "[200~\x1b[201~"
