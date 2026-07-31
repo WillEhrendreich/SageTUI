@@ -170,6 +170,9 @@ let isCompleteEscSeqTests = testList "AnsiParser.isCompleteEscSeq" [
   testCase "[<0;10 is incomplete" <| fun () ->
     AnsiParser.isCompleteEscSeq "[<0;10" |> Expect.isFalse "partial SGR"
 
+  testCase "[200~ starts bracketed paste immediately" <| fun () ->
+    AnsiParser.isCompleteEscSeq "[200~" |> Expect.isTrue "bracketed paste start"
+
   testCase "OP (F1 SS3) is complete" <| fun () ->
     AnsiParser.isCompleteEscSeq "OP" |> Expect.isTrue "OP"
 
@@ -178,6 +181,54 @@ let isCompleteEscSeqTests = testList "AnsiParser.isCompleteEscSeq" [
 
   testCase "single char Alt+key is complete" <| fun () ->
     AnsiParser.isCompleteEscSeq "a" |> Expect.isTrue "alt+a"
+]
+
+let private withoutTerminator (payload: string) =
+  payload.Replace("\x1b[201~", "\x1b[201?")
+
+let private consumeBracketedPaste (payload: string) =
+  let feed initialStep characters =
+    characters
+    |> Seq.fold
+      (fun step character ->
+        match step with
+        | BracketedPasteResult.Continue state -> BracketedPaste.feed character state
+        | completed -> completed)
+      initialStep
+
+  let afterPayload = feed (BracketedPasteResult.Continue BracketedPaste.empty) payload
+  match afterPayload with
+  | BracketedPasteResult.Continue state -> feed (BracketedPasteResult.Continue state) "\x1b[201~"
+  | completed -> completed
+
+let bracketedPasteParserTests = testList "Bracketed paste parser" [
+
+  testProperty "bounded hostile payloads round-trip without parser failure" <| fun (payload: string) ->
+    let safePayload =
+      match isNull payload with
+      | true -> ""
+      | false ->
+        payload
+        |> Seq.truncate 1024
+        |> Array.ofSeq
+        |> System.String
+        |> withoutTerminator
+
+    match consumeBracketedPaste safePayload with
+    | BracketedPasteResult.Completed actual -> actual = safePayload
+    | _ -> false
+
+  testCase "embedded escape fragments are preserved until the exact terminator" <| fun () ->
+    let payload = "token\x1b[200~fragment\x1b[201?tail"
+    consumeBracketedPaste payload
+    |> Expect.equal "only the exact terminator should end the paste" (BracketedPasteResult.Completed payload)
+
+  testCase "payloads beyond the transport limit are rejected without allocation growth" <| fun () ->
+    let payload = System.String('x', BracketedPaste.MaximumLength + 1)
+
+    match consumeBracketedPaste payload with
+    | BracketedPasteResult.ExceededMaximumLength -> ()
+    | _ -> failtest "an over-limit paste should be rejected"
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -902,6 +953,7 @@ let inputTests =
     sprintThirtyTests
     dragSubTests
     bracketedPasteTests
+    bracketedPasteParserTests
     kittyKeyTests
     subPrefixTests
   ]

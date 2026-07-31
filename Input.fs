@@ -53,6 +53,67 @@ type TerminalEvent =
   | FocusLost
   | Pasted of string
 
+type BracketedPasteState = private {
+  ReversedContent: char list
+  ContentLength: int
+  PendingTerminator: string
+  ExceededMaximumLength: bool
+}
+
+type BracketedPasteResult =
+  | Continue of BracketedPasteState
+  | Completed of string
+  | ExceededMaximumLength
+
+module BracketedPaste =
+  [<Literal>]
+  let MaximumLength = 16_384
+
+  [<Literal>]
+  let private Terminator = "\x1b[201~"
+
+  let empty = {
+    ReversedContent = []
+    ContentLength = 0
+    PendingTerminator = ""
+    ExceededMaximumLength = false
+  }
+
+  let private appendContent (content: string) (state: BracketedPasteState) =
+    match state.ExceededMaximumLength, state.ContentLength + content.Length > MaximumLength with
+    | true, _
+    | false, true ->
+      { state with ExceededMaximumLength = true }
+    | false, false ->
+      {
+        state with
+          ReversedContent = content |> Seq.fold (fun reversed character -> character :: reversed) state.ReversedContent
+          ContentLength = state.ContentLength + content.Length
+      }
+
+  let private terminatorSuffixLength (candidate: string) =
+    [ min candidate.Length Terminator.Length .. -1 .. 0 ]
+    |> List.find (fun length ->
+      Terminator.StartsWith(candidate.Substring(candidate.Length - length), StringComparison.Ordinal))
+
+  let feed (character: char) (state: BracketedPasteState) =
+    let candidate = state.PendingTerminator + string character
+    match candidate = Terminator, Terminator.StartsWith(candidate, StringComparison.Ordinal) with
+    | true, _ ->
+      match state.ExceededMaximumLength with
+      | true -> ExceededMaximumLength
+      | false -> state.ReversedContent |> List.rev |> List.toArray |> System.String |> Completed
+    | false, true ->
+      { state with PendingTerminator = candidate } |> Continue
+    | false, false ->
+      let suffixLength = terminatorSuffixLength candidate
+      let contentLength = candidate.Length - suffixLength
+      let content = candidate.Substring(0, contentLength)
+      let pendingTerminator = candidate.Substring(contentLength)
+      appendContent content state
+      |> fun updated -> { updated with PendingTerminator = pendingTerminator }
+      |> Continue
+
 /// Pure ANSI/VT escape sequence parser. No I/O — feeds into the background input reader.
 module AnsiParser =
 
@@ -113,17 +174,9 @@ module AnsiParser =
     | s ->
       match s.[0] with
       | '[' ->
-        // Bracketed paste: starts with "[200~" and ends with the next ESC[201~ sequence.
-        // The buf here is everything AFTER the first ESC; a bracketed paste chunk
-        // looks like "[200~<content>ESC[201~". We detect completion by finding "[201~" at the end.
-        match s.StartsWith("[200~") with
-        | true ->
-          // Use Ordinal comparison: ESC (\x1b = char 27) is a Unicode-ignorable character
-          // in cultural comparisons, so EndsWith("\x1b[201~") would return true even without
-          // the ESC byte. Ordinal guarantees a byte-exact check.
-          s.EndsWith("\x1b[201~", System.StringComparison.Ordinal) || s.EndsWith("[201~", System.StringComparison.Ordinal)
-        // CSI: '[' + zero-or-more param/intermediate bytes + one final byte (0x40–0x7E)
-        | false -> s.Length >= 2 && s.[s.Length - 1] >= '@' && s.[s.Length - 1] <= '~'
+        match s with
+        | "[200~" -> true
+        | _ -> s.Length >= 2 && s.[s.Length - 1] >= '@' && s.[s.Length - 1] <= '~'
       | 'O' ->
         // SS3: 'O' + exactly one char (F1=P, F2=Q, F3=R, F4=S)
         s.Length = 2
