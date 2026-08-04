@@ -162,6 +162,44 @@ module RawMode =
   let private ISIG   = 0x80u    // enable signals (Ctrl-C etc) — keep enabled
   // Termios struct is 60 bytes on Linux/macOS (enough for both ABI layouts)
   let private termiosSize = 60
+  // Linux termios: c_line is byte 16 and c_cc starts at byte 17. In
+  // non-canonical mode VTIME is c_cc[5] and VMIN is c_cc[6].
+  let private linuxControlCharactersOffset = 17
+  let private linuxVtimeIndex = 5
+  let private linuxVminIndex = 6
+
+  /// A raw read can be interrupted by a signal or report that a nonblocking
+  /// terminal has no byte available yet. Neither condition means input ended.
+  let isTransientReadError (platform: Platform) errorCode =
+    match errorCode with
+    | 4 -> true // EINTR on Linux and macOS
+    | 11 when platform = Linux -> true // EAGAIN/EWOULDBLOCK on Linux
+    | 35 when platform = MacOS -> true // EAGAIN/EWOULDBLOCK on macOS
+    | _ -> false
+
+  /// Configure a captured Unix termios snapshot for byte-at-a-time raw input.
+  /// The caller keeps the original snapshot for restoration.
+  let configureUnixRawMode (platform: Platform) (snapshot: byte array) =
+    let configuredSnapshot = Array.copy snapshot
+    let lflagsOffset =
+      match platform with
+      | Linux -> 12
+      | MacOS -> 8
+      | Windows -> invalidArg "platform" "Windows does not use termios"
+    let lflags = BitConverter.ToUInt32(configuredSnapshot, lflagsOffset)
+    let newLflags = lflags &&& ~~~(ICANON ||| ECHO)
+    BitConverter.GetBytes(newLflags).CopyTo(configuredSnapshot, lflagsOffset)
+    match platform with
+    | Linux ->
+      // Native read(2) no longer initializes .NET's console reader. Set these
+      // explicitly so fd 0 blocks until one byte is available; otherwise an
+      // inherited 0/0 pair returns immediately and the UI renders while its
+      // input reader spins without receiving keystrokes.
+      configuredSnapshot.[linuxControlCharactersOffset + linuxVtimeIndex] <- 0uy
+      configuredSnapshot.[linuxControlCharactersOffset + linuxVminIndex] <- 1uy
+    | MacOS -> ()
+    | Windows -> invalidArg "platform" "Windows does not use termios"
+    configuredSnapshot
 
   let private ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004u
   let private ENABLE_PROCESSED_INPUT = 0x0001u
@@ -196,16 +234,14 @@ module RawMode =
       try
         tcgetattr(0, handle) |> ignore
         Runtime.InteropServices.Marshal.Copy(handle, snapshot, 0, termiosSize)
-        // Clear ICANON and ECHO; leave ISIG so Ctrl-C still works
-        let iflagsOffset = 0  // c_iflag is first field on both Linux and macOS
-        let lflagsOffset =
-          match platform with
-          | Linux -> 12   // offsetof(termios, c_lflag) on Linux = 12
-          | _     -> 8    // offsetof(termios, c_lflag) on macOS = 8
-        let lflags = BitConverter.ToUInt32(snapshot, lflagsOffset)
-        let newLflags = lflags &&& ~~~(ICANON ||| ECHO)
-        let newBytes = BitConverter.GetBytes(newLflags)
-        Runtime.InteropServices.Marshal.Copy(newBytes, 0, handle + nativeint lflagsOffset, 4)
+        let configuredSnapshot = configureUnixRawMode platform snapshot
+        match platform with
+        | Linux ->
+          // Linux termios has c_line before c_cc, so only copying c_cc would
+          // leave the c_lflag change behind. Copy the complete configured ABI.
+          Runtime.InteropServices.Marshal.Copy(configuredSnapshot, 0, handle, termiosSize)
+        | MacOS -> Runtime.InteropServices.Marshal.Copy(configuredSnapshot, 0, handle, termiosSize)
+        | Windows -> invalidArg "platform" "Windows does not use termios"
         tcsetattr(0, TCSANOW, handle) |> ignore
       finally
         Runtime.InteropServices.Marshal.FreeHGlobal(handle)
@@ -314,9 +350,13 @@ module Backend =
               // on EOF — so retry; this also matches the old busy-loop at EOF.
               Threading.Thread.Sleep(1)
             | _ when n < 0 ->
-              // EINTR (e.g. SIGWINCH on resize) — retry; any other error, stop.
+              // EINTR (e.g. SIGWINCH on resize) and EAGAIN/EWOULDBLOCK are
+              // transient. In particular, SSH/ConPTY can expose a nonblocking
+              // stdin at startup; treating its initial EAGAIN as terminal makes
+              // the UI render successfully but permanently lose keyboard input.
               match Runtime.InteropServices.Marshal.GetLastPInvokeError() with
-              | 4 -> ()  // EINTR on Linux and macOS
+              | errorCode when RawMode.isTransientReadError platform errorCode ->
+                Threading.Thread.Sleep(1)
               | _ -> running <- false
             | _ ->
               // Decode UTF-8 incrementally so multi-byte runes stay intact across

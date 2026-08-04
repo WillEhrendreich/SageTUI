@@ -5,6 +5,29 @@ open Expecto.Flip
 open FsCheck
 open SageTUI
 
+let rawReadRetryTests = testList "RawMode transient read errors" [
+  testCase "Linux EAGAIN is retried because nonblocking SSH stdin can report no byte during startup" <| fun () ->
+    RawMode.isTransientReadError Linux 11
+    |> Expect.isTrue "Linux EAGAIN must not terminate the raw input reader"
+
+  testCase "Unix EINTR is retried because terminal signals interrupt a pending read" <| fun () ->
+    RawMode.isTransientReadError Linux 4
+    |> Expect.isTrue "EINTR must not terminate the raw input reader"
+
+  testCase "unexpected native read errors remain terminal" <| fun () ->
+    RawMode.isTransientReadError Linux 9
+    |> Expect.isFalse "EBADF must stop the raw input reader"
+
+  testCase "Linux raw mode blocks for a byte instead of inheriting an empty-read 0/0 pair" <| fun () ->
+    let configured = RawMode.configureUnixRawMode Linux (Array.zeroCreate 60)
+
+    configured.[22]
+    |> Expect.equal "Linux VTIME must be zero for an indefinite byte wait" 0uy
+
+    configured.[23]
+    |> Expect.equal "Linux VMIN must require one byte before native read returns" 1uy
+]
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AnsiParser.parseSgrMouse — press, release, motion, modifiers, phase
 // ─────────────────────────────────────────────────────────────────────────────
@@ -945,6 +968,7 @@ let subPrefixTests = testList "Sprint 33: Sub.prefix" [
 [<Tests>]
 let inputTests =
   testList "Phase 11: Input / AnsiParser" [
+    rawReadRetryTests
     parseSgrMouseTests
     isCompleteEscSeqTests
     parseEscapeTests
