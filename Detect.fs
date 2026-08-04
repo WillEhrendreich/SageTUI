@@ -150,6 +150,11 @@ module RawMode =
   extern int tcgetattr(int fd, nativeint termios)
   [<DllImport("libc", EntryPoint = "tcsetattr")>]
   extern int tcsetattr(int fd, int action, nativeint termios)
+  // Raw read(2) for stdin. Bypasses Console.In entirely on Unix: the .NET
+  // runtime's StdInReader echoes every printable character to stdout itself,
+  // independent of the termios ECHO flag (a managed write(1), not kernel echo).
+  [<DllImport("libc", EntryPoint = "read", SetLastError = true)>]
+  extern nativeint read(int fd, byte[] buf, nativeint count)
 
   let private TCSANOW = 0
   let private ICANON = 0x100u   // line-buffered input
@@ -256,7 +261,7 @@ module Backend =
   ///
   /// Escape sequence timeout: if no follow-up char arrives within 50ms after ESC,
   /// emits a bare Escape key. Otherwise accumulates until isCompleteEscSeq returns true.
-  let private startInputReader (eventQueue: Collections.Concurrent.ConcurrentQueue<TerminalEvent>) =
+  let private startInputReader (platform: Platform) (eventQueue: Collections.Concurrent.ConcurrentQueue<TerminalEvent>) =
     // Channel<int> replaces ConcurrentQueue + Thread.Sleep spin-wait.
     // The raw reader writes into a bounded Channel; tryReadChar does a proper blocking
     // read with cancellation — zero jitter, no wasted CPU cycles.
@@ -271,16 +276,54 @@ module Backend =
     // eliminating the fixed-sleep worst-case latency.
     let eventSignal = new Threading.SemaphoreSlim(0)
 
-    // Raw reader: purely drains Console.In into the channel. Daemon thread; never stops.
-    let rawThread = Threading.Thread(fun () ->
-      let reader = Console.In
-      let writer = charChannel.Writer
-      let mutable running = true
-      while running do
-        try
-          let ch = reader.Read()
-          writer.WriteAsync(ch).AsTask().Wait()
-        with _ -> running <- false)
+    // Raw reader: purely drains stdin into the channel. Daemon thread; never stops.
+    // Unix: uses a raw read(2) instead of Console.In.Read(). The .NET runtime's
+    // StdInReader echoes each printable char to stdout on its own (independent of
+    // the termios ECHO flag), which ghosts typed characters onto the alternate
+    // screen. A raw read(2) delivers the identical byte stream with no managed echo.
+    let rawThread =
+      match platform with
+      | Windows ->
+        Threading.Thread(fun () ->
+          let reader = Console.In
+          let writer = charChannel.Writer
+          let mutable running = true
+          while running do
+            try
+              let ch = reader.Read()
+              writer.WriteAsync(ch).AsTask().Wait()
+            with _ -> running <- false)
+      | MacOS | Linux ->
+        Threading.Thread(fun () ->
+          let writer = charChannel.Writer
+          let mutable running = true
+          let buf = Array.zeroCreate<byte> 256
+          let decoder = System.Text.Encoding.UTF8.GetDecoder()
+          let chars = Array.zeroCreate<char> 256
+          while running do
+            let mutable n = 0
+            try
+              n <- RawMode.read(0, buf, nativeint buf.Length) |> int
+            with _ -> running <- false
+            match n with
+            | 0 ->
+              // Transient: VMIN/VTIME may still be 0/0 until .NET's console init
+              // runs (it is triggered by the first Console.Write a moment after
+              // this thread starts). A real EOF on a TTY in raw mode is not
+              // observable, and the previous Console.In.Read() path also looped
+              // on EOF — so retry; this also matches the old busy-loop at EOF.
+              Threading.Thread.Sleep(1)
+            | _ when n < 0 ->
+              // EINTR (e.g. SIGWINCH on resize) — retry; any other error, stop.
+              match Runtime.InteropServices.Marshal.GetLastPInvokeError() with
+              | 4 -> ()  // EINTR on Linux and macOS
+              | _ -> running <- false
+            | _ ->
+              // Decode UTF-8 incrementally so multi-byte runes stay intact across
+              // buffer boundaries, then enqueue one char code per decoded char.
+              let count = decoder.GetChars(buf, 0, n, chars, 0, false)
+              for i in 0 .. count - 1 do
+                writer.WriteAsync(int chars[i]).AsTask().Wait())
     rawThread.IsBackground <- true
     rawThread.Name <- "SageTUI.InputRaw"
     rawThread.Start()
@@ -458,7 +501,7 @@ module Backend =
         savedModes <- RawMode.enter profile.Platform
         match inputStarted with
         | false ->
-          eventSignal <- Some (startInputReader eventQueue)
+          eventSignal <- Some (startInputReader profile.Platform eventQueue)
           inputStarted <- true
         | true -> ()
         // Enable terminal features:
