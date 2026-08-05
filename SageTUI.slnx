@@ -33,6 +33,8 @@
   </Folder>
   <Project Path="SageTUI.Html/SageTUI.Html.fsproj" />
   <Project Path="SageTUI.Library.fsproj" />
+  <Project Path="SageTUI.ContainerProbe\SageTUI.ContainerProbe.fsproj" />
+  <Project Path="SageTUI.LinuxContainerTests\SageTUI.LinuxContainerTests.fsproj" />
   <Project Path="SageTUI.Templates.fsproj" />
   <Project Path="SageTUI.Tests\SageTUI.Tests.fsproj" />
 </Solution>

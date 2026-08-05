@@ -26,6 +26,14 @@ let rawReadRetryTests = testList "RawMode transient read errors" [
 
     configured.[23]
     |> Expect.equal "Linux VMIN must require one byte before native read returns" 1uy
+
+  testCase "line feed is accepted as Enter because PTY automation commonly injects LF" <| fun () ->
+    RawMode.isEnterCharacter '\n'
+    |> Expect.isTrue "LF must advance a form just like CR"
+
+  testCase "carriage return remains accepted as Enter for standard terminal input" <| fun () ->
+    RawMode.isEnterCharacter '\r'
+    |> Expect.isTrue "CR must advance a form"
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────

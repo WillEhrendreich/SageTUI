@@ -177,6 +177,9 @@ module RawMode =
     | 35 when platform = MacOS -> true // EAGAIN/EWOULDBLOCK on macOS
     | _ -> false
 
+  let isEnterCharacter character =
+    character = '\r' || character = '\n'
+
   /// Configure a captured Unix termios snapshot for byte-at-a-time raw input.
   /// The caller keeps the original snapshot for restoration.
   let configureUnixRawMode (platform: Platform) (snapshot: byte array) =
@@ -229,6 +232,13 @@ module RawMode =
       SetConsoleMode(stdout, outMode ||| ENABLE_VIRTUAL_TERMINAL_PROCESSING) |> ignore
       { Platform = Windows; InputMode = inMode; OutputMode = outMode; TermiosSnapshot = Array.empty }
     | MacOS | Linux ->
+      // Force .NET's console initialization before configuring termios. The
+      // native reader deliberately bypasses Console.In, but a later first
+      // Console.Write can still initialize the runtime console and overwrite
+      // VMIN/VTIME. That left SSH PTYs rendering correctly while ignoring every
+      // injected keystroke. Once Console.Out is initialized, apply raw mode last.
+      Console.Write("")
+      Console.Out.Flush()
       let snapshot = Array.zeroCreate<byte> termiosSize
       let handle = Runtime.InteropServices.Marshal.AllocHGlobal(termiosSize)
       try
@@ -460,7 +470,7 @@ module Backend =
           let ch = char c
           let event =
             match ch with
-            | '\r' -> KeyPressed(Key.Enter,     Modifiers.None)
+            | c when RawMode.isEnterCharacter c -> KeyPressed(Key.Enter, Modifiers.None)
             | '\b' | '\x7F' -> KeyPressed(Key.Backspace, Modifiers.None)
             | '\t' -> KeyPressed(Key.Tab,       Modifiers.None)
             | c when int c >= 1 && int c <= 26 ->

@@ -53,6 +53,9 @@ jobs:
       - name: Test
         run: dotnet run --project SageTUI.Tests/SageTUI.Tests.fsproj --no-build -c Release
 
+      - name: Verify Debian and Arch PTY input
+        run: dotnet run --project SageTUI.LinuxContainerTests/SageTUI.LinuxContainerTests.fsproj -c Release -- --summary-location
+
       - name: Pack — Library
         run: >
           dotnet pack SageTUI.Library.fsproj
